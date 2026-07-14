@@ -1,0 +1,288 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Centre {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  status    String   @default("active")
+  
+  users     User[]
+  coaches   Coach[]
+  students  Student[]
+  slots     ScheduleSlot[]
+  enquiries Enquiry[]
+
+  @@map("centres")
+}
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  email     String   @unique
+  password  String
+  role      String   // 'owner', 'front_desk', 'coach', 'parent'
+  centre_id String?  @db.Uuid
+  centre    Centre?  @relation(fields: [centre_id], references: [id])
+  
+  coaches   Coach[]
+  reports   Report[]
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+model Coach {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String?  @db.Uuid
+  user      User?    @relation(fields: [user_id], references: [id])
+  centre_id String?  @db.Uuid
+  centre    Centre?  @relation(fields: [centre_id], references: [id])
+  title     String?
+  active    Boolean  @default(true)
+
+  students  Student[]
+  slots     ScheduleSlot[]
+  attendance Attendance[]
+  progressLogs ProgressLog[]
+
+  @@map("coaches")
+}
+
+model Family {
+  id            String   @id @default(uuid()) @db.Uuid
+  primary_name  String?
+  phone         String?
+  email         String?
+  consent_ops   Boolean  @default(true)
+  consent_mktg  Boolean  @default(false)
+  
+  students      Student[]
+
+  @@map("families")
+}
+
+model Student {
+  id            String   @id @default(uuid()) @db.Uuid
+  family_id     String?  @db.Uuid
+  family        Family?  @relation(fields: [family_id], references: [id])
+  centre_id     String   @db.Uuid
+  centre        Centre   @relation(fields: [centre_id], references: [id])
+  coach_id      String?  @db.Uuid
+  coach         Coach?   @relation(fields: [coach_id], references: [id])
+  name          String
+  dob           DateTime? @db.Date
+  gender        String?
+  school        String?
+  level         String?
+  status        String   @default("active")
+  fide_id       String?
+  photo_url     String?
+  join_date     DateTime? @default(now()) @db.Date
+  last_attended DateTime? @db.Date
+  pace_status   String?
+  pace_reason   String?
+  flags         Json?    @default("{}")
+
+  packages      Package[]
+  attendance    Attendance[]
+  progressLogs  ProgressLog[]
+  skills        StudentSkill[]
+  fideRatings   FideRating[]
+  reports       Report[]
+  invoices      Invoice[]
+  notifications Notification[]
+  enrollments   Enrollment[]
+
+  @@map("students")
+}
+
+model Tier {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String
+  price      Decimal  @db.Decimal(10,2)
+  inclusions Json?    @default("[]")
+  active     Boolean  @default(true)
+
+  packages   Package[]
+
+  @@map("tiers")
+}
+
+model Package {
+  id                String   @id @default(uuid()) @db.Uuid
+  student_id        String   @db.Uuid
+  student           Student  @relation(fields: [student_id], references: [id])
+  tier_id           String?  @db.Uuid
+  tier              Tier?    @relation(fields: [tier_id], references: [id])
+  kind              String?  @default("new")
+  classes_total     Int
+  classes_remaining Int
+  discount_pct      Decimal? @default(0) @db.Decimal(5,2)
+  frozen            Boolean? @default(false)
+  start_date        DateTime? @default(now()) @db.Date
+  expiry_date       DateTime? @db.Date
+
+  invoices          Invoice[]
+
+  @@map("packages")
+}
+
+model ScheduleSlot {
+  id        String   @id @default(uuid()) @db.Uuid
+  centre_id String   @db.Uuid
+  centre    Centre   @relation(fields: [centre_id], references: [id])
+  coach_id  String   @db.Uuid
+  coach     Coach    @relation(fields: [coach_id], references: [id])
+  day       String
+  time      String
+  level     String
+  capacity  Int      @default(10)
+
+  attendance Attendance[]
+  enrollments Enrollment[]
+
+  @@map("schedule_slots")
+}
+
+model Enrollment {
+  id         String   @id @default(uuid()) @db.Uuid
+  student_id String   @db.Uuid
+  student    Student  @relation(fields: [student_id], references: [id])
+  slot_id    String   @db.Uuid
+  slot       ScheduleSlot @relation(fields: [slot_id], references: [id])
+  enrolled_at DateTime @default(now()) @db.Timestamptz
+
+  @@map("enrollments")
+}
+
+model Attendance {
+  id         String   @id @default(uuid()) @db.Uuid
+  student_id String   @db.Uuid
+  student    Student  @relation(fields: [student_id], references: [id])
+  slot_id    String?  @db.Uuid
+  slot       ScheduleSlot? @relation(fields: [slot_id], references: [id])
+  coach_id   String   @db.Uuid
+  coach      Coach    @relation(fields: [coach_id], references: [id])
+  date       DateTime @default(now()) @db.Date
+  status     String
+  topic      String?
+  note       String?
+  created_at DateTime? @default(now()) @db.Timestamptz
+
+  @@map("attendance")
+}
+
+model ProgressLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  student_id String   @db.Uuid
+  student    Student  @relation(fields: [student_id], references: [id])
+  coach_id   String   @db.Uuid
+  coach      Coach    @relation(fields: [coach_id], references: [id])
+  date       DateTime? @default(now()) @db.Date
+  focus_area String?
+  evaluation Int?
+  skills     Json?
+  notes      String?
+
+  @@map("progress_logs")
+}
+
+model StudentSkill {
+  student_id String  @db.Uuid
+  student    Student @relation(fields: [student_id], references: [id])
+  skill      String
+  value      Int?
+
+  @@id([student_id, skill])
+  @@map("student_skills")
+}
+
+model FideRating {
+  id         String   @id @default(uuid()) @db.Uuid
+  student_id String?  @db.Uuid
+  student    Student? @relation(fields: [student_id], references: [id])
+  date       DateTime? @db.Date
+  rating     Int?
+
+  @@map("fide_ratings")
+}
+
+model Enquiry {
+  id         String   @id @default(uuid()) @db.Uuid
+  child      String?
+  age        String?
+  parent     String?
+  phone      String?
+  source     String?
+  stage      String?  @default("new")
+  centre_id  String?  @db.Uuid
+  centre     Centre?  @relation(fields: [centre_id], references: [id])
+  experience String?
+  trial_date DateTime? @db.Date
+  coach_id   String?  @db.Uuid
+  notes      String?
+  created_at DateTime? @default(now()) @db.Timestamptz
+
+  @@map("enquiries")
+}
+
+model Report {
+  id          String   @id @default(uuid()) @db.Uuid
+  student_id  String?  @db.Uuid
+  student     Student? @relation(fields: [student_id], references: [id])
+  period      String?
+  status      String?  @default("draft")
+  pdf_url     String?
+  approved_by String?  @db.Uuid
+  approver    User?    @relation(fields: [approved_by], references: [id])
+  created_at  DateTime? @default(now()) @db.Timestamptz
+
+  @@map("reports")
+}
+
+model Invoice {
+  id             String   @id @default(uuid()) @db.Uuid
+  package_id     String?  @db.Uuid
+  package        Package? @relation(fields: [package_id], references: [id])
+  student_id     String?  @db.Uuid
+  student        Student? @relation(fields: [student_id], references: [id])
+  amount         Decimal? @db.Decimal(10,2)
+  vat            Decimal? @db.Decimal(10,2)
+  method         String?
+  settlement_ref String?
+  status         String?  @default("unpaid")
+  created_at     DateTime? @default(now()) @db.Timestamptz
+
+  @@map("invoices")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actor_id   String?  @db.Uuid @map("actor")
+  actor      User?    @relation(fields: [actor_id], references: [id])
+  action     String?
+  entity     String?
+  before     Json?
+  after      Json?
+  at         DateTime? @default(now()) @db.Timestamptz
+
+  @@map("audit_log")
+}
+
+model Notification {
+  id         String   @id @default(uuid()) @db.Uuid
+  student_id String?  @db.Uuid
+  student    Student? @relation(fields: [student_id], references: [id])
+  type       String?
+  channel    String?
+  status     String?
+  sent_at    DateTime? @db.Timestamptz
+
+  @@map("notifications")
+}
