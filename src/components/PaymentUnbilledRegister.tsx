@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/db';
 import type { User, Student, Package, Coach, Centre } from '../lib/db';
-
+import { updateInvoiceDB, deleteInvoiceDB, syncDatabaseToClient } from '../app/actions';
+import { exportTableToCSV, exportToPDF } from '../lib/export';
 interface PaymentUnbilledRegisterProps {
   currentUser: User;
   activeCentre: string;
@@ -26,6 +27,44 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
   // Sorting
   const [sortCol, setSortCol] = useState<string>('overdueValue');
   const [sortAsc, setSortAsc] = useState<boolean>(false); // default sort descending by overdue value
+
+  // Editing state
+  const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
+  const [studentInvoices, setStudentInvoices] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (selectedStudent) {
+      const invs = invoices.filter(inv => inv.student_id === selectedStudent.id);
+      setStudentInvoices(invs);
+    } else {
+      setStudentInvoices([]);
+    }
+  }, [selectedStudent, invoices]);
+
+  const handleUpdateInvoiceStatus = async (invoiceId: string, newStatus: string) => {
+    try {
+      await updateInvoiceDB(invoiceId, newStatus);
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      refresh();
+      alert('✓ Invoice status updated.');
+    } catch (e: any) {
+      alert('Error updating invoice: ' + e.message);
+    }
+  };
+
+  const handleDeleteInvoice = async (invoiceId: string) => {
+    if (!confirm('Are you sure you want to delete this invoice?')) return;
+    try {
+      await deleteInvoiceDB(invoiceId);
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      refresh();
+      alert('✓ Invoice deleted.');
+    } catch (e: any) {
+      alert('Error deleting invoice: ' + e.message);
+    }
+  };
 
   const refresh = () => {
     setStudents(db.getStudents());
@@ -330,12 +369,18 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
           className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
         />
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 no-print">
           <span className="text-xs text-muted-custom font-semibold">{filtered.length} rows</span>
-          <button className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1">
+          <button 
+            onClick={() => exportTableToCSV('#payment-table', 'payments_register.csv')}
+            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+          >
             ↓ Excel
           </button>
-          <button className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1">
+          <button 
+            onClick={exportToPDF}
+            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+          >
             ⎙ PDF
           </button>
         </div>
@@ -374,7 +419,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
       {/* Main Table Grid */}
       <div className="bg-surface border border-line rounded-[14px] shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-xs">
+          <table id="payment-table" className="w-full border-collapse text-xs">
             <thead className="border-b border-line bg-canvas">
               <tr>
                 <SortTh col="studentName">Student</SortTh>
@@ -400,10 +445,11 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
                 filtered.map(row => (
                   <tr
                     key={row.id}
-                    className="border-b border-line hover:bg-canvas/40 transition-colors"
+                    onClick={() => setSelectedStudent(row)}
+                    className="border-b border-line hover:bg-canvas/40 transition-colors cursor-pointer"
                   >
                     {/* Student */}
-                    <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap">
+                    <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       <a href={`/student-dashboard?studentId=${row.id}`} className="hover:text-forest hover:underline">
                         {row.studentName}
                       </a>
@@ -450,6 +496,69 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
           </table>
         </div>
       </div>
+
+      {selectedStudent && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setSelectedStudent(null)} />
+          <div className="relative bg-white w-full max-w-md h-full overflow-y-auto shadow-2xl flex flex-col">
+            {/* Header */}
+            <div className="bg-[#173F35] text-white p-6 flex justify-between items-start">
+              <div>
+                <div className="text-[9px] font-bold tracking-widest text-emerald-200 uppercase">Invoices & Payments</div>
+                <h2 className="text-xl font-bold mt-1">{selectedStudent.studentName}</h2>
+                <div className="text-xs text-emerald-200 mt-0.5">{selectedStudent.centreName}</div>
+              </div>
+              <button onClick={() => setSelectedStudent(null)} className="text-white/70 hover:text-white text-xl font-bold">✕</button>
+            </div>
+
+            {/* List Body */}
+            <div className="p-6 space-y-4 flex-1">
+              <h3 className="text-xs font-bold text-[#C4A249] tracking-wider uppercase border-b border-line pb-2">RAW INVOICES</h3>
+              {studentInvoices.length === 0 ? (
+                <p className="text-xs text-muted-custom py-4 text-center">No invoices found for this student.</p>
+              ) : (
+                <div className="space-y-3">
+                  {studentInvoices.map((inv) => (
+                    <div key={inv.id} className="border border-line rounded-lg p-3 flex justify-between items-center text-xs">
+                      <div className="space-y-1">
+                        <div className="font-semibold text-ink">AED {inv.amount}</div>
+                        <div className="text-[10px] text-muted-custom">Created: {new Date(inv.created_at).toISOString().split('T')[0]}</div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={inv.status}
+                          onChange={(e) => handleUpdateInvoiceStatus(inv.id, e.target.value)}
+                          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
+                        >
+                          <option value="paid">Paid</option>
+                          <option value="unpaid">Unpaid</option>
+                        </select>
+                        <button
+                          onClick={() => handleDeleteInvoice(inv.id)}
+                          className="w-6 h-6 flex items-center justify-center rounded border border-red-200 text-hot-custom text-xs hover:bg-red-50"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 border-t border-line bg-canvas">
+              <button
+                onClick={() => setSelectedStudent(null)}
+                className="w-full bg-[#173F35] hover:bg-[#173F35]/90 text-white font-bold text-xs py-2.5 rounded-lg transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

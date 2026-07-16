@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/db';
 import type { User, Student, Package, Coach, Centre } from '../lib/db';
-
+import { updateCoachDB, deleteCoachDB, syncDatabaseToClient } from '../app/actions';
+import { exportTableToCSV, exportToPDF } from '../lib/export';
 interface CoachRegisterProps {
   currentUser: User;
   activeCentre: string;
@@ -26,6 +27,40 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
   // Sorting
   const [sortCol, setSortCol] = useState<string>('studentsCount');
   const [sortAsc, setSortAsc] = useState<boolean>(false); // default sort descending by students count
+
+  // Editing state
+  const [selectedCoach, setSelectedCoach] = useState<any | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editCentreId, setEditCentreId] = useState('');
+
+  const handleSaveCoach = async () => {
+    if (!selectedCoach) return;
+    try {
+      await updateCoachDB(selectedCoach.id, editName, editCentreId);
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      refresh();
+      setSelectedCoach(null);
+      alert('✓ Coach updated successfully.');
+    } catch (e: any) {
+      alert('Error updating coach: ' + e.message);
+    }
+  };
+
+  const handleDeleteCoach = async () => {
+    if (!selectedCoach) return;
+    if (!confirm(`Are you sure you want to delete coach ${selectedCoach.coachName}?`)) return;
+    try {
+      await deleteCoachDB(selectedCoach.id);
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      refresh();
+      setSelectedCoach(null);
+      alert('✓ Coach archived successfully.');
+    } catch (e: any) {
+      alert('Error deleting coach: ' + e.message);
+    }
+  };
 
   const refresh = () => {
     setStudents(db.getStudents());
@@ -62,23 +97,17 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
         ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000)
         : 999;
 
-      // Deterministic stable mock data if no real attendance exists, otherwise compute from real records
+      // Calculate 30D and 90D attendance metrics from real records
       const studentAtts = attendance.filter(a => a.student_id === s.id && a.status === 'present');
       let cls30d = 0;
       let cls90d = 0;
-      const hash = s.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
 
-      if (studentAtts.length > 0) {
-        studentAtts.forEach(a => {
-          const attDate = new Date(a.date);
-          const diffDays = Math.floor((today.getTime() - attDate.getTime()) / 86400000);
-          if (diffDays >= 0 && diffDays <= 30) cls30d++;
-          if (diffDays >= 0 && diffDays <= 90) cls90d++;
-        });
-      } else if (daysSince !== 999) {
-        cls30d = daysSince < 30 ? (hash % 10) + 8 : 0;
-        cls90d = daysSince < 90 ? cls30d + (hash % 15) + 10 : 0;
-      }
+      studentAtts.forEach(a => {
+        const attDate = new Date(a.date);
+        const diffDays = Math.floor((today.getTime() - attDate.getTime()) / 86400000);
+        if (diffDays >= 0 && diffDays <= 30) cls30d++;
+        if (diffDays >= 0 && diffDays <= 90) cls90d++;
+      });
 
       // Overdue value and classes
       const overdueClasses = (s.flags as any)?.unpaid_classes || 0;
@@ -122,7 +151,7 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
     const list: any[] = [];
     
     // Add all coaches from DB
-    coaches.forEach(c => {
+    coaches.filter(c => c.active).forEach(c => {
       const coachStudents = enrichedStudents.filter(s => s.coach_id === c.id);
       const centre = centres.find(cen => cen.id === c.centre_id);
       const centreName = centre?.name || '—';
@@ -329,12 +358,18 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
           className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
         />
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 no-print">
           <span className="text-xs text-muted-custom font-semibold">{filtered.length} rows</span>
-          <button className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1">
+          <button 
+            onClick={() => exportTableToCSV('#coach-table', 'coaches_register.csv')}
+            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+          >
             ↓ Excel
           </button>
-          <button className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1">
+          <button 
+            onClick={exportToPDF}
+            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+          >
             ⎙ PDF
           </button>
         </div>
@@ -343,7 +378,7 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
       {/* Main Table Grid */}
       <div className="bg-surface border border-line rounded-[14px] shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-xs">
+          <table id="coach-table" className="w-full border-collapse text-xs">
             <thead className="border-b border-line bg-canvas">
               <tr>
                 <SortTh col="coachName">Coach</SortTh>
@@ -371,7 +406,14 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
                   {filtered.map(row => (
                     <tr
                       key={row.id}
-                      className="border-b border-line hover:bg-canvas/40 transition-colors font-medium"
+                      onClick={() => {
+                        if (row.id && row.coachName !== 'UNASSIGNED') {
+                          setSelectedCoach(row);
+                          setEditName(row.coachName);
+                          setEditCentreId(centres.find(c => c.name === row.centreName)?.id || '');
+                        }
+                      }}
+                      className="border-b border-line hover:bg-canvas/40 transition-colors font-medium cursor-pointer"
                     >
                       {/* Coach */}
                       <td className="py-3 px-4 font-bold text-ink whitespace-nowrap">
@@ -448,6 +490,72 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
       <p className="text-[10px] text-muted-custom">
         ✦ Capacity 400 student-classes/coach/month — configurable per coach in Settings.
       </p>
+
+      {selectedCoach && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setSelectedCoach(null)} />
+          <div className="relative bg-white w-full max-w-md h-full overflow-y-auto shadow-2xl flex flex-col">
+            {/* Header */}
+            <div className="bg-[#173F35] text-white p-6 flex justify-between items-start">
+              <div>
+                <div className="text-[9px] font-bold tracking-widest text-emerald-200 uppercase">Coach Profile</div>
+                <h2 className="text-xl font-bold mt-1">{selectedCoach.coachName}</h2>
+                <div className="text-xs text-emerald-200 mt-0.5">{selectedCoach.centreName}</div>
+              </div>
+              <button onClick={() => setSelectedCoach(null)} className="text-white/70 hover:text-white text-xl font-bold">✕</button>
+            </div>
+
+            {/* Form Body */}
+            <div className="p-6 space-y-5 flex-1">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-ink">Name</label>
+                <input 
+                  type="text" 
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-ink">Home Centre</label>
+                <select 
+                  value={editCentreId}
+                  onChange={e => setEditCentreId(e.target.value)}
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
+                >
+                  {centres.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+
+              <div className="pt-8">
+                <button
+                  onClick={handleDeleteCoach}
+                  className="w-full bg-red-50 border border-red-200 text-hot-custom font-bold text-xs py-2.5 rounded-lg hover:bg-red-100 transition-all"
+                >
+                  ⚠️ Delete Coach
+                </button>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 border-t border-line bg-canvas flex gap-3">
+              <button
+                onClick={handleSaveCoach}
+                className="flex-1 bg-[#173F35] hover:bg-[#173F35]/90 text-white font-bold text-xs py-2.5 rounded-lg transition-all"
+              >
+                Save Changes
+              </button>
+              <button
+                onClick={() => setSelectedCoach(null)}
+                className="bg-white border border-line text-ink font-bold text-xs px-4 py-2.5 rounded-lg hover:bg-canvas"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

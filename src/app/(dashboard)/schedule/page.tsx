@@ -12,10 +12,8 @@ export default function SchedulePage() {
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login");
-    } else if (session?.user?.role === "coach") {
-      router.push("/");
     }
-  }, [status, router, session]);
+  }, [status, router]);
 
   if (status === "loading" || !session) return null;
 

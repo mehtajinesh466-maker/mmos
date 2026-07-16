@@ -75,119 +75,211 @@ async function main() {
     'Pro-Track': tPro.id
   }
 
-  // 5. Load and seed 152 student records
-  const mockStudentsPath = path.join(process.cwd(), 'prisma', 'mock_students.json')
-  if (fs.existsSync(mockStudentsPath)) {
-    const rawData = fs.readFileSync(mockStudentsPath, 'utf-8')
-    const studentsArray = JSON.parse(rawData)
+  // 5. Create 5 test student records (including Alexander Sterling)
+  const fSterling = await prisma.family.create({
+    data: {
+      primary_name: 'Sterling Family',
+      phone: '+971 50 999 8888',
+      email: 'parent@mastermoves.com'
+    }
+  });
 
-    console.log(`Loading ${studentsArray.length} student records...`)
+  const fSmith = await prisma.family.create({
+    data: {
+      primary_name: 'Smith Family',
+      phone: '+971 50 111 2222',
+      email: 'smith@example.com'
+    }
+  });
 
-    for (const record of studentsArray) {
-      const name = record[0]
-      const code = record[1] || `MM-${Math.floor(Math.random()*9000)+1000}`
-      const centreCode = record[2]
-      const alertCat = record[3]
-      const alertReason = record[4]
-      const classesTotal = record[5] || 8
-      const paid = record[6] || 0
-      const overdue = record[7] || 0
-      const unbilled = record[8] || 0
-      const refunded = record[9] || 0
-      const classesRemaining = record[10] || 0
-      const engagement = record[11] || 'Engaged'
-      const attCount = record[12] || 0
-      const expiryDate = record[14] ? new Date(record[14]) : new Date(Date.now() + 60 * 24 * 60 * 60 * 1000)
-      const billingTotal = record[15] || 0
-      const levelClass = record[17] || 'Juniors-Intermediate B'
-      
-      const levelParts = levelClass.split('-')
-      const level = (levelParts[1] || 'Beginner').replace(' 1','').replace(' 2','').replace(' A','').replace(' B','') as any
+  const fBrown = await prisma.family.create({
+    data: {
+      primary_name: 'Brown Family',
+      phone: '+971 50 333 4444',
+      email: 'brown@example.com'
+    }
+  });
 
-      const rawCoach = (record[18] || '').toLowerCase().trim()
-      const coachId = coachMap[rawCoach] || chJames.id
-      const joinDate = record[19] ? new Date(record[19]) : new Date()
+  const fMiller = await prisma.family.create({
+    data: {
+      primary_name: 'Miller Family',
+      phone: '+971 50 555 6666',
+      email: 'miller@example.com'
+    }
+  });
 
-      const centreId = centreCode === 'J' ? c2.id : c1.id
+  const fWatson = await prisma.family.create({
+    data: {
+      primary_name: 'Watson Family',
+      phone: '+971 50 777 8888',
+      email: 'watson@example.com'
+    }
+  });
 
-      // Create Family
-      const familyName = name.split(' ').pop() + ' Family'
-      const family = await prisma.family.create({
-        data: {
-          primary_name: familyName,
-          phone: '+971 50 123 4567',
-          email: `${familyName.toLowerCase().replace(' ', '')}@example.com`
+  const testStudents = [
+    {
+      family_id: fSterling.id,
+      centre_id: c1.id,
+      coach_id: chJames.id,
+      name: 'Alexander Sterling',
+      level: 'Beginner',
+      status: 'active',
+      join_date: new Date('2026-07-01'),
+      last_attended: new Date('2026-07-12'),
+      fide_id: 'MM-1001',
+      pace_status: 'On track',
+      tier_id: tCore.id,
+      classes_total: 8,
+      classes_remaining: 3,
+      billing_total: 1000,
+      overdue: 0,
+      unpaid_classes: 0,
+      unpaid_value: 0,
+      low_package: true,
+      att_dates: ['2026-07-03', '2026-07-05', '2026-07-07', '2026-07-10', '2026-07-12']
+    },
+    {
+      family_id: fSmith.id,
+      centre_id: c1.id,
+      coach_id: chJames.id,
+      name: 'Bob Jones',
+      level: 'Intermediate',
+      status: 'active',
+      join_date: new Date('2026-06-15'),
+      last_attended: new Date('2026-07-14'),
+      fide_id: 'MM-1002',
+      pace_status: 'Slow',
+      tier_id: tElite.id,
+      classes_total: 12,
+      classes_remaining: 0,
+      billing_total: 1500,
+      overdue: 0,
+      unpaid_classes: 2,
+      unpaid_value: 250,
+      low_package: true,
+      att_dates: ['2026-06-18', '2026-06-21', '2026-06-25', '2026-06-28', '2026-07-02', '2026-07-05', '2026-07-09', '2026-07-12', '2026-07-14']
+    },
+    {
+      family_id: fBrown.id,
+      centre_id: c1.id,
+      coach_id: chJohn.id,
+      name: 'Charlie Brown',
+      level: 'Beginner',
+      status: 'inactive',
+      join_date: new Date('2026-05-01'),
+      last_attended: new Date('2026-05-28'),
+      fide_id: 'MM-1003',
+      pace_status: 'Stalled',
+      tier_id: tMini.id,
+      classes_total: 4,
+      classes_remaining: 0,
+      billing_total: 750,
+      overdue: 750,
+      unpaid_classes: 4,
+      unpaid_value: 750,
+      low_package: true,
+      att_dates: ['2026-05-05', '2026-05-12', '2026-05-19', '2026-05-28']
+    },
+    {
+      family_id: fMiller.id,
+      centre_id: c2.id,
+      coach_id: chMahri.id,
+      name: 'David Miller',
+      level: 'Advanced',
+      status: 'active',
+      join_date: new Date('2026-07-02'),
+      last_attended: new Date('2026-07-15'),
+      fide_id: 'MM-1004',
+      pace_status: 'On track',
+      tier_id: tCore.id,
+      classes_total: 8,
+      classes_remaining: 4,
+      billing_total: 1000,
+      overdue: 0,
+      unpaid_classes: 0,
+      unpaid_value: 0,
+      low_package: false,
+      att_dates: ['2026-07-04', '2026-07-08', '2026-07-11', '2026-07-15']
+    },
+    {
+      family_id: fWatson.id,
+      centre_id: c2.id,
+      coach_id: chJames.id,
+      name: 'Emma Watson',
+      level: 'Beginner',
+      status: 'active',
+      join_date: new Date('2026-06-10'),
+      last_attended: new Date('2026-07-08'),
+      fide_id: 'MM-1005',
+      pace_status: 'Slow',
+      tier_id: tElite.id,
+      classes_total: 12,
+      classes_remaining: 0,
+      billing_total: 1500,
+      overdue: 0,
+      unpaid_classes: 3,
+      unpaid_value: 375,
+      low_package: true,
+      att_dates: ['2026-06-12', '2026-06-15', '2026-06-19', '2026-06-22', '2026-06-26', '2026-06-29', '2026-07-03', '2026-07-06', '2026-07-08']
+    }
+  ];
+
+  for (const ts of testStudents) {
+    const student = await prisma.student.create({
+      data: {
+        family_id: ts.family_id,
+        centre_id: ts.centre_id,
+        coach_id: ts.coach_id,
+        name: ts.name,
+        level: ts.level,
+        status: ts.status,
+        join_date: ts.join_date,
+        last_attended: ts.last_attended,
+        fide_id: ts.fide_id,
+        pace_status: ts.pace_status,
+        flags: {
+          at_risk: ts.pace_status === 'Slow',
+          inactive: ts.status === 'inactive',
+          unpaid_classes: ts.unpaid_classes,
+          unpaid_value: ts.unpaid_value,
+          low_package: ts.low_package
         }
-      })
-
-      // If name matches robert sterling's child, link it to Robert Sterling
-      if (name.toLowerCase().includes('alexander sterling')) {
-        await prisma.student.create({
-          data: {
-            id: 's-alex-sterling-id',
-            family_id: family.id,
-            centre_id: centreId,
-            coach_id: coachId,
-            name,
-            level: 'Beginner',
-            status: 'active',
-            join_date: joinDate,
-            fide_id: code,
-            pace_status: 'On track',
-            flags: {}
-          }
-        })
-        continue;
       }
+    });
 
-      // Create Student
-      const student = await prisma.student.create({
+    const pkg = await prisma.package.create({
+      data: {
+        student_id: student.id,
+        tier_id: ts.tier_id,
+        classes_total: ts.classes_total,
+        classes_remaining: ts.classes_remaining,
+        start_date: ts.join_date,
+        expiry_date: new Date(ts.join_date.getTime() + 60 * 24 * 60 * 60 * 1000)
+      }
+    });
+
+    if (ts.billing_total > 0) {
+      await prisma.invoice.create({
         data: {
-          family_id: family.id,
-          centre_id: centreId,
-          coach_id: coachId,
-          name,
-          level: ['Beginner', 'Intermediate', 'Advanced', 'Pro-Track'].includes(level) ? level : 'Beginner',
-          status: overdue > 0 ? 'inactive' : 'active',
-          join_date: joinDate,
-          fide_id: code,
-          pace_status: engagement === 'Slipping' ? 'Slow' : engagement === 'Cold' ? 'Stalled' : 'On track',
-          flags: {
-            at_risk: alertCat === 'HOT',
-            inactive: engagement === 'Cold',
-            unpaid_classes: record[21] || 0,
-            unpaid_value: record[22] || 0,
-            low_package: classesRemaining <= 3
-          }
+          package_id: pkg.id,
+          student_id: student.id,
+          amount: ts.billing_total,
+          vat: ts.billing_total * 0.05,
+          status: ts.overdue > 0 ? 'unpaid' : 'paid',
+          method: 'Card'
         }
-      })
+      });
+    }
 
-      // Create Package
-      const tId = tierMap[levelClass.split('-')[0]] || tCore.id
-      const pkg = await prisma.package.create({
+    for (const dStr of ts.att_dates) {
+      await prisma.attendance.create({
         data: {
           student_id: student.id,
-          tier_id: tId,
-          classes_total: classesTotal,
-          classes_remaining: classesRemaining,
-          start_date: joinDate,
-          expiry_date: expiryDate
+          coach_id: ts.coach_id,
+          date: new Date(dStr),
+          status: 'present'
         }
-      })
-
-      // Create Invoice if billing exists
-      if (billingTotal > 0) {
-        await prisma.invoice.create({
-          data: {
-            package_id: pkg.id,
-            student_id: student.id,
-            amount: billingTotal,
-            vat: billingTotal * 0.05,
-            status: overdue > 0 ? 'unpaid' : 'paid',
-            method: 'Card'
-          }
-        })
-      }
+      });
     }
   }
 

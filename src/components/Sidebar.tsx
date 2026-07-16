@@ -102,6 +102,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'student_dashboard', path: '/student-dashboard', label: 'Student Dashboard', glyph: '♟' }
         ]
       });
+      sections.push({
+        title: 'REPORTS',
+        items: [
+          { id: 'reports_centre', path: '/reports-centre', label: 'Reports Centre', glyph: '📤' },
+          { id: 'report_builder', path: '/analytics?tab=builder', label: 'Report Builder', glyph: '✚' }
+        ]
+      });
     } else if (role === 'coach') {
       sections.push({
         title: 'THIS WEEK',
@@ -118,11 +125,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'student_dashboard', path: '/student-dashboard', label: 'Student Dashboard', glyph: '♟' }
         ]
       });
+      sections.push({
+        title: 'REPORTS',
+        items: [
+          { id: 'progress_report', path: '/progress-report', label: 'Progress Report', glyph: '◔' },
+          { id: 'package_report', path: '/package-report', label: 'Package Utilisation', glyph: '▦' }
+        ]
+      });
     } else if (role === 'parent') {
       sections.push({
         title: 'PARENT PORTAL',
         items: [
-          { id: 'student_dashboard', path: '/student-dashboard', label: 'Student Dashboard', glyph: '♟' }
+          { id: 'dashboard', path: '/student-dashboard', label: 'Overview', glyph: '♟' },
+          { id: 'attendance_register', path: '/attendance-register', label: 'Attendance', glyph: '♞' },
+          { id: 'package_report', path: '/package-report', label: 'Package Status', glyph: '▦' },
+          { id: 'progress_report', path: '/progress-report', label: 'Progress Reports', glyph: '◔' }
         ]
       });
     }

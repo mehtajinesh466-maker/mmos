@@ -60,6 +60,13 @@ export async function reassignCoachDB(fromCoachId: string, toCoachId: string) {
   });
 }
 
+export async function deleteCoachDB(coachId: string) {
+  return await prisma.coach.update({
+    where: { id: coachId },
+    data: { active: false }
+  });
+}
+
 export async function saveCentreDB(data: { name: string; status: string }) {
   return await prisma.centre.create({
     data: { name: data.name, status: data.status }
@@ -135,6 +142,7 @@ export async function syncDatabaseToClient() {
   const packages = await prisma.package.findMany();
   const scheduleSlots = await prisma.scheduleSlot.findMany();
   const attendance = await prisma.attendance.findMany();
+  const invoices = await prisma.invoice.findMany();
 
   return JSON.parse(JSON.stringify({
     centres,
@@ -146,6 +154,7 @@ export async function syncDatabaseToClient() {
     packages,
     scheduleSlots,
     attendance,
+    invoices,
   }));
 }
 
@@ -413,3 +422,87 @@ export async function getReconciliationData() {
     };
   });
 }
+
+export async function deleteStudentDB(id: string) {
+  return await prisma.student.update({
+    where: { id },
+    data: { status: 'inactive' }
+  });
+}
+
+export async function deletePackageDB(id: string) {
+  return await prisma.package.delete({
+    where: { id }
+  });
+}
+
+export async function updatePackageDB(id: string, data: any) {
+  return await prisma.package.update({
+    where: { id },
+    data: {
+      classes_total: Number(data.classes_total),
+      classes_remaining: Number(data.classes_remaining),
+      frozen: data.frozen === true || data.frozen === 'true'
+    }
+  });
+}
+
+export async function deleteAttendanceDB(id: string) {
+  return await prisma.attendance.delete({
+    where: { id }
+  });
+}
+
+export async function updateAttendanceDB(id: string, status: string) {
+  return await prisma.attendance.update({
+    where: { id },
+    data: { status }
+  });
+}
+
+export async function deleteInvoiceDB(id: string) {
+  return await prisma.invoice.delete({
+    where: { id }
+  });
+}
+
+export async function updateInvoiceDB(id: string, status: string) {
+  return await prisma.invoice.update({
+    where: { id },
+    data: { status }
+  });
+}
+
+export async function getActionCentreData() {
+  const students = await prisma.student.findMany({
+    include: {
+      centre: true,
+      coach: {
+        include: {
+          user: true
+        }
+      },
+      packages: {
+        orderBy: {
+          start_date: 'asc'
+        }
+      }
+    }
+  });
+
+  const centres = await prisma.centre.findMany();
+  const coaches = await prisma.coach.findMany({
+    include: {
+      user: true
+    }
+  });
+  const tiers = await prisma.tier.findMany();
+
+  return JSON.parse(JSON.stringify({
+    students,
+    centres,
+    coaches,
+    tiers
+  }));
+}
+

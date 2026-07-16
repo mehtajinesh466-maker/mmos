@@ -58,6 +58,9 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
     if (stds.length > 0 && !selectedStudentId) {
       if (queryStudentId && stds.some(s => s.id === queryStudentId)) {
         setSelectedStudentId(queryStudentId);
+      } else if (currentUser.role === 'parent') {
+        const parentChild = stds.find(s => s.id === 's-alex-sterling-id') || stds[0];
+        setSelectedStudentId(parentChild.id);
       } else {
         setSelectedStudentId(stds[0].id);
       }
@@ -82,7 +85,15 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
     }
   }, [queryStudentId]);
 
-  const activeStudent = students.find(s => s.id === selectedStudentId);
+  const activeStudentId = useMemo(() => {
+    if (currentUser.role === 'parent') {
+      const alex = students.find(s => s.id === 's-alex-sterling-id') || students[0];
+      return alex ? alex.id : '';
+    }
+    return selectedStudentId;
+  }, [currentUser, students, selectedStudentId]);
+
+  const activeStudent = students.find(s => s.id === activeStudentId);
 
   const getCoachName = (coachId: string | null) => {
     if (!coachId) return 'Unassigned';
@@ -143,18 +154,18 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
 
     // 1. Line spline chart
     const months = ['Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26', 'Jul-26'];
-    const isAadi = activeStudent.name.toLowerCase().includes('aadi');
-    const hash = activeStudent.name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const getMonthLabel = (dateStr: string) => {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      const m = monthNames[d.getMonth()];
+      const y = d.getFullYear().toString().slice(-2);
+      return `${m}-${y}`;
+    };
 
-    const lineData = months.map((m, idx) => {
-      if (isAadi) {
-        // Aadi Jain values from mockup screenshot
-        const aadiSpline: { [key: string]: number } = {
-          'Dec-25': 5, 'Jan-26': 3, 'Feb-26': 0, 'Mar-26': 2, 'Apr-26': 0, 'May-26': 2, 'Jun-26': 2, 'Jul-26': 0
-        };
-        return aadiSpline[m] ?? 0;
-      }
-      return (hash + idx) % 4;
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && a.status === 'present');
+    const lineData = months.map(m => {
+      return studentAtts.filter(a => getMonthLabel(a.date) === m).length;
     });
 
     chartInstances.current.line = new Chart(lineChartRef.current, {
@@ -232,24 +243,18 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
     if (logs.length > 0) {
       return logs.map(l => ({
         topic: l.topic,
-        mastery: l.rating >= 4 ? 'MASTERED' : 'PRACTISING'
+        mastery: l.mastery === 'Mastered' ? 'MASTERED' : 'PRACTISING'
       })).slice(-4);
     }
 
-    // Default simulation mockup values
-    return [
-      { topic: 'Rook endgames', mastery: 'PRACTISING' },
-      { topic: 'Back-rank patterns', mastery: 'MASTERED' },
-      { topic: 'Knight outposts', mastery: 'MASTERED' },
-      { topic: 'Opening principles', mastery: 'PRACTISING' }
-    ];
+    return [];
   }, [activeStudent, progressLogs]);
 
   const latestFeedback = useMemo(() => {
     if (!activeStudent) return '';
     const logs = progressLogs.filter(l => l.student_id === activeStudent.id);
     const lastWithNote = [...logs].reverse().find(l => l.note);
-    return lastWithNote?.note || 'Capable when present, but the gaps between classes are undoing the progress made. Re-establishing a weekly rhythm is the single change that moves this student forward fastest.';
+    return lastWithNote?.note || 'No specific feedback notes logged yet.';
   }, [activeStudent, progressLogs]);
 
   const handleStudentChange = (id: string) => {
@@ -279,16 +284,25 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
       {/* Filter Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-surface border border-line rounded-xl p-3.5 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-bold text-muted-custom uppercase">STUDENT</span>
-          <select 
-            value={selectedStudentId} 
-            onChange={e => handleStudentChange(e.target.value)}
-            className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none w-56"
-          >
-            {students.filter(s => activeCentre === 'All' || s.centre_id === activeCentre).map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+          {currentUser.role !== 'parent' && (
+            <>
+              <span className="text-[10px] font-bold text-muted-custom uppercase">STUDENT</span>
+              <select 
+                value={selectedStudentId} 
+                onChange={e => handleStudentChange(e.target.value)}
+                className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none w-56"
+              >
+                {students.filter(s => activeCentre === 'All' || s.centre_id === activeCentre).map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </>
+          )}
+          {currentUser.role === 'parent' && activeStudent && (
+            <div className="text-xs text-muted-custom font-semibold">
+              Student: <b className="text-ink">{activeStudent.name}</b>
+            </div>
+          )}
 
           <select 
             value={filterCentre}
@@ -408,20 +422,28 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
                     </tr>
                   </thead>
                   <tbody>
-                    {topicsLearnt.map((item, idx) => (
-                      <tr key={idx} className="border-b border-line hover:bg-canvas/30 transition-colors font-medium">
-                        <td className="py-2.5 px-3 text-ink">{item.topic}</td>
-                        <td className="py-2.5 px-3">
-                          <span className={`text-[9px] font-bold px-2.5 py-0.5 rounded border ${
-                            item.mastery === 'MASTERED'
-                              ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
-                              : 'bg-amber-100 text-amber-700 border-amber-200'
-                          }`}>
-                            {item.mastery}
-                          </span>
+                    {topicsLearnt.length === 0 ? (
+                      <tr>
+                        <td colSpan={2} className="py-4 px-3 text-center text-muted-custom">
+                          No topics logged yet.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      topicsLearnt.map((item, idx) => (
+                        <tr key={idx} className="border-b border-line hover:bg-canvas/30 transition-colors font-medium">
+                          <td className="py-2.5 px-3 text-ink">{item.topic}</td>
+                          <td className="py-2.5 px-3">
+                            <span className={`text-[9px] font-bold px-2.5 py-0.5 rounded border ${
+                              item.mastery === 'MASTERED'
+                                ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                                : 'bg-amber-100 text-amber-700 border-amber-200'
+                            }`}>
+                              {item.mastery}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>

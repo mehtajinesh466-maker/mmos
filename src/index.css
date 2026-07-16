@@ -60,3 +60,49 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(23, 37, 31, 0.2);
 }
+
+/* Print layout styles */
+@media print {
+  aside, 
+  nav, 
+  header, 
+  button, 
+  select, 
+  input, 
+  .no-print, 
+  .slice-bar, 
+  .slice-dice-toolbar, 
+  .filter-bar {
+    display: none !important;
+  }
+  
+  body, html, main, #root, .print-full-width {
+    background: white !important;
+    color: black !important;
+    overflow: visible !important;
+    height: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .overflow-x-auto, .overflow-y-auto {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  table {
+    page-break-inside: auto;
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+}

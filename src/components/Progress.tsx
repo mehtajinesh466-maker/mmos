@@ -30,7 +30,7 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
       const coach = coaches.find(c => c.user_id === currentUser.id);
       return coach ? coach.id : '';
     }
-    return 'ch-1';
+    return coaches[0]?.id || '';
   };
 
   const coachId = getCoachId();

@@ -10,11 +10,21 @@ interface RegistrationProps {
 }
 
 export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeCentre }) => {
+  const centres = db.getCentres();
+  const coaches = db.getCoaches();
+
+  const bayCentre = centres.find(c => c.name === 'Bay Avenue');
+  const jltCentre = centres.find(c => c.name === 'JLT');
+
+  const defaultCentreId = activeCentre === 'All' 
+    ? (bayCentre ? bayCentre.id : (centres[0]?.id || '')) 
+    : activeCentre;
+
   const [formData, setFormData] = useState({
     name: '',
     dob: '',
     gender: 'Boy',
-    centre_id: activeCentre === 'All' ? 'c-1' : activeCentre, // default to Bay Avenue (c-1) if All
+    centre_id: defaultCentreId,
     coach_id: '',
     level: '',
     school: '',
@@ -38,25 +48,14 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
   const [saveStatus, setSaveStatus] = useState('');
   const [studentIdAuto, setStudentIdAuto] = useState('BAY-363 (auto)');
 
-  // Hardcoded or fetched centres and coaches
-  const centres = db.getCentres().length > 0 ? db.getCentres() : [
-    { id: 'c-1', name: 'Bay Avenue' },
-    { id: 'c-2', name: 'JLT' }
-  ];
-
-  const coaches = db.getCoaches().length > 0 ? db.getCoaches() : [
-    { id: 'james', name: 'JAMES', centre_id: 'c-1' },
-    { id: 'john', name: 'JOHN', centre_id: 'c-1' },
-    { id: 'brett', name: 'BRETT', centre_id: 'c-2' }
-  ];
-
   const filteredCoaches = formData.centre_id ? coaches.filter(c => c.centre_id === formData.centre_id) : coaches;
 
   // Auto student ID calculation based on centre selection
   useEffect(() => {
-    const prefix = formData.centre_id === 'c-2' ? 'JLT' : 'BAY';
-    setStudentIdAuto(`${prefix}-363 (auto)`);
-  }, [formData.centre_id]);
+    const prefix = formData.centre_id === jltCentre?.id ? 'JLT' : 'BAY';
+    const count = db.getStudents().filter(s => s.centre_id === formData.centre_id).length;
+    setStudentIdAuto(`${prefix}-${count + 1 + 100} (auto)`);
+  }, [formData.centre_id, centres, jltCentre]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -90,6 +89,13 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
     setIsSubmitting(true);
     setSaveStatus('');
 
+    const tiers = db.getTiers();
+    const classesNum = formData.package_size.match(/\d+/)?.[0] || '12';
+    const matchingTier = tiers.find(t => t.name.includes(`${classesNum} classes`)) 
+      || tiers.find(t => t.name.includes(classesNum)) 
+      || tiers[0];
+    const tierId = matchingTier ? matchingTier.id : '';
+
     // Map fields to match action expectation
     const payload = {
       name: formData.name,
@@ -103,7 +109,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       centre_id: formData.centre_id,
       coach_id: formData.coach_id || (filteredCoaches[0]?.id || ''),
       level: formData.level || 'Beginner',
-      tier_id: 'tier-12-class', // maps to a default tier
+      tier_id: tierId,
       consent_ops: formData.consent_ops,
       consent_mktg: formData.consent_mktg,
     };

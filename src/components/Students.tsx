@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/db';
 import type { User, Student, Package, Coach, Centre } from '../lib/db';
+import { saveStudentDB, deleteStudentDB, syncDatabaseToClient } from '../app/actions';
+import { exportTableToCSV, exportToPDF } from '../lib/export';
 
 interface StudentsProps {
   currentUser: User;
@@ -14,6 +16,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   const [packages, setPackages]   = useState<Package[]>([]);
   const [coaches, setCoaches]     = useState<Coach[]>([]);
   const [centres, setCentres]     = useState<Centre[]>([]);
+  const [attendance, setAttendance] = useState<any[]>([]);
 
   // Filters
   const [filterCentre, setFilterCentre]   = useState<string>('All centres');
@@ -22,16 +25,69 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   const [filterEngagement, setFilterEngagement] = useState<string>('All engagement');
   const [search, setSearch]               = useState<string>('');
 
-  // Detail panel
+  // Detail panel / Edit
   const [selected, setSelected] = useState<Student | null>(null);
   const [sortCol, setSortCol]   = useState<string>('name');
   const [sortAsc, setSortAsc]   = useState<boolean>(true);
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editLevel, setEditLevel] = useState('');
+  const [editStatus, setEditStatus] = useState('');
+  const [editFideId, setEditFideId] = useState('');
+
+  useEffect(() => {
+    if (selected) {
+      setEditName(selected.name);
+      setEditLevel(selected.level || 'Beginner');
+      setEditStatus(selected.status);
+      setEditFideId(selected.fide_id || '');
+      setIsEditing(false);
+    }
+  }, [selected]);
+
+  const handleSaveStudent = async () => {
+    if (!selected) return;
+    try {
+      await saveStudentDB({
+        ...selected,
+        name: editName,
+        level: editLevel,
+        status: editStatus,
+        fide_id: editFideId
+      });
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      refresh();
+      setIsEditing(false);
+      setSelected(null);
+      alert('✓ Student updated successfully.');
+    } catch (e: any) {
+      alert('Error updating student: ' + e.message);
+    }
+  };
+
+  const handleDeleteStudent = async () => {
+    if (!selected) return;
+    if (!confirm(`Are you sure you want to delete ${selected.name}? This will remove all their packages and logs.`)) return;
+    try {
+      await deleteStudentDB(selected.id);
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      refresh();
+      setSelected(null);
+      alert('✓ Student deleted successfully.');
+    } catch (e: any) {
+      alert('Error deleting student: ' + e.message);
+    }
+  };
 
   const refresh = () => {
     setStudents(db.getStudents());
     setPackages(db.getPackages());
     setCoaches(db.getCoaches());
     setCentres(db.getCentres());
+    setAttendance(db.getAttendance());
   };
 
   useEffect(() => {
@@ -43,11 +99,22 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   // Sync activeCentre prop → filter
   useEffect(() => {
     if (activeCentre && activeCentre !== 'All') {
-      setFilterCentre(activeCentre);
+      const match = db.getCentres().find(c => c.id === activeCentre);
+      if (match) {
+        setFilterCentre(match.name);
+      }
     } else {
       setFilterCentre('All centres');
     }
   }, [activeCentre]);
+
+  // Determine coach record for isolation
+  const coachRecord = useMemo(() => {
+    if (currentUser.role === 'coach') {
+      return coaches.find(c => c.user_id === currentUser.id) || null;
+    }
+    return null;
+  }, [currentUser, coaches]);
 
   // ── Per-student computed metrics ─────────────────────────────────────────
   const enriched = useMemo(() => {
@@ -56,7 +123,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
       // Active package
       const pkgs = packages
         .filter(p => p.student_id === s.id && !p.frozen)
-        .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime());
+        .sort((a, b) => new Date(a.start_date || '').getTime() - new Date(b.start_date || '').getTime());
       const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
 
       const classesLeft  = activePkg?.classes_remaining ?? 0;
@@ -68,17 +135,21 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
         ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000)
         : 999;
 
-      // 30D / 90D classes (mock from attendance count — use packages as proxy)
-      const cls30d       = daysSince < 30 ? Math.floor(Math.random() * 8) + 1 : 0; // live: query attendance
-      const cls90d       = daysSince < 90 ? Math.floor(Math.random() * 20) + 1 : 0;
+      // 30D / 90D classes calculated from real attendance
+      const studentAtts  = attendance.filter(a => a.student_id === s.id && a.status === 'present');
+      let cls30d = 0;
+      let cls90d = 0;
+      studentAtts.forEach(a => {
+        const diffDays = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
+        if (diffDays >= 0 && diffDays <= 30) cls30d++;
+        if (diffDays >= 0 && diffDays <= 90) cls90d++;
+      });
 
-      // Rate per class (from tier price / size or default 100)
+      // Rate per class
       const rate         = activePkg?.classes_total ? Math.round(1200 / (activePkg.classes_total || 12)) : 100;
-
-      // Paid to date (simple: completed × rate)
       const paidToDate   = completed * rate;
 
-      // Segment: based on level + daysSince
+      // Segment
       const segment      = s.level
         ? (s.level === 'Pro-Track' ? 'Pro-Track'
           : s.level === 'Advanced' ? 'Juniors-Advanced'
@@ -86,22 +157,18 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
           : 'Early Starters-Beginner 2')
         : 'Not set';
 
-      // Engagement heat
+      // Engagement heat mapping
       const engagement   = daysSince <= 14 ? 'ENGAGED'
         : daysSince <= 30 ? 'SLIPPING'
         : daysSince <= 60 ? 'COLD'
         : 'DORMANT';
 
-      // Hot/Cold flag
       const heat         = classesLeft <= 2 && pkgSize > 0 ? 'HOT'
         : daysSince > 30 ? 'COLD'
         : 'HEALTHY';
 
-      // Coach + centre names
       const coach        = coaches.find(c => c.id === s.coach_id);
       const centre       = centres.find(c => c.id === s.centre_id);
-
-      // Auto-generated BAY/JLT style ID
       const prefix       = (centre?.name || 'BAY').slice(0, 3).toUpperCase();
       const numPart      = s.fide_id || s.id.replace(/\D/g, '').slice(0, 3) || '000';
       const displayId    = `${prefix}-${numPart}`;
@@ -124,27 +191,55 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
         heat,
       };
     });
-  }, [students, packages, coaches, centres]);
+  }, [students, packages, coaches, centres, attendance]);
 
-  // ── Filter + sort ────────────────────────────────────────────────────────
+  // Filter + sort
   const filtered = useMemo(() => {
-    let rows = enriched;
-    if (filterCentre !== 'All centres') rows = rows.filter(r => r.centre_id === filterCentre || r.centreName === filterCentre);
+    let rows = enriched.filter(r => r.status !== 'inactive');
+    
+    // Apply coach role isolation
+    if (currentUser.role === 'coach' && coachRecord) {
+      rows = rows.filter(r => r.coach_id === coachRecord.id);
+    }
+
+    if (filterCentre !== 'All centres') rows = rows.filter(r => r.centreName === filterCentre);
     if (filterCoach  !== 'All coaches')  rows = rows.filter(r => r.coachName === filterCoach);
     if (filterSegment !== 'All segments') rows = rows.filter(r => r.segment === filterSegment);
     if (filterEngagement !== 'All engagement') rows = rows.filter(r => r.engagement === filterEngagement);
     if (search) rows = rows.filter(r => r.name.toLowerCase().includes(search.toLowerCase()) || r.displayId.toLowerCase().includes(search.toLowerCase()));
 
+    // Sorting by recent attendance (daysSince asc) by default for coach, or by column
     return rows.sort((a, b) => {
       let av: any = (a as any)[sortCol] ?? '';
       let bv: any = (b as any)[sortCol] ?? '';
+      
+      if (sortCol === 'daysSince') {
+        av = av === null ? 999 : av;
+        bv = bv === null ? 999 : bv;
+      }
+      
       if (typeof av === 'string') av = av.toLowerCase();
       if (typeof bv === 'string') bv = bv.toLowerCase();
+      
       if (av < bv) return sortAsc ? -1 : 1;
       if (av > bv) return sortAsc ? 1 : -1;
       return 0;
     });
-  }, [enriched, filterCentre, filterCoach, filterSegment, filterEngagement, search, sortCol, sortAsc]);
+  }, [enriched, filterCentre, filterCoach, filterSegment, filterEngagement, search, sortCol, sortAsc, currentUser, coachRecord]);
+
+  // Coach-specific metrics
+  const coachStats = useMemo(() => {
+    const coachStudents = enriched.filter(s => s.status !== 'inactive' && s.coach_id === (coachRecord?.id || ''));
+    const totalCount = coachStudents.length;
+    const engagedCount = coachStudents.filter(s => s.engagement === 'ENGAGED').length;
+    const slippingOrDormantCount = coachStudents.filter(s => s.engagement === 'SLIPPING' || s.engagement === 'DORMANT').length;
+    
+    return {
+      totalCount,
+      engagedCount,
+      slippingOrDormantCount
+    };
+  }, [enriched, coachRecord]);
 
   const toggleSort = (col: string) => {
     if (sortCol === col) setSortAsc(!sortAsc);
@@ -160,13 +255,6 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
     </th>
   );
 
-  // Badge helpers
-  const heatBadge = (h: string) => {
-    if (h === 'HOT')     return 'bg-red-100 text-red-700 border-red-200';
-    if (h === 'COLD')    return 'bg-slate-100 text-slate-500 border-slate-200';
-    return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-  };
-
   const engagementBadge = (e: string) => {
     if (e === 'ENGAGED')  return 'bg-emerald-100 text-emerald-700 border-emerald-200';
     if (e === 'SLIPPING') return 'bg-amber-100 text-amber-700 border-amber-200';
@@ -174,24 +262,138 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
     return 'bg-orange-100 text-orange-700 border-orange-200'; // DORMANT
   };
 
+  // Render Coach-specific "My Students" view
+  if (currentUser.role === 'coach') {
+    return (
+      <div className="p-8 max-w-7xl mx-auto w-full space-y-8 text-ink">
+        
+        {/* Top Header */}
+        <div className="flex justify-between items-start">
+          <div>
+            <div className="text-[10px] font-bold tracking-widest text-[#C4A249] uppercase">OUTPUT</div>
+            <h1 className="text-3xl font-bold font-display text-ink mt-1">My Students</h1>
+            <p className="text-sm text-muted-custom mt-1">
+              {currentUser.name} · {coachStats.totalCount} students · {coachStats.engagedCount} engaged
+            </p>
+          </div>
+
+          <select 
+            value={filterCentre}
+            onChange={e => setFilterCentre(e.target.value)}
+            className="bg-white border border-line rounded-lg px-4 py-2 text-xs text-ink outline-none cursor-pointer"
+          >
+            <option>All centres</option>
+            {centres.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+        </div>
+
+        {/* Slipping/Dormant Warning Notice */}
+        {coachStats.slippingOrDormantCount > 0 && (
+          <div className="p-4 rounded-[12px] bg-[#FBF2E7] border border-[#EAD5AE] border-l-4 border-l-[#C4A249] flex gap-3 text-xs leading-relaxed text-[#7a5a1e]">
+            <span className="text-xl">⚏</span>
+            <div>
+              <b className="text-[#6d4f0c] block font-bold">{coachStats.slippingOrDormantCount} of your students are slipping or dormant</b>
+              <span>A short message from you — their coach — recovers more of these than any front-desk call.</span>
+            </div>
+          </div>
+        )}
+
+        {/* Table Container */}
+        <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm">
+          <div className="flex justify-between items-center mb-1">
+            <h3 className="text-lg font-bold font-display text-ink flex items-center gap-2">
+              <span className="text-forest">⚏</span> My students
+            </h3>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => exportTableToCSV('#coach-students-table', 'my_students.csv')}
+                className="bg-white border border-line text-ink font-bold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1 cursor-pointer transition-all"
+              >
+                ↓ Excel
+              </button>
+              <button 
+                onClick={exportToPDF}
+                className="bg-white border border-line text-ink font-bold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1 cursor-pointer transition-all"
+              >
+                ⎙ PDF
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-muted-custom mb-6">Ranked by recent attendance.</p>
+
+          <div className="overflow-x-auto">
+            <table id="coach-students-table" className="w-full border-collapse">
+              <thead>
+                <tr className="border-b border-line text-left text-muted-custom text-[9px] uppercase tracking-wider font-bold">
+                  <th className="py-3 px-4">Student</th>
+                  <th className="py-3 px-4">Level</th>
+                  <th className="py-3 px-4 text-right">Classes Left</th>
+                  <th className="py-3 px-4 text-right">30D</th>
+                  <th className="py-3 px-4 text-right">90D</th>
+                  <th className="py-3 px-4 text-right">Days Since</th>
+                  <th className="py-3 px-4">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="text-center text-muted-custom py-8">
+                      No active students found.
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map(row => (
+                    <tr key={row.id} className="border-b border-line hover:bg-canvas/50 transition-all font-medium text-ink">
+                      <td className="py-4 px-4 font-bold text-ink">
+                        <a href={`/student-dashboard?studentId=${row.id}`} className="hover:text-forest hover:underline">
+                          {row.name}
+                        </a>
+                      </td>
+                      <td className="py-4 px-4 text-muted-custom text-xs">{row.level || '—'}</td>
+                      <td className={`py-4 px-4 text-right font-mono font-bold ${row.classesLeft <= 0 ? 'text-hot-custom' : 'text-ink'}`}>
+                        {row.classesLeft}
+                      </td>
+                      <td className="py-4 px-4 text-right font-mono">{row.cls30d}</td>
+                      <td className="py-4 px-4 text-right font-mono">{row.cls90d}</td>
+                      <td className="py-4 px-4 text-right font-mono">
+                        {row.daysSince === null ? '—' : row.daysSince}
+                      </td>
+                      <td className="py-4 px-4">
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${engagementBadge(row.engagement)}`}>
+                          {row.engagement}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    );
+  }
+
+  // Fallback to Admin Student Register View
   const uniqueCoaches  = [...new Set(enriched.map(r => r.coachName))].sort();
   const uniqueSegments = [...new Set(enriched.map(r => r.segment))].sort();
 
-  const highlightNum = (n: number | null, threshold: number) =>
-    n !== null && n >= threshold ? 'text-[#C4A249] font-bold' : 'text-ink';
-
   return (
     <div className="p-6 max-w-full mx-auto w-full space-y-4 text-ink">
-
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
           <div className="text-[10px] font-bold tracking-widest text-[#C4A249] uppercase">OUTPUT · RAW</div>
           <h1 className="text-2xl font-bold font-display text-ink mt-0.5">Student Register</h1>
         </div>
-        <select className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none">
+        <select 
+          value={filterCentre}
+          onChange={e => setFilterCentre(e.target.value)}
+          className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none"
+        >
           <option>All centres</option>
-          {centres.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          {centres.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
         </select>
       </div>
 
@@ -236,7 +438,10 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
           className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
         >
           <option>All engagement</option>
-          {['ENGAGED', 'SLIPPING', 'COLD', 'DORMANT'].map(e => <option key={e} value={e}>{e}</option>)}
+          <option value="ENGAGED">ENGAGED</option>
+          <option value="SLIPPING">SLIPPING</option>
+          <option value="COLD">COLD</option>
+          <option value="DORMANT">DORMANT</option>
         </select>
 
         <input
@@ -247,225 +452,204 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
           className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
         />
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 no-print">
           <span className="text-xs text-muted-custom font-semibold">{filtered.length} rows</span>
-          <button className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas">↓ Excel</button>
-          <button className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas">⎙ PDF</button>
+          <button 
+            onClick={() => exportTableToCSV('#student-table', 'student_register.csv')}
+            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+          >
+            ↓ Excel
+          </button>
+          <button 
+            onClick={exportToPDF}
+            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+          >
+            ⎙ PDF
+          </button>
         </div>
       </div>
 
-      {/* Table */}
+      {/* Main Grid */}
       <div className="bg-surface border border-line rounded-[14px] shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-xs" style={{ minWidth: '1200px' }}>
+          <table id="student-table" className="w-full border-collapse text-xs">
             <thead className="border-b border-line bg-canvas">
               <tr>
-                <SortTh col="name">Name</SortTh>
+                <SortTh col="name">Student</SortTh>
                 <SortTh col="displayId">ID</SortTh>
                 <SortTh col="centreName">Centre</SortTh>
                 <SortTh col="coachName">Coach</SortTh>
-                <SortTh col="level">Level</SortTh>
-                <SortTh col="segment">Segment</SortTh>
-                <SortTh col="engagement">Engagement</SortTh>
-                <SortTh col="classesLeft" right>Classes Left</SortTh>
-                <SortTh col="pkgSize" right>Pkg Size</SortTh>
-                <SortTh col="completed" right>Completed</SortTh>
+                <SortTh col="classesLeft" right>Left</SortTh>
+                <SortTh col="pkgSize" right>Size</SortTh>
                 <SortTh col="cls30d" right>30D</SortTh>
                 <SortTh col="cls90d" right>90D</SortTh>
                 <SortTh col="daysSince" right>Days Since</SortTh>
-                <SortTh col="last_attended">Last Class</SortTh>
-                <SortTh col="rate" right>Rate</SortTh>
-                <SortTh col="paidToDate" right>Paid to Date</SortTh>
+                <SortTh col="engagement">Engagement</SortTh>
+                <SortTh col="heat">Heat</SortTh>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={16} className="py-12 text-center text-muted-custom text-xs">
+                  <td colSpan={11} className="py-12 text-center text-muted-custom">
                     No students match your filters.
                   </td>
                 </tr>
-              ) : filtered.map(row => (
-                <tr
-                  key={row.id}
-                  onClick={() => setSelected(row)}
-                  className="border-b border-line hover:bg-canvas/60 cursor-pointer transition-colors"
-                >
-                  {/* Name */}
-                  <td className="py-2.5 px-2 font-semibold text-ink whitespace-nowrap">
-                    <a href={`/student-dashboard?studentId=${row.id}`} className="hover:text-forest hover:underline">
-                      {row.name}
-                    </a>
-                  </td>
-
-                  {/* ID */}
-                  <td className="py-2.5 px-2 text-[10px] font-mono text-[#C4A249] whitespace-nowrap">{row.displayId}</td>
-
-                  {/* Centre */}
-                  <td className="py-2.5 px-2 text-muted-custom whitespace-nowrap">{row.centreName}</td>
-
-                  {/* Coach */}
-                  <td className="py-2.5 px-2 text-[10px] font-semibold text-ink/90 whitespace-nowrap uppercase">{row.coachName}</td>
-
-                  {/* Level */}
-                  <td className="py-2.5 px-2 text-[10px] text-muted-custom whitespace-nowrap">
-                    {row.level || <span className="text-muted-custom italic">Not set</span>}
-                  </td>
-
-                  {/* Segment */}
-                  <td className="py-2.5 px-2">
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${heatBadge(row.heat)}`}>
-                      {row.heat}
-                    </span>
-                  </td>
-
-                  {/* Engagement */}
-                  <td className="py-2.5 px-2">
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${engagementBadge(row.engagement)}`}>
-                      {row.engagement}
-                    </span>
-                  </td>
-
-                  {/* Classes left */}
-                  <td className={`py-2.5 px-2 text-right font-mono font-semibold ${row.classesLeft <= 2 && row.pkgSize > 0 ? 'text-hot-custom' : 'text-ink'}`}>
-                    {row.classesLeft}
-                  </td>
-
-                  {/* Pkg size */}
-                  <td className="py-2.5 px-2 text-right font-mono text-ink">{row.pkgSize}</td>
-
-                  {/* Completed */}
-                  <td className="py-2.5 px-2 text-right font-mono text-ink">{row.completed}</td>
-
-                  {/* 30D */}
-                  <td className={`py-2.5 px-2 text-right font-mono ${highlightNum(row.cls30d, 5)}`}>{row.cls30d}</td>
-
-                  {/* 90D */}
-                  <td className={`py-2.5 px-2 text-right font-mono ${highlightNum(row.cls90d, 10)}`}>{row.cls90d}</td>
-
-                  {/* Days since */}
-                  <td className={`py-2.5 px-2 text-right font-mono ${row.daysSince !== null && row.daysSince > 60 ? 'text-hot-custom' : row.daysSince !== null && row.daysSince > 30 ? 'text-[#C4A249]' : 'text-ink'}`}>
-                    {row.daysSince ?? '—'}
-                  </td>
-
-                  {/* Last class */}
-                  <td className="py-2.5 px-2 font-mono text-[10px] text-muted-custom whitespace-nowrap">
-                    {row.last_attended || '—'}
-                  </td>
-
-                  {/* Rate */}
-                  <td className="py-2.5 px-2 text-right font-mono text-ink">{row.rate}</td>
-
-                  {/* Paid to date */}
-                  <td className="py-2.5 px-2 text-right font-mono text-ink whitespace-nowrap">
-                    AED {row.paidToDate.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
+              ) : (
+                filtered.map(row => (
+                  <tr
+                    key={row.id}
+                    onClick={() => setSelected(row)}
+                    className="border-b border-line hover:bg-canvas/40 transition-colors cursor-pointer"
+                  >
+                    <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                      <a href={`/student-dashboard?studentId=${row.id}`} className="hover:text-forest hover:underline">
+                        {row.name}
+                      </a>
+                    </td>
+                    <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">{row.displayId}</td>
+                    <td className="py-3 px-4 text-muted-custom whitespace-nowrap">{row.centreName}</td>
+                    <td className="py-3 px-4 text-muted-custom whitespace-nowrap">{row.coachName}</td>
+                    <td className={`py-3 px-4 text-right font-mono font-bold ${row.classesLeft <= 0 ? 'text-hot-custom' : 'text-ink'}`}>{row.classesLeft}</td>
+                    <td className="py-3 px-4 text-right font-mono text-muted-custom">{row.pkgSize}</td>
+                    <td className="py-3 px-4 text-right font-mono">{row.cls30d}</td>
+                    <td className="py-3 px-4 text-right font-mono">{row.cls90d}</td>
+                    <td className="py-3 px-4 text-right font-mono">{row.daysSince === null ? '—' : row.daysSince}</td>
+                    <td className="py-3 px-4">
+                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${engagementBadge(row.engagement)}`}>
+                        {row.engagement}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${row.classesLeft <= 2 && row.pkgSize > 0 ? 'bg-red-100 text-red-700 border-red-200' : 'bg-emerald-100 text-emerald-700 border-emerald-200'}`}>
+                        {row.classesLeft <= 2 && row.pkgSize > 0 ? 'HOT' : 'HEALTHY'}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      <p className="text-[10px] text-muted-custom">
-        ✦ Every field is live — counts recompute from attendance and package records on every load.
-      </p>
-
-      {/* Detail slide-over */}
+      {/* Selected Student Detail Panel */}
       {selected && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setSelected(null)} />
           <div className="relative bg-white w-full max-w-md h-full overflow-y-auto shadow-2xl flex flex-col">
-
-            {/* Panel header */}
             <div className="bg-[#173F35] text-white p-6 flex justify-between items-start">
               <div>
                 <div className="text-[9px] font-bold tracking-widest text-emerald-200 uppercase">Student Profile</div>
                 <h2 className="text-xl font-bold mt-1">{selected.name}</h2>
-                <div className="text-xs text-emerald-200 mt-0.5">
-                  {(enriched.find(e => e.id === selected.id) as any)?.displayId} · {(enriched.find(e => e.id === selected.id) as any)?.centreName}
-                </div>
+                <div className="text-xs text-emerald-200 mt-0.5">ID: {selected.displayId}</div>
               </div>
               <button onClick={() => setSelected(null)} className="text-white/70 hover:text-white text-xl font-bold">✕</button>
             </div>
 
-            {/* Status bar */}
-            <div className="px-6 py-3 border-b border-line bg-canvas flex gap-3 items-center">
-              {(() => {
-                const r = enriched.find(e => e.id === selected.id) as any;
-                return r ? (
-                  <>
-                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${heatBadge(r.heat)}`}>{r.heat}</span>
-                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${engagementBadge(r.engagement)}`}>{r.engagement}</span>
-                    <span className="text-[9px] text-muted-custom ml-auto">{selected.status.toUpperCase()}</span>
-                  </>
-                ) : null;
-              })()}
-            </div>
-
             <div className="p-6 space-y-5 flex-1">
-              {(() => {
-                const r = enriched.find(e => e.id === selected.id) as any;
-                if (!r) return null;
-                return (
-                  <>
-                    <div>
-                      <div className="text-[10px] font-bold text-[#C4A249] uppercase tracking-wider mb-3 border-b border-line pb-2">Basics</div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">Coach</div><div className="text-xs font-semibold mt-0.5">{r.coachName}</div></div>
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">Level</div><div className="text-xs font-semibold mt-0.5">{r.level || '—'}</div></div>
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">Gender</div><div className="text-xs font-semibold mt-0.5">{r.gender || '—'}</div></div>
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">Join Date</div><div className="text-xs font-semibold mt-0.5 font-mono">{r.join_date || '—'}</div></div>
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">School</div><div className="text-xs font-semibold mt-0.5">{r.school || '—'}</div></div>
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">FIDE ID</div><div className="text-xs font-semibold mt-0.5 font-mono">{r.fide_id || '—'}</div></div>
-                      </div>
-                    </div>
+              {isEditing ? (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Name</label>
+                    <input 
+                      type="text" 
+                      value={editName}
+                      onChange={e => setEditName(e.target.value)}
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
 
-                    <div>
-                      <div className="text-[10px] font-bold text-[#C4A249] uppercase tracking-wider mb-3 border-b border-line pb-2">Package & Activity</div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">Classes Left</div><div className={`text-xs font-semibold mt-0.5 ${r.classesLeft <= 2 && r.pkgSize > 0 ? 'text-hot-custom' : ''}`}>{r.classesLeft} / {r.pkgSize}</div></div>
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">Completed</div><div className="text-xs font-semibold mt-0.5">{r.completed}</div></div>
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">Days Since Class</div><div className={`text-xs font-semibold mt-0.5 ${r.daysSince > 60 ? 'text-hot-custom' : r.daysSince > 30 ? 'text-[#C4A249]' : ''}`}>{r.daysSince ?? '—'}</div></div>
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">Last Class</div><div className="text-xs font-semibold mt-0.5 font-mono">{r.last_attended || '—'}</div></div>
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">30D Classes</div><div className="text-xs font-semibold mt-0.5">{r.cls30d}</div></div>
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">90D Classes</div><div className="text-xs font-semibold mt-0.5">{r.cls90d}</div></div>
-                      </div>
-                    </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Level</label>
+                    <select
+                      value={editLevel}
+                      onChange={e => setEditLevel(e.target.value)}
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    >
+                      <option>Beginner</option>
+                      <option>Intermediate</option>
+                      <option>Advanced</option>
+                      <option>Pro-Track</option>
+                    </select>
+                  </div>
 
-                    <div>
-                      <div className="text-[10px] font-bold text-[#C4A249] uppercase tracking-wider mb-3 border-b border-line pb-2">Financials</div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">Rate / Class</div><div className="text-xs font-semibold mt-0.5">AED {r.rate}</div></div>
-                        <div><div className="text-[10px] text-muted-custom uppercase font-bold">Paid to Date</div><div className="text-xs font-semibold mt-0.5">AED {r.paidToDate.toLocaleString()}</div></div>
-                      </div>
-                    </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Status</label>
+                    <select
+                      value={editStatus}
+                      onChange={e => setEditStatus(e.target.value)}
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="frozen">Frozen</option>
+                      <option value="left">Left</option>
+                    </select>
+                  </div>
 
-                    {(r.pace_reason) && (
-                      <div>
-                        <div className="text-[10px] font-bold text-[#C4A249] uppercase tracking-wider mb-3 border-b border-line pb-2">Pace Note</div>
-                        <div className="text-xs text-ink bg-canvas border border-line rounded-lg p-3 leading-relaxed">{r.pace_reason}</div>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">FIDE ID / Custom ID</label>
+                    <input 
+                      type="text" 
+                      value={editFideId}
+                      onChange={e => setEditFideId(e.target.value)}
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[10px]">Level</span>
+                      <b className="text-ink text-sm">{selected.level || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[10px]">Status</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${selected.status === 'active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                        {selected.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-line">
+                    <button
+                      onClick={() => setIsEditing(true)}
+                      className="w-full bg-white border border-line text-ink font-bold text-xs py-2 rounded-lg hover:bg-canvas"
+                    >
+                      Edit Student info
+                    </button>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      onClick={handleDeleteStudent}
+                      className="w-full bg-red-50 border border-red-200 text-hot-custom font-bold text-xs py-2 rounded-lg hover:bg-red-100"
+                    >
+                      ⚠️ Delete Student
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="p-6 border-t border-line bg-canvas flex gap-3">
-              <button
-                onClick={() => setSelected(null)}
-                className="flex-1 bg-[#173F35] hover:bg-[#173F35]/90 text-white font-bold text-xs py-2.5 rounded-lg transition-all"
-              >
-                Renew Package
-              </button>
-              <button
-                onClick={() => setSelected(null)}
-                className="bg-white border border-line text-ink font-bold text-xs px-4 py-2.5 rounded-lg hover:bg-canvas"
-              >
-                Close
-              </button>
-            </div>
+            {isEditing && (
+              <div className="p-6 border-t border-line bg-canvas flex gap-3">
+                <button
+                  onClick={handleSaveStudent}
+                  className="flex-1 bg-[#173F35] hover:bg-[#173F35]/90 text-white font-bold text-xs py-2.5 rounded-lg transition-all"
+                >
+                  Save Changes
+                </button>
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="bg-white border border-line text-ink font-bold text-xs px-4 py-2.5 rounded-lg hover:bg-canvas"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

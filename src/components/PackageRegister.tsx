@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/db';
 import type { User, Student, Package, Coach, Centre } from '../lib/db';
-
+import { updatePackageDB, deletePackageDB, syncDatabaseToClient } from '../app/actions';
+import { exportTableToCSV, exportToPDF } from '../lib/export';
 interface PackageRegisterProps {
   currentUser: User;
   activeCentre: string;
@@ -27,6 +28,45 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
   // Sorting
   const [sortCol, setSortCol] = useState<string>('studentName');
   const [sortAsc, setSortAsc] = useState<boolean>(true);
+
+  // Edit states
+  const [selectedPkg, setSelectedPkg] = useState<any | null>(null);
+  const [editTotal, setEditTotal] = useState(0);
+  const [editRemaining, setEditRemaining] = useState(0);
+  const [editFrozen, setEditFrozen] = useState(false);
+
+  const handleSavePackage = async () => {
+    if (!selectedPkg) return;
+    try {
+      await updatePackageDB(selectedPkg.id, {
+        classes_total: editTotal,
+        classes_remaining: editRemaining,
+        frozen: editFrozen
+      });
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      refresh();
+      setSelectedPkg(null);
+      alert('✓ Package updated successfully.');
+    } catch (e: any) {
+      alert('Error updating package: ' + e.message);
+    }
+  };
+
+  const handleDeletePackage = async () => {
+    if (!selectedPkg) return;
+    if (!confirm('Are you sure you want to delete this package?')) return;
+    try {
+      await deletePackageDB(selectedPkg.id);
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      refresh();
+      setSelectedPkg(null);
+      alert('✓ Package deleted successfully.');
+    } catch (e: any) {
+      alert('Error deleting package: ' + e.message);
+    }
+  };
 
   const refresh = () => {
     setStudents(db.getStudents());
@@ -344,12 +384,18 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
           className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
         />
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 no-print">
           <span className="text-xs text-muted-custom font-semibold">{filtered.length} rows</span>
-          <button className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1">
+          <button 
+            onClick={() => exportTableToCSV('#package-table', 'packages_register.csv')}
+            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+          >
             ↓ Excel
           </button>
-          <button className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1">
+          <button 
+            onClick={exportToPDF}
+            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+          >
             ⎙ PDF
           </button>
         </div>
@@ -358,7 +404,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
       {/* Main Table Grid */}
       <div className="bg-surface border border-line rounded-[14px] shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-xs">
+          <table id="package-table" className="w-full border-collapse text-xs">
             <thead className="border-b border-line bg-canvas">
               <tr>
                 <SortTh col="studentName">Student</SortTh>
@@ -386,10 +432,24 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
                 filtered.map(row => (
                   <tr
                     key={row.id}
-                    className="border-b border-line hover:bg-canvas/40 transition-colors"
+                    onClick={() => {
+                      if (row.type !== '>> UNPAID <<') {
+                        setSelectedPkg({
+                          id: row.id,
+                          classes_total: row.classesPaid,
+                          classes_remaining: row.balance,
+                          frozen: packages.find(p => p.id === row.id)?.frozen || false,
+                          studentName: row.studentName
+                        });
+                        setEditTotal(row.classesPaid);
+                        setEditRemaining(row.balance);
+                        setEditFrozen(packages.find(p => p.id === row.id)?.frozen || false);
+                      }
+                    }}
+                    className="border-b border-line hover:bg-canvas/40 transition-colors cursor-pointer"
                   >
                     {/* Student */}
-                    <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap">
+                    <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       <a href={`/student-dashboard?studentId=${row.studentId}`} className="hover:text-forest hover:underline">
                         {row.studentName}
                       </a>
@@ -447,6 +507,81 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
         </div>
       </div>
 
+      {selectedPkg && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setSelectedPkg(null)} />
+          <div className="relative bg-white w-full max-w-md h-full overflow-y-auto shadow-2xl flex flex-col">
+            {/* Header */}
+            <div className="bg-[#173F35] text-white p-6 flex justify-between items-start">
+              <div>
+                <div className="text-[9px] font-bold tracking-widest text-emerald-200 uppercase">Package Edit</div>
+                <h2 className="text-xl font-bold mt-1">{selectedPkg.studentName}</h2>
+                <div className="text-xs text-emerald-200 mt-0.5">Package ID: {selectedPkg.id}</div>
+              </div>
+              <button onClick={() => setSelectedPkg(null)} className="text-white/70 hover:text-white text-xl font-bold">✕</button>
+            </div>
+
+            {/* Form Body */}
+            <div className="p-6 space-y-5 flex-1">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-ink">Classes Total</label>
+                <input 
+                  type="number" 
+                  value={editTotal}
+                  onChange={e => setEditTotal(Number(e.target.value))}
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-ink">Classes Remaining</label>
+                <input 
+                  type="number" 
+                  value={editRemaining}
+                  onChange={e => setEditRemaining(Number(e.target.value))}
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <input 
+                  type="checkbox" 
+                  checked={editFrozen}
+                  onChange={e => setEditFrozen(e.target.checked)}
+                  id="edit-frozen-chk"
+                  className="w-4 h-4 rounded border-line text-forest focus:ring-forest"
+                />
+                <label htmlFor="edit-frozen-chk" className="text-xs font-bold text-ink">Freeze Package</label>
+              </div>
+
+              <div className="pt-8">
+                <button
+                  onClick={handleDeletePackage}
+                  className="w-full bg-red-50 border border-red-200 text-hot-custom font-bold text-xs py-2.5 rounded-lg hover:bg-red-100 transition-all"
+                >
+                  ⚠️ Delete Package
+                </button>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 border-t border-line bg-canvas flex gap-3">
+              <button
+                onClick={handleSavePackage}
+                className="flex-1 bg-[#173F35] hover:bg-[#173F35]/90 text-white font-bold text-xs py-2.5 rounded-lg transition-all"
+              >
+                Save Changes
+              </button>
+              <button
+                onClick={() => setSelectedPkg(null)}
+                className="bg-white border border-line text-ink font-bold text-xs px-4 py-2.5 rounded-lg hover:bg-canvas"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

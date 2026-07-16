@@ -165,18 +165,17 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
 
     // 1. Attendance trend per month
     const months = ['Feb-25', 'Mar-25', 'Apr-25', 'May-25', 'Jun-25', 'Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26'];
-    const trendData = months.map((m, idx) => {
-      // Deterministic simulation based on student id + date to match screenshot
-      const hash = activeStudent.name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-      const isAadi = activeStudent.name.toLowerCase().includes('aadi');
-      if (isAadi) {
-        // Match screenshot for Aadi Jain exactly
-        const aadiMock: { [key: string]: number } = {
-          'Feb-25': 2, 'Mar-25': 2, 'Apr-25': 1, 'May-25': 3, 'Jun-25': 4, 'Jul-25': 12, 'Aug-25': 1, 'Sep-25': 4, 'Oct-25': 11, 'Nov-25': 3, 'Dec-25': 5, 'Jan-26': 3, 'Feb-26': 0, 'Mar-26': 2, 'Apr-26': 0, 'May-26': 2, 'Jun-26': 2
-        };
-        return aadiMock[m] ?? 0;
-      }
-      return (hash + idx) % 5;
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const getMonthLabel = (dateStr: string) => {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      const m = monthNames[d.getMonth()];
+      const y = d.getFullYear().toString().slice(-2);
+      return `${m}-${y}`;
+    };
+
+    const trendData = months.map(m => {
+      return studentAtts.filter(a => getMonthLabel(a.date) === m).length;
     });
 
     chartInstances.current.trend = new Chart(trendChartRef.current, {
@@ -202,9 +201,45 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     });
 
     // 2. Vs Peers comparison
-    const student30d = studentMetrics?.cls30d || 2;
-    const student90d = studentMetrics?.cls90d || 11;
-    const studentDays = typeof studentMetrics?.daysSince === 'number' ? studentMetrics.daysSince : 17;
+    const student30d = studentMetrics?.cls30d || 0;
+    const student90d = studentMetrics?.cls90d || 0;
+    const studentDays = typeof studentMetrics?.daysSince === 'number' ? studentMetrics.daysSince : 0;
+
+    // Calculate actual peer average across all other students
+    const levelPeers = students.filter(s => s.id !== activeStudent.id && s.level === activeStudent.level);
+    const peersList = levelPeers.length > 0 ? levelPeers : students.filter(s => s.id !== activeStudent.id);
+    
+    let avg30 = 0;
+    let avg90 = 0;
+    let avgDays = 0;
+    
+    if (peersList.length > 0) {
+      let sum30 = 0;
+      let sum90 = 0;
+      let sumDays = 0;
+      
+      peersList.forEach(p => {
+        const pAtts = attendance.filter(a => a.student_id === p.id && a.status === 'present');
+        let p30 = 0;
+        let p90 = 0;
+        pAtts.forEach(a => {
+          const diffDays = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
+          if (diffDays >= 0 && diffDays <= 30) p30++;
+          if (diffDays >= 0 && diffDays <= 90) p90++;
+        });
+        const pDays = p.last_attended
+          ? Math.floor((today.getTime() - new Date(p.last_attended).getTime()) / 86400000)
+          : 365;
+        
+        sum30 += p30;
+        sum90 += p90;
+        sumDays += pDays;
+      });
+      
+      avg30 = Math.round((sum30 / peersList.length) * 10) / 10;
+      avg90 = Math.round((sum90 / peersList.length) * 10) / 10;
+      avgDays = Math.round(sumDays / peersList.length);
+    }
 
     chartInstances.current.comparison = new Chart(comparisonChartRef.current, {
       type: 'bar',
@@ -219,7 +254,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
           },
           {
             label: 'Peer average',
-            data: [2.3, 8.5, 87],
+            data: [avg30, avg90, avgDays],
             backgroundColor: '#D6D1C4',
             borderRadius: 4,
           }

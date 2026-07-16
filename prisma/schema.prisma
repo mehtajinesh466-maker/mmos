@@ -8,281 +8,273 @@ datasource db {
 }
 
 model Centre {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String         @id @default(uuid()) @db.Uuid
   name      String
-  status    String   @default("active")
-  
-  users     User[]
+  status    String         @default("active")
   coaches   Coach[]
-  students  Student[]
-  slots     ScheduleSlot[]
   enquiries Enquiry[]
+  slots     ScheduleSlot[]
+  students  Student[]
+  users     User[]
 
   @@map("centres")
 }
 
 model User {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String     @id @default(uuid()) @db.Uuid
   name      String
-  email     String   @unique
+  email     String     @unique
   password  String
-  role      String   // 'owner', 'front_desk', 'coach', 'parent'
-  centre_id String?  @db.Uuid
-  centre    Centre?  @relation(fields: [centre_id], references: [id])
-  
+  role      String
+  centre_id String?    @db.Uuid
+  auditLogs AuditLog[]
   coaches   Coach[]
   reports   Report[]
-  auditLogs AuditLog[]
+  centre    Centre?    @relation(fields: [centre_id], references: [id])
 
   @@map("users")
 }
 
 model Coach {
-  id        String   @id @default(uuid()) @db.Uuid
-  user_id   String?  @db.Uuid
-  user      User?    @relation(fields: [user_id], references: [id])
-  centre_id String?  @db.Uuid
-  centre    Centre?  @relation(fields: [centre_id], references: [id])
-  title     String?
-  active    Boolean  @default(true)
-
-  students  Student[]
-  slots     ScheduleSlot[]
-  attendance Attendance[]
+  id           String         @id @default(uuid()) @db.Uuid
+  user_id      String?        @db.Uuid
+  centre_id    String?        @db.Uuid
+  title        String?
+  active       Boolean        @default(true)
+  attendance   Attendance[]
+  centre       Centre?        @relation(fields: [centre_id], references: [id])
+  user         User?          @relation(fields: [user_id], references: [id])
   progressLogs ProgressLog[]
+  slots        ScheduleSlot[]
+  students     Student[]
 
   @@map("coaches")
 }
 
 model Family {
-  id            String   @id @default(uuid()) @db.Uuid
-  primary_name  String?
-  phone         String?
-  email         String?
-  consent_ops   Boolean  @default(true)
-  consent_mktg  Boolean  @default(false)
-  
-  students      Student[]
+  id           String    @id @default(uuid()) @db.Uuid
+  primary_name String?
+  phone        String?
+  email        String?
+  consent_ops  Boolean   @default(true)
+  consent_mktg Boolean   @default(false)
+  students     Student[]
 
   @@map("families")
 }
 
 model Student {
-  id            String   @id @default(uuid()) @db.Uuid
-  family_id     String?  @db.Uuid
-  family        Family?  @relation(fields: [family_id], references: [id])
-  centre_id     String   @db.Uuid
-  centre        Centre   @relation(fields: [centre_id], references: [id])
-  coach_id      String?  @db.Uuid
-  coach         Coach?   @relation(fields: [coach_id], references: [id])
+  id            String         @id @default(uuid()) @db.Uuid
+  family_id     String?        @db.Uuid
+  centre_id     String         @db.Uuid
+  coach_id      String?        @db.Uuid
   name          String
-  dob           DateTime? @db.Date
+  dob           DateTime?      @db.Date
   gender        String?
   school        String?
   level         String?
-  status        String   @default("active")
+  status        String         @default("active")
   fide_id       String?
   photo_url     String?
-  join_date     DateTime? @default(now()) @db.Date
-  last_attended DateTime? @db.Date
+  join_date     DateTime?      @default(now()) @db.Date
+  last_attended DateTime?      @db.Date
   pace_status   String?
   pace_reason   String?
-  flags         Json?    @default("{}")
-
-  packages      Package[]
+  flags         Json?          @default("{}")
   attendance    Attendance[]
-  progressLogs  ProgressLog[]
-  skills        StudentSkill[]
+  enrollments   Enrollment[]
   fideRatings   FideRating[]
-  reports       Report[]
   invoices      Invoice[]
   notifications Notification[]
-  enrollments   Enrollment[]
+  packages      Package[]
+  progressLogs  ProgressLog[]
+  reports       Report[]
+  skills        StudentSkill[]
+  centre        Centre         @relation(fields: [centre_id], references: [id])
+  coach         Coach?         @relation(fields: [coach_id], references: [id])
+  family        Family?        @relation(fields: [family_id], references: [id])
 
   @@map("students")
 }
 
 model Tier {
-  id         String   @id @default(uuid()) @db.Uuid
+  id         String    @id @default(uuid()) @db.Uuid
   name       String
-  price      Decimal  @db.Decimal(10,2)
-  inclusions Json?    @default("[]")
-  active     Boolean  @default(true)
-
+  price      Decimal   @db.Decimal(10, 2)
+  inclusions Json?     @default("[]")
+  active     Boolean   @default(true)
   packages   Package[]
 
   @@map("tiers")
 }
 
 model Package {
-  id                String   @id @default(uuid()) @db.Uuid
-  student_id        String   @db.Uuid
-  student           Student  @relation(fields: [student_id], references: [id])
-  tier_id           String?  @db.Uuid
-  tier              Tier?    @relation(fields: [tier_id], references: [id])
-  kind              String?  @default("new")
+  id                String    @id @default(uuid()) @db.Uuid
+  student_id        String    @db.Uuid
+  tier_id           String?   @db.Uuid
+  kind              String?   @default("new")
   classes_total     Int
   classes_remaining Int
-  discount_pct      Decimal? @default(0) @db.Decimal(5,2)
-  frozen            Boolean? @default(false)
+  discount_pct      Decimal?  @default(0) @db.Decimal(5, 2)
+  frozen            Boolean?  @default(false)
   start_date        DateTime? @default(now()) @db.Date
   expiry_date       DateTime? @db.Date
-
   invoices          Invoice[]
+  student           Student   @relation(fields: [student_id], references: [id])
+  tier              Tier?     @relation(fields: [tier_id], references: [id])
 
   @@map("packages")
 }
 
 model ScheduleSlot {
-  id        String   @id @default(uuid()) @db.Uuid
-  centre_id String   @db.Uuid
-  centre    Centre   @relation(fields: [centre_id], references: [id])
-  coach_id  String   @db.Uuid
-  coach     Coach    @relation(fields: [coach_id], references: [id])
-  day       String
-  time      String
-  level     String
-  capacity  Int      @default(10)
-
-  attendance Attendance[]
+  id          String       @id @default(uuid()) @db.Uuid
+  centre_id   String       @db.Uuid
+  coach_id    String       @db.Uuid
+  day         String
+  time        String
+  level       String
+  capacity    Int          @default(10)
+  attendance  Attendance[]
   enrollments Enrollment[]
+  centre      Centre       @relation(fields: [centre_id], references: [id])
+  coach       Coach        @relation(fields: [coach_id], references: [id])
 
   @@map("schedule_slots")
 }
 
 model Enrollment {
-  id         String   @id @default(uuid()) @db.Uuid
-  student_id String   @db.Uuid
-  student    Student  @relation(fields: [student_id], references: [id])
-  slot_id    String   @db.Uuid
-  slot       ScheduleSlot @relation(fields: [slot_id], references: [id])
-  enrolled_at DateTime @default(now()) @db.Timestamptz
+  id          String       @id @default(uuid()) @db.Uuid
+  student_id  String       @db.Uuid
+  slot_id     String       @db.Uuid
+  enrolled_at DateTime     @default(now()) @db.Timestamptz(6)
+  slot        ScheduleSlot @relation(fields: [slot_id], references: [id])
+  student     Student      @relation(fields: [student_id], references: [id])
 
   @@map("enrollments")
 }
 
 model Attendance {
-  id         String   @id @default(uuid()) @db.Uuid
-  student_id String   @db.Uuid
-  student    Student  @relation(fields: [student_id], references: [id])
-  slot_id    String?  @db.Uuid
-  slot       ScheduleSlot? @relation(fields: [slot_id], references: [id])
-  coach_id   String   @db.Uuid
-  coach      Coach    @relation(fields: [coach_id], references: [id])
-  date       DateTime @default(now()) @db.Date
+  id         String        @id @default(uuid()) @db.Uuid
+  student_id String        @db.Uuid
+  slot_id    String?       @db.Uuid
+  coach_id   String        @db.Uuid
+  date       DateTime      @default(now()) @db.Date
   status     String
   topic      String?
   note       String?
-  created_at DateTime? @default(now()) @db.Timestamptz
+  created_at DateTime?     @default(now()) @db.Timestamptz(6)
+  coach      Coach         @relation(fields: [coach_id], references: [id])
+  slot       ScheduleSlot? @relation(fields: [slot_id], references: [id])
+  student    Student       @relation(fields: [student_id], references: [id])
 
   @@map("attendance")
 }
 
 model ProgressLog {
-  id         String   @id @default(uuid()) @db.Uuid
-  student_id String   @db.Uuid
-  student    Student  @relation(fields: [student_id], references: [id])
-  coach_id   String   @db.Uuid
-  coach      Coach    @relation(fields: [coach_id], references: [id])
+  id         String    @id @default(uuid()) @db.Uuid
+  student_id String    @db.Uuid
+  coach_id   String    @db.Uuid
   date       DateTime? @default(now()) @db.Date
-  focus_area String?
-  evaluation Int?
   skills     Json?
+  evaluation Int?
+  focus_area String?
   notes      String?
+  coach      Coach     @relation(fields: [coach_id], references: [id])
+  student    Student   @relation(fields: [student_id], references: [id])
 
   @@map("progress_logs")
 }
 
 model StudentSkill {
   student_id String  @db.Uuid
-  student    Student @relation(fields: [student_id], references: [id])
   skill      String
   value      Int?
+  student    Student @relation(fields: [student_id], references: [id])
 
   @@id([student_id, skill])
   @@map("student_skills")
 }
 
 model FideRating {
-  id         String   @id @default(uuid()) @db.Uuid
-  student_id String?  @db.Uuid
-  student    Student? @relation(fields: [student_id], references: [id])
+  id         String    @id @default(uuid()) @db.Uuid
+  student_id String?   @db.Uuid
   date       DateTime? @db.Date
   rating     Int?
+  student    Student?  @relation(fields: [student_id], references: [id])
 
   @@map("fide_ratings")
 }
 
 model Enquiry {
-  id         String   @id @default(uuid()) @db.Uuid
+  id         String    @id @default(uuid()) @db.Uuid
   child      String?
-  age        String?
   parent     String?
   phone      String?
   source     String?
-  stage      String?  @default("new")
-  centre_id  String?  @db.Uuid
-  centre     Centre?  @relation(fields: [centre_id], references: [id])
-  experience String?
+  stage      String?   @default("new")
+  centre_id  String?   @db.Uuid
   trial_date DateTime? @db.Date
-  coach_id   String?  @db.Uuid
+  age        String?
+  coach_id   String?   @db.Uuid
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  experience String?
   notes      String?
-  created_at DateTime? @default(now()) @db.Timestamptz
+  centre     Centre?   @relation(fields: [centre_id], references: [id])
 
   @@map("enquiries")
 }
 
 model Report {
-  id          String   @id @default(uuid()) @db.Uuid
-  student_id  String?  @db.Uuid
-  student     Student? @relation(fields: [student_id], references: [id])
+  id          String    @id @default(uuid()) @db.Uuid
+  student_id  String?   @db.Uuid
   period      String?
-  status      String?  @default("draft")
+  status      String?   @default("draft")
   pdf_url     String?
-  approved_by String?  @db.Uuid
-  approver    User?    @relation(fields: [approved_by], references: [id])
-  created_at  DateTime? @default(now()) @db.Timestamptz
+  approved_by String?   @db.Uuid
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+  approver    User?     @relation(fields: [approved_by], references: [id])
+  student     Student?  @relation(fields: [student_id], references: [id])
 
   @@map("reports")
 }
 
 model Invoice {
-  id             String   @id @default(uuid()) @db.Uuid
-  package_id     String?  @db.Uuid
-  package        Package? @relation(fields: [package_id], references: [id])
-  student_id     String?  @db.Uuid
-  student        Student? @relation(fields: [student_id], references: [id])
-  amount         Decimal? @db.Decimal(10,2)
-  vat            Decimal? @db.Decimal(10,2)
+  id             String    @id @default(uuid()) @db.Uuid
+  package_id     String?   @db.Uuid
+  student_id     String?   @db.Uuid
+  amount         Decimal?  @db.Decimal(10, 2)
+  vat            Decimal?  @db.Decimal(10, 2)
   method         String?
   settlement_ref String?
-  status         String?  @default("unpaid")
-  created_at     DateTime? @default(now()) @db.Timestamptz
+  status         String?   @default("unpaid")
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  package        Package?  @relation(fields: [package_id], references: [id])
+  student        Student?  @relation(fields: [student_id], references: [id])
 
   @@map("invoices")
 }
 
 model AuditLog {
-  id         String   @id @default(uuid()) @db.Uuid
-  actor_id   String?  @db.Uuid @map("actor")
-  actor      User?    @relation(fields: [actor_id], references: [id])
-  action     String?
-  entity     String?
-  before     Json?
-  after      Json?
-  at         DateTime? @default(now()) @db.Timestamptz
+  id       String    @id @default(uuid()) @db.Uuid
+  actor_id String?   @map("actor") @db.Uuid
+  action   String?
+  entity   String?
+  before   Json?
+  after    Json?
+  at       DateTime? @default(now()) @db.Timestamptz(6)
+  actor    User?     @relation(fields: [actor_id], references: [id])
 
   @@map("audit_log")
 }
 
 model Notification {
-  id         String   @id @default(uuid()) @db.Uuid
-  student_id String?  @db.Uuid
-  student    Student? @relation(fields: [student_id], references: [id])
+  id         String    @id @default(uuid()) @db.Uuid
+  student_id String?   @db.Uuid
   type       String?
   channel    String?
   status     String?
-  sent_at    DateTime? @db.Timestamptz
+  sent_at    DateTime? @db.Timestamptz(6)
+  student    Student?  @relation(fields: [student_id], references: [id])
 
   @@map("notifications")
 }

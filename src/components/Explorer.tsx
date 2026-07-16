@@ -22,6 +22,7 @@ export const Explorer: React.FC = () => {
   const [packages, setPackages] = useState<Package[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
+  const [centres, setCentres] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Chart ref
@@ -33,6 +34,7 @@ export const Explorer: React.FC = () => {
     setPackages(db.getPackages());
     setAttendance(db.getAttendance());
     setCoaches(db.getCoaches());
+    setCentres(db.getCentres());
     setLoading(false);
   };
 
@@ -44,15 +46,17 @@ export const Explorer: React.FC = () => {
 
   // Filter students based on active slices
   const filteredStudents = useMemo(() => {
+    const bayCentreId = centres.find(c => c.name === 'Bay Avenue')?.id || 'c-1';
+    const jltCentreId = centres.find(c => c.name === 'JLT')?.id || 'c-2';
     return students.filter(s => {
       // Centre slice
       if (filterCentre !== 'All') {
-        const targetId = filterCentre === 'JLT' ? 'c-2' : 'c-1';
+        const targetId = filterCentre === 'JLT' ? jltCentreId : bayCentreId;
         if (s.centre_id !== targetId) return false;
       }
       // Top bar centre selector
       if (selectedCentre !== 'All') {
-        const targetId = selectedCentre === 'JLT' ? 'c-2' : 'c-1';
+        const targetId = selectedCentre === 'JLT' ? jltCentreId : bayCentreId;
         if (s.centre_id !== targetId) return false;
       }
       if (filterCoach !== 'All' && s.coach_id !== filterCoach) return false;
@@ -60,16 +64,17 @@ export const Explorer: React.FC = () => {
       if (filterEngagement !== 'All' && s.engagement_status !== filterEngagement) return false;
       return true;
     });
-  }, [students, filterCentre, filterCoach, filterSegment, filterEngagement, selectedCentre]);
+  }, [students, filterCentre, filterCoach, filterSegment, filterEngagement, selectedCentre, centres]);
 
   // Compute metrics grouped by dice dimension
   const computedData = useMemo(() => {
     const groups: { [key: string]: { runRate: number; students: number; unbilled: number } } = {};
 
     filteredStudents.forEach(s => {
+      const jltCentreId = centres.find(c => c.name === 'JLT')?.id || 'c-2';
       let groupKey = '';
       if (diceBy === 'By Centre') {
-        groupKey = s.centre_id === 'c-2' ? 'JLT' : 'Bay Avenue';
+        groupKey = s.centre_id === jltCentreId ? 'JLT' : 'Bay Avenue';
       } else if (diceBy === 'By Coach') {
         const coach = coaches.find(c => c.id === s.coach_id);
         groupKey = coach ? coach.name : 'Unassigned';

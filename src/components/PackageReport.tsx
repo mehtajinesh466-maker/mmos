@@ -47,6 +47,9 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
     if (stds.length > 0 && !selectedStudentId) {
       if (queryStudentId && stds.some(s => s.id === queryStudentId)) {
         setSelectedStudentId(queryStudentId);
+      } else if (currentUser.role === 'parent') {
+        const parentChild = stds.find(s => s.id === 's-alex-sterling-id') || stds[0];
+        setSelectedStudentId(parentChild.id);
       } else {
         setSelectedStudentId(stds[0].id);
       }
@@ -73,7 +76,15 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
     }
   }, [queryStudentId]);
 
-  const activeStudent = students.find(s => s.id === selectedStudentId);
+  const activeStudentId = useMemo(() => {
+    if (currentUser.role === 'parent') {
+      const alex = students.find(s => s.id === 's-alex-sterling-id') || students[0];
+      return alex ? alex.id : '';
+    }
+    return selectedStudentId;
+  }, [currentUser, students, selectedStudentId]);
+
+  const activeStudent = students.find(s => s.id === activeStudentId);
 
   const getCoachName = (coachId: string | null) => {
     if (!coachId) return 'Unassigned';
@@ -147,17 +158,18 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
     }
 
     const months = ['Feb-25', 'Mar-25', 'Apr-25', 'May-25', 'Jun-25', 'Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26'];
-    const isAadi = activeStudent.name.toLowerCase().includes('aadi');
-    const hash = activeStudent.name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const getMonthLabel = (dateStr: string) => {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      const m = monthNames[d.getMonth()];
+      const y = d.getFullYear().toString().slice(-2);
+      return `${m}-${y}`;
+    };
 
-    const trendData = months.map((m, idx) => {
-      if (isAadi) {
-        const aadiMock: { [key: string]: number } = {
-          'Feb-25': 2, 'Mar-25': 2, 'Apr-25': 1, 'May-25': 3, 'Jun-25': 4, 'Jul-25': 12, 'Aug-25': 1, 'Sep-25': 4, 'Oct-25': 11, 'Nov-25': 3, 'Dec-25': 5, 'Jan-26': 3, 'Feb-26': 0, 'Mar-26': 2, 'Apr-26': 0, 'May-26': 2, 'Jun-26': 2
-        };
-        return aadiMock[m] ?? 0;
-      }
-      return (hash + idx) % 5;
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && a.status === 'present');
+    const trendData = months.map(m => {
+      return studentAtts.filter(a => getMonthLabel(a.date) === m).length;
     });
 
     chartInstance.current = new Chart(trendChartRef.current, {
@@ -289,18 +301,27 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
       {/* Filter Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-surface border border-line rounded-xl p-3.5 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-bold text-muted-custom uppercase">STUDENT</span>
-          <select 
-            value={selectedStudentId} 
-            onChange={e => handleStudentChange(e.target.value)}
-            className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none w-56"
-          >
-            {students.filter(s => activeCentre === 'All' || s.centre_id === activeCentre).map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+          {currentUser.role !== 'parent' && (
+            <>
+              <span className="text-[10px] font-bold text-muted-custom uppercase">STUDENT</span>
+              <select 
+                value={selectedStudentId} 
+                onChange={e => handleStudentChange(e.target.value)}
+                className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none w-56"
+              >
+                {students.filter(s => activeCentre === 'All' || s.centre_id === activeCentre).map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </>
+          )}
+          {currentUser.role === 'parent' && activeStudent && (
+            <div className="text-xs text-muted-custom font-semibold">
+              Student: <b className="text-ink">{activeStudent.name}</b>
+            </div>
+          )}
 
-          <select 
+        <select 
             value={filterCentre}
             onChange={e => setFilterCentre(e.target.value)}
             className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none"

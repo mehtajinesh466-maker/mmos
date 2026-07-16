@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Chart, registerables } from 'chart.js';
 import { db } from '../lib/db';
 import type { Student, Package, Attendance, Coach } from '../lib/db';
+import { exportTableToCSV, exportToPDF } from '../lib/export';
 
 Chart.register(...registerables);
 
@@ -29,6 +30,8 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
   const [packages, setPackages] = useState<Package[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [centres, setCentres] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Chart ref
@@ -40,6 +43,8 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
     setPackages(db.getPackages());
     setAttendance(db.getAttendance());
     setCoaches(db.getCoaches());
+    setCentres(db.getCentres());
+    setInvoices(db.get<any>('invoices') || []);
     setLoading(false);
   };
 
@@ -84,21 +89,46 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
 
   // Dynamic filter function
   const filteredStudents = useMemo(() => {
-    return students.filter(s => {
-      if (filterCentre !== 'All' && s.centre_id !== (filterCentre === 'JLT' ? 'c-2' : 'c-1')) return false;
+    return students.map(s => {
+      // Enrich student first
+      const studentInvs = invoices.filter(i => i.student_id === s.id && i.status === 'paid');
+      const totalPaidVal = studentInvs.reduce((sum, inv) => sum + Number(inv.amount), 0);
+      
+      const today = new Date();
+      const daysSince = s.last_attended
+        ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000)
+        : 999;
+      
+      const engagement = daysSince <= 14 ? 'Engaged'
+        : daysSince <= 30 ? 'Slipping'
+        : daysSince <= 60 ? 'Cold'
+        : 'Dormant';
+
+      const segment = (s.flags?.low_package) ? 'HOT' : 'HEALTHY';
+
+      return {
+        ...s,
+        total_paid: totalPaidVal,
+        segment,
+        engagement_status: engagement
+      };
+    }).filter(s => {
+      const bayCentreId = centres.find(c => c.name === 'Bay Avenue')?.id || 'c-1';
+      const jltCentreId = centres.find(c => c.name === 'JLT')?.id || 'c-2';
+      if (filterCentre !== 'All' && s.centre_id !== (filterCentre === 'JLT' ? jltCentreId : bayCentreId)) return false;
       if (filterSegment !== 'All' && s.segment !== filterSegment) return false;
       if (filterEngagement !== 'All' && s.engagement_status !== filterEngagement) return false;
       if (filterLevel !== 'All' && s.level !== filterLevel) return false;
       if (filterCoach !== 'All' && s.coach_id !== filterCoach) return false;
       return true;
     });
-  }, [students, filterCentre, filterSegment, filterEngagement, filterLevel, filterCoach]);
+  }, [students, invoices, filterCentre, filterSegment, filterEngagement, filterLevel, filterCoach]);
 
   // Compute stats and groupings based on reportId
   const reportData = useMemo(() => {
-    let kpi1 = { label: 'Active Students', val: filteredStudents.length };
-    let kpi2 = { label: 'Average LTV', val: 'AED 3,240' };
-    let kpi3 = { label: 'Unbilled Value', val: 'AED 12,400' };
+    let kpi1 = { label: 'Active Students', val: filteredStudents.length.toString() };
+    let kpi2 = { label: 'Average LTV', val: 'AED 0' };
+    let kpi3 = { label: 'Unbilled Value', val: 'AED 0' };
 
     // Grouping dimension values
     const groups: { [key: string]: number } = {};
@@ -117,13 +147,10 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       }
       
       if (reportId.includes('revenue') || reportId.includes('ltv') || reportId.includes('economics')) {
-        // sum student lifetime paid or run-rate
-        groups[groupKey] = (groups[groupKey] || 0) + (s.total_paid || 1800);
-      } else if (reportId.includes('unbilled') || reportId.includes('leak')) {
-        const studentPkgs = packages.filter(p => p.student_id === s.id && p.classes_remaining === 0);
-        groups[groupKey] = (groups[groupKey] || 0) + (studentPkgs.length * 150); // AED 150 per class
+        groups[groupKey] = (groups[groupKey] || 0) + s.total_paid;
+      } else if (reportId.includes('unbilled') || reportId.includes('leak') || reportId.includes('reconciliation')) {
+        groups[groupKey] = (groups[groupKey] || 0) + ((s.flags as any)?.unpaid_value || 0);
       } else {
-        // default student count
         groups[groupKey] = (groups[groupKey] || 0) + 1;
       }
     });
@@ -132,17 +159,46 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
     if (reportId.includes('revenue') || reportId.includes('economics') || reportId.includes('rate-card')) {
       const totalRev = Object.values(groups).reduce((a, b) => a + b, 0);
       kpi1 = { label: 'Total Revenue Tracked', val: `AED ${totalRev.toLocaleString()}` };
-      kpi2 = { label: 'Avg Monthly Run-rate', val: `AED ${(totalRev / 12).toFixed(0)}` };
-      kpi3 = { label: 'Avg Rate per Class', val: 'AED 125' };
+      
+      const runRate = packages.filter(p => p.classes_remaining > 0 && filteredStudents.some(s => s.id === p.student_id)).reduce((sum, p) => {
+        const t = db.getTiers().find(tier => tier.id === p.tier_id);
+        return sum + (t ? t.price : 1000);
+      }, 0);
+      kpi2 = { label: 'Avg Monthly Run-rate', val: `AED ${runRate.toLocaleString()}` };
+      
+      const totalInvoiced = invoices.filter(i => filteredStudents.some(s => s.id === i.student_id));
+      const totalInvoiceAmt = totalInvoiced.reduce((sum, i) => sum + Number(i.amount), 0);
+      const totalClassesTaught = attendance.filter(a => a.status === 'present' && filteredStudents.some(s => s.id === a.student_id)).length;
+      const avgRate = totalClassesTaught > 0 ? Math.round(totalInvoiceAmt / totalClassesTaught) : 125;
+      kpi3 = { label: 'Avg Rate per Class', val: `AED ${avgRate}` };
     } else if (reportId.includes('unbilled') || reportId.includes('leak') || reportId.includes('reconciliation')) {
-      const totalUnbilled = Object.values(groups).reduce((a, b) => a + b, 0);
+      const totalUnbilled = filteredStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
+      const classesCount = filteredStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_classes || 0), 0);
       kpi1 = { label: 'Unbilled Value Ledger', val: `AED ${totalUnbilled.toLocaleString()}` };
-      kpi2 = { label: 'Unbilled Classes', val: `${Math.round(totalUnbilled / 150)} classes` };
-      kpi3 = { label: 'Revenue Leak Rate', val: '12%' };
+      kpi2 = { label: 'Unbilled Classes', val: `${classesCount} classes` };
+      
+      const totalInvoiceAmt = invoices.filter(i => filteredStudents.some(s => s.id === i.student_id)).reduce((sum, i) => sum + Number(i.amount), 0);
+      const leakRate = totalInvoiceAmt > 0 ? Math.round((totalUnbilled / (totalInvoiceAmt + totalUnbilled)) * 100) : 0;
+      kpi3 = { label: 'Revenue Leak Rate', val: `${leakRate}%` };
     } else if (reportId.includes('attendance') || reportId.includes('engagement') || reportId.includes('slow')) {
-      kpi1 = { label: 'Students in Scope', val: filteredStudents.length };
-      kpi2 = { label: 'Average Attendance Rate', val: '86%' };
-      kpi3 = { label: 'Slipping Students', val: filteredStudents.filter(s => s.engagement_status === 'Slipping').length.toString() };
+      kpi1 = { label: 'Students in Scope', val: filteredStudents.length.toString() };
+      
+      const scopeAtts = attendance.filter(a => filteredStudents.some(s => s.id === a.student_id));
+      const presentCount = scopeAtts.filter(a => a.status === 'present').length;
+      const totalLogs = scopeAtts.length;
+      const attRate = totalLogs > 0 ? Math.round((presentCount / totalLogs) * 100) : 100;
+      kpi2 = { label: 'Average Attendance Rate', val: `${attRate}%` };
+      
+      const slippingCount = filteredStudents.filter(s => s.engagement_status === 'Slipping').length;
+      kpi3 = { label: 'Slipping Students', val: `${slippingCount}` };
+    } else {
+      const totalPaidSum = filteredStudents.reduce((sum, s) => sum + s.total_paid, 0);
+      const avgLtvVal = filteredStudents.length > 0 ? Math.round(totalPaidSum / filteredStudents.length) : 0;
+      kpi1 = { label: 'Active Students', val: filteredStudents.length.toString() };
+      kpi2 = { label: 'Average LTV', val: `AED ${avgLtvVal.toLocaleString()}` };
+      
+      const totalUnbilled = filteredStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
+      kpi3 = { label: 'Unbilled Value', val: `AED ${totalUnbilled.toLocaleString()}` };
     }
 
     const labels = Object.keys(groups);
@@ -171,7 +227,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         };
       })
     };
-  }, [filteredStudents, reportId, diceBy, coaches, packages]);
+  }, [filteredStudents, reportId, diceBy, coaches, packages, invoices, attendance]);
 
   // Draw Chart
   const drawChart = () => {
@@ -228,13 +284,33 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
     return <div className="p-10 text-center text-muted-custom">Loading Report Data...</div>;
   }
 
+  const handleExcelDownload = () => {
+    const tableEl = document.querySelector('table');
+    if (tableEl && chartType === 'table') {
+      exportTableToCSV('table', `${reportId}_report.csv`);
+    } else {
+      let csvContent = "data:text/csv;charset=utf-8,";
+      csvContent += "Category,Value\n";
+      Object.entries(reportData.groups).forEach(([key, val]) => {
+        csvContent += `"${key}",${val}\n`;
+      });
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `${reportId}_report.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
   return (
     <div className="p-6 max-w-7xl mx-auto w-full space-y-6 text-ink">
       
       {/* Back navigation */}
       <button 
         onClick={() => router.push('/reports-centre')}
-        className="text-xs font-semibold text-forest hover:text-emerald-700 flex items-center gap-1.5 transition-colors"
+        className="text-xs font-semibold text-forest hover:text-emerald-700 flex items-center gap-1.5 transition-colors no-print"
       >
         ← Back to Reports Centre
       </button>
@@ -248,9 +324,19 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           <h1 className="text-2xl font-bold font-display text-ink mt-0.5">{reportInfo.title}</h1>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">↓ Excel</button>
-          <button className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">⎙ PDF</button>
+        <div className="flex items-center gap-2 no-print">
+          <button 
+            onClick={handleExcelDownload}
+            className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas"
+          >
+            ↓ Excel
+          </button>
+          <button 
+            onClick={exportToPDF}
+            className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas"
+          >
+            ⎙ PDF
+          </button>
         </div>
       </div>
 
@@ -259,7 +345,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       </p>
 
       {/* Slice & Dice Toolbar */}
-      <div className="bg-surface border border-line rounded-[14px] p-3.5 shadow-sm flex flex-wrap gap-4 items-center justify-between">
+      <div className="bg-surface border border-line rounded-[14px] p-3.5 shadow-sm flex flex-wrap gap-4 items-center justify-between no-print">
         
         {/* Slices */}
         <div className="flex flex-wrap gap-2.5 items-center text-xs">

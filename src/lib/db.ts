@@ -151,6 +151,7 @@ function initStorage() {
     localStorage.setItem('mmos_progress_logs', JSON.stringify([]));
     localStorage.setItem('mmos_audit_log', JSON.stringify([]));
     localStorage.setItem('mmos_enquiries', JSON.stringify([]));
+    localStorage.setItem('mmos_invoices', JSON.stringify([]));
     localStorage.setItem('mmos_offline_queue', JSON.stringify([]));
     localStorage.setItem('mmos_initialized', 'true');
   }
@@ -169,6 +170,7 @@ export const db = {
     if (data.packages) this.save('packages', data.packages);
     if (data.scheduleSlots) this.save('schedule_slots', data.scheduleSlots);
     if (data.attendance) this.save('attendance', data.attendance);
+    if (data.invoices) this.save('invoices', data.invoices);
     window.dispatchEvent(new Event('db-synced'));
   },
   // Helper loaders & savers

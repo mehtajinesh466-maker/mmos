@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/db';
 import type { User, Coach, Centre, Student } from '../lib/db';
 import {
-  addCoachDB, updateCoachDB, reassignCoachDB,
+  addCoachDB, updateCoachDB, reassignCoachDB, deleteCoachDB,
   saveCentreDB, updateCentreStatusDB, deleteCentreDB,
   syncDatabaseToClient
 } from '../app/actions';
@@ -38,7 +38,7 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
   const [coachCentres, setCoachCentres] = useState<Record<string, string>>({});
 
   const refresh = () => {
-    const c = db.getCoaches();
+    const c = db.getCoaches().filter(ch => ch.active);
     const ct = db.getCentres();
     const s = db.getStudents();
     setCoaches(c);
@@ -142,6 +142,17 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
       toast('❌ ' + err.message);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleDeleteCoach = async (coachId: string) => {
+    try {
+      await deleteCoachDB(coachId);
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      toast('✓ Coach archived.');
+    } catch (err: any) {
+      toast('❌ ' + err.message);
     }
   };
 
@@ -351,12 +362,13 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
                     <th className="text-right text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 px-3">Engaged</th>
                     <th className="text-right text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 px-3">Cls 30D</th>
                     <th className="text-right text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 px-3">Run-Rate</th>
+                    <th className="py-2.5 px-3"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {coaches.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-xs text-muted-custom">No coaches found. Add one above.</td>
+                      <td colSpan={8} className="py-8 text-center text-xs text-muted-custom">No coaches found. Add one above.</td>
                     </tr>
                   ) : coaches.map(coach => {
                     const stats = coachStats.find(s => s.coachId === coach.id) || { students: 0, engaged: 0, cls30d: 0, runRate: 0 };
@@ -382,7 +394,7 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
                         </td>
                         <td className="py-3 px-3">
                           <select
-                            value={coachCentres[coach.id] || coach.centre_id}
+                             value={coachCentres[coach.id] || coach.centre_id}
                             onChange={e => setCoachCentres(prev => ({ ...prev, [coach.id]: e.target.value }))}
                             className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
                           >
@@ -393,6 +405,14 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
                         <td className="py-3 px-3 text-right font-mono text-xs text-ink">{stats.engaged}</td>
                         <td className="py-3 px-3 text-right font-mono text-xs text-ink">{stats.cls30d}</td>
                         <td className="py-3 px-3 text-right font-mono text-xs text-ink">{formatAED(stats.runRate)}</td>
+                        <td className="py-3 px-3 text-right">
+                          <button
+                            onClick={() => handleDeleteCoach(coach.id)}
+                            className="w-6 h-6 flex items-center justify-center rounded border border-red-200 text-hot-custom text-xs hover:bg-red-50"
+                          >
+                            ×
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}

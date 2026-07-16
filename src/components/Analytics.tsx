@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Chart, registerables } from 'chart.js';
 import { db } from '../lib/db';
 
@@ -13,6 +13,33 @@ interface AnalyticsProps {
 
 export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'builder'>('dashboard');
+
+  const [students, setStudents] = useState<any[]>([]);
+  const [packages, setPackages] = useState<any[]>([]);
+  const [attendance, setAttendance] = useState<any[]>([]);
+  const [coaches, setCoaches] = useState<any[]>([]);
+  const [centres, setCentres] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const bayCentreId = useMemo(() => centres.find(c => c.name === 'Bay Avenue')?.id || 'c-1', [centres]);
+  const jltCentreId = useMemo(() => centres.find(c => c.name === 'JLT')?.id || 'c-2', [centres]);
+
+  const loadData = () => {
+    setStudents(db.getStudents());
+    setPackages(db.getPackages());
+    setAttendance(db.getAttendance());
+    setCoaches(db.getCoaches());
+    setCentres(db.getCentres());
+    setInvoices(db.get<any>('invoices') || []);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadData();
+    window.addEventListener('db-synced', loadData);
+    return () => window.removeEventListener('db-synced', loadData);
+  }, []);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -66,18 +93,47 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
       drawBuilderCharts();
     }
     return () => destroyCharts();
-  }, [activeTab, filterCentre, filterSegment, filterEngagement, filterLevel, diceBy, chartType, selectedMeasures]);
+  }, [activeTab, filterCentre, filterSegment, filterEngagement, filterLevel, diceBy, chartType, selectedMeasures, loading]);
+
+  const filteredStudents = useMemo(() => {
+    return students.filter(s => {
+      if (filterCentre !== 'All' && s.centre_id !== (filterCentre === 'JLT' ? jltCentreId : bayCentreId)) return false;
+      if (filterLevel !== 'All' && s.level !== filterLevel) return false;
+      
+      // Filter segment
+      if (filterSegment !== 'All') {
+        const heat = (s.flags?.low_package) ? 'HOT' : 'HEALTHY';
+        if (heat !== filterSegment) return false;
+      }
+      
+      // Filter engagement
+      if (filterEngagement !== 'All') {
+        const today = new Date();
+        const daysSince = s.last_attended
+          ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000)
+          : 999;
+        const engStatus = daysSince <= 14 ? 'Engaged' : daysSince <= 30 ? 'Slipping' : 'Dormant';
+        if (engStatus.toLowerCase() !== filterEngagement.toLowerCase()) return false;
+      }
+      return true;
+    });
+  }, [students, filterCentre, filterSegment, filterEngagement, filterLevel]);
 
   const drawDashboardCharts = () => {
+    if (loading) return;
+
     // 1. Students by Centre Chart
     if (studentsChartRef.current) {
+      const bayCount = filteredStudents.filter(s => s.centre_id === bayCentreId).length;
+      const jltCount = filteredStudents.filter(s => s.centre_id === jltCentreId).length;
+
       chartInstances.current.students = new Chart(studentsChartRef.current, {
         type: 'bar',
         data: {
           labels: ['Bay Avenue', 'JLT'],
           datasets: [{
             label: 'Students',
-            data: [248, 114],
+            data: [bayCount, jltCount],
             backgroundColor: ['#286957', '#C4A249'],
             borderWidth: 0
           }]
@@ -96,19 +152,33 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
 
     // 2. Enrolments per month Chart
     if (enrolmentsChartRef.current) {
+      const monthsLabels = ['2025-08', '2025-09', '2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'];
+      const bayData = monthsLabels.map(mLabel => {
+        return filteredStudents.filter(s => {
+          const joinMonth = s.join_date ? new Date(s.join_date).toISOString().slice(0, 7) : '';
+          return joinMonth === mLabel && s.centre_id === bayCentreId;
+        }).length;
+      });
+      const jltData = monthsLabels.map(mLabel => {
+        return filteredStudents.filter(s => {
+          const joinMonth = s.join_date ? new Date(s.join_date).toISOString().slice(0, 7) : '';
+          return joinMonth === mLabel && s.centre_id === jltCentreId;
+        }).length;
+      });
+
       chartInstances.current.enrolments = new Chart(enrolmentsChartRef.current, {
         type: 'bar',
         data: {
-          labels: ['2025-08', '2025-09', '2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'],
+          labels: monthsLabels,
           datasets: [
             {
               label: 'Bay Avenue',
-              data: [12, 14, 11, 15, 10, 13, 11, 9, 12, 8, 9, 6],
+              data: bayData,
               backgroundColor: '#286957'
             },
             {
               label: 'JLT',
-              data: [6, 8, 5, 9, 4, 7, 6, 5, 8, 4, 7, 8],
+              data: jltData,
               backgroundColor: '#9DDDCB'
             }
           ]
@@ -127,6 +197,11 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
 
     // 3. Centre comparison Chart
     if (comparisonChartRef.current) {
+      const activeBay = filteredStudents.filter(s => s.status === 'active' && s.centre_id === bayCentreId).length;
+      const activeJlt = filteredStudents.filter(s => s.status === 'active' && s.centre_id === jltCentreId).length;
+      const inactiveBay = filteredStudents.filter(s => s.status === 'inactive' && s.centre_id === bayCentreId).length;
+      const inactiveJlt = filteredStudents.filter(s => s.status === 'inactive' && s.centre_id === jltCentreId).length;
+
       chartInstances.current.comparison = new Chart(comparisonChartRef.current, {
         type: 'bar',
         data: {
@@ -134,12 +209,12 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
           datasets: [
             {
               label: 'Active',
-              data: [97, 52],
+              data: [activeBay, activeJlt],
               backgroundColor: '#286957'
             },
             {
               label: 'Inactive',
-              data: [151, 62],
+              data: [inactiveBay, inactiveJlt],
               backgroundColor: '#E4DFD2'
             }
           ]
@@ -158,7 +233,14 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
   };
 
   const drawBuilderCharts = () => {
-    if (!builderChartRef.current) return;
+    if (!builderChartRef.current || loading) return;
+
+    const bayRev = invoices
+      .filter(i => i.status === 'paid' && filteredStudents.some(s => s.id === i.student_id) && students.find(s => s.id === i.student_id)?.centre_id === bayCentreId)
+      .reduce((sum, i) => sum + Number(i.amount), 0);
+    const jltRev = invoices
+      .filter(i => i.status === 'paid' && filteredStudents.some(s => s.id === i.student_id) && students.find(s => s.id === i.student_id)?.centre_id === jltCentreId)
+      .reduce((sum, i) => sum + Number(i.amount), 0);
 
     chartInstances.current.builder = new Chart(builderChartRef.current, {
       type: 'bar',
@@ -166,7 +248,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
         labels: ['Bay Avenue', 'JLT'],
         datasets: [{
           label: 'Revenue (AED)',
-          data: [63432, 28156],
+          data: [bayRev, jltRev],
           backgroundColor: '#286957'
         }]
       },
@@ -181,6 +263,95 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
       }
     });
   };
+
+  // Variables calculated from database
+  const totalStudents = students.length;
+  
+  const activeStudentsCount = students.filter(s => {
+    if (!s.last_attended) return false;
+    const diff = Math.floor((new Date().getTime() - new Date(s.last_attended).getTime()) / 86400000);
+    return diff >= 0 && diff <= 30 && s.status === 'active';
+  }).length;
+  
+  const activePercent = totalStudents > 0 ? Math.round((activeStudentsCount / totalStudents) * 100) : 0;
+
+  const activePackages = packages.filter(p => p.classes_remaining > 0);
+  
+  const getPackagePrice = (pkg: any) => {
+    const tiersList = db.getTiers();
+    const t = tiersList.find(tier => tier.id === pkg.tier_id);
+    return t ? Number(t.price) : 1000;
+  };
+
+  const totalRunrate = activePackages.reduce((sum, p) => sum + getPackagePrice(p), 0);
+  const runRateK = (totalRunrate / 1000).toFixed(0);
+
+  const totalUnbilled = students.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
+  const unbilledK = (totalUnbilled / 1000).toFixed(0);
+  const unbilledClasses = students.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_classes || 0), 0);
+
+  const currentMonthStr = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+  const newEnrolmentsThisMonth = students.filter(s => s.join_date && new Date(s.join_date).toISOString().slice(0, 7) === currentMonthStr).length;
+  
+  const prevMonthDate = new Date();
+  prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+  const prevMonthStr = prevMonthDate.toISOString().slice(0, 7);
+  const newEnrolmentsPrevMonth = students.filter(s => s.join_date && new Date(s.join_date).toISOString().slice(0, 7) === prevMonthStr).length;
+
+  const totalCollected = invoices.filter(i => i.status === 'paid').reduce((sum, i) => sum + Number(i.amount), 0);
+  const totalCollectedM = (totalCollected / 1000000).toFixed(2);
+
+  // Bay Avenue metrics
+  const bayStudents = students.filter(s => s.centre_id === bayCentreId);
+  const activeBay = bayStudents.filter(s => {
+    if (!s.last_attended) return false;
+    const diff = Math.floor((new Date().getTime() - new Date(s.last_attended).getTime()) / 86400000);
+    return diff >= 0 && diff <= 30 && s.status === 'active';
+  }).length;
+  const activeRateBay = bayStudents.length > 0 ? Math.round((activeBay / bayStudents.length) * 100) : 0;
+  const bayClasses30d = attendance.filter(a => a.status === 'present' && bayStudents.some(s => s.id === a.student_id) && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
+  const bayRunrate = packages.filter(p => p.classes_remaining > 0 && bayStudents.some(s => s.id === p.student_id)).reduce((sum, p) => sum + getPackagePrice(p), 0);
+  const bayUnbilled = bayStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
+  const newBayThisMonth = bayStudents.filter(s => s.join_date && new Date(s.join_date).toISOString().slice(0, 7) === currentMonthStr).length;
+  const bayCoaches = new Set(bayStudents.filter(s => s.coach_id).map(s => s.coach_id)).size;
+
+  // JLT metrics
+  const jltStudents = students.filter(s => s.centre_id === jltCentreId);
+  const activeJlt = jltStudents.filter(s => {
+    if (!s.last_attended) return false;
+    const diff = Math.floor((new Date().getTime() - new Date(s.last_attended).getTime()) / 86400000);
+    return diff >= 0 && diff <= 30 && s.status === 'active';
+  }).length;
+  const activeRateJlt = jltStudents.length > 0 ? Math.round((activeJlt / jltStudents.length) * 100) : 0;
+  const jltClasses30d = attendance.filter(a => a.status === 'present' && jltStudents.some(s => s.id === a.student_id) && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
+  const jltRunrate = packages.filter(p => p.classes_remaining > 0 && jltStudents.some(s => s.id === p.student_id)).reduce((sum, p) => sum + getPackagePrice(p), 0);
+  const jltUnbilled = jltStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
+  const newJltThisMonth = jltStudents.filter(s => s.join_date && new Date(s.join_date).toISOString().slice(0, 7) === currentMonthStr).length;
+  const jltCoaches = new Set(jltStudents.filter(s => s.coach_id).map(s => s.coach_id)).size;
+
+  const activeAdvocates = useMemo(() => {
+    return students.map(s => {
+      const classes30d = attendance.filter(a => a.student_id === s.id && a.status === 'present' && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
+      
+      const stPkgs = packages.filter(p => p.student_id === s.id);
+      const totalRemaining = stPkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
+      
+      const coach = coaches.find(c => c.id === s.coach_id);
+      const coachName = coach ? coach.name : 'Unassigned';
+
+      const segment = (s.flags?.low_package) ? 'HOT' : 'HEALTHY';
+
+      return {
+        ...s,
+        classes30d,
+        left: totalRemaining,
+        coachName,
+        segment
+      };
+    })
+    .sort((a, b) => b.classes30d - a.classes30d)
+    .slice(0, 10);
+  }, [students, attendance, packages, coaches]);
 
   return (
     <div className="p-8 max-w-7xl mx-auto w-full space-y-6 text-ink">
@@ -277,12 +448,12 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
           {/* Top KPIs row (Dark Green blocks with white text) */}
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
             {[
-              { label: 'TOTAL STUDENTS', value: '362', desc: 'on the book' },
-              { label: 'ACTIVE STUDENTS', value: '149', desc: 'attended in last 30 days · 41%' },
-              { label: 'RUN-RATE', value: 'AED 92K', desc: 'per month · AED 1.10M annualised' },
-              { label: 'UNBILLED', value: 'AED 62K', desc: '620 classes · ledger-verified' },
-              { label: 'ENROLMENTS', value: '14', desc: 'Jul MTD · 9 in June' },
-              { label: 'LIFETIME COLLECTED', value: 'AED 1.77M', desc: 'zero external capital' }
+              { label: 'TOTAL STUDENTS', value: `${totalStudents}`, desc: 'on the book' },
+              { label: 'ACTIVE STUDENTS', value: `${activeStudentsCount}`, desc: `attended in last 30 days · ${activePercent}%` },
+              { label: 'RUN-RATE', value: `AED ${runRateK}K`, desc: `per month · AED ${(totalRunrate * 12 / 1000000).toFixed(2)}M annualised` },
+              { label: 'UNBILLED', value: `AED ${unbilledK}K`, desc: `${unbilledClasses} classes · ledger-verified` },
+              { label: 'ENROLMENTS', value: `${newEnrolmentsThisMonth}`, desc: `MTD · ${newEnrolmentsPrevMonth} prev month` },
+              { label: 'LIFETIME COLLECTED', value: `AED ${totalCollectedM}M`, desc: 'zero external capital' }
             ].map((kpi, idx) => (
               <div key={idx} className="bg-[#173F35] text-white border border-[#122F28] rounded-[14px] p-5 shadow-sm space-y-1 relative overflow-hidden">
                 <div className="text-[9px] font-bold text-[#9DDDCB] tracking-wider uppercase">{kpi.label}</div>
@@ -301,16 +472,16 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                 <div className="text-[9px] font-bold text-muted-custom tracking-wider uppercase">BUSINESS BAY · FLAGSHIP</div>
               </div>
               <div className="grid grid-cols-4 gap-4 text-center border-b border-line pb-4">
-                <div><div className="font-bold text-lg text-ink">248</div><div className="text-[8px] text-muted-custom uppercase">Students</div></div>
-                <div><div className="font-bold text-lg text-ink">97</div><div className="text-[8px] text-[#286957] uppercase font-semibold">Active (30d)</div></div>
-                <div><div className="font-bold text-lg text-ink">39%</div><div className="text-[8px] text-muted-custom uppercase">Active Rate</div></div>
-                <div><div className="font-bold text-lg text-ink">657</div><div className="text-[8px] text-muted-custom uppercase">Classes/30d</div></div>
+                <div><div className="font-bold text-lg text-ink">{bayStudents.length}</div><div className="text-[8px] text-muted-custom uppercase">Students</div></div>
+                <div><div className="font-bold text-lg text-ink">{activeBay}</div><div className="text-[8px] text-[#286957] uppercase font-semibold">Active (30d)</div></div>
+                <div><div className="font-bold text-lg text-ink">{activeRateBay}%</div><div className="text-[8px] text-muted-custom uppercase">Active Rate</div></div>
+                <div><div className="font-bold text-lg text-ink">{bayClasses30d}</div><div className="text-[8px] text-muted-custom uppercase">Classes/30d</div></div>
               </div>
               <div className="grid grid-cols-4 gap-4 text-center">
-                <div><div className="font-bold text-sm text-[#286957]">AED 63K</div><div className="text-[8px] text-muted-custom uppercase">Run-rate /mo</div></div>
-                <div><div className="font-bold text-sm text-hot-custom">AED 51K</div><div className="text-[8px] text-muted-custom uppercase">Unbilled</div></div>
-                <div><div className="font-bold text-sm text-ink">6</div><div className="text-[8px] text-muted-custom uppercase font-semibold">New Jul (MTD)</div></div>
-                <div><div className="font-bold text-sm text-ink">5</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">Coaches</div></div>
+                <div><div className="font-bold text-sm text-[#286957]">AED ${(bayRunrate / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase">Run-rate /mo</div></div>
+                <div><div className="font-bold text-sm text-hot-custom">AED ${(bayUnbilled / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase">Unbilled</div></div>
+                <div><div className="font-bold text-sm text-ink">{newBayThisMonth}</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">New MTD</div></div>
+                <div><div className="font-bold text-sm text-ink">{bayCoaches}</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">Coaches</div></div>
               </div>
             </div>
 
@@ -321,16 +492,16 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                 <div className="text-[9px] font-bold text-muted-custom tracking-wider uppercase">SABA TOWER 1 · GROWTH ENGINE</div>
               </div>
               <div className="grid grid-cols-4 gap-4 text-center border-b border-line pb-4">
-                <div><div className="font-bold text-lg text-ink">114</div><div className="text-[8px] text-muted-custom uppercase">Students</div></div>
-                <div><div className="font-bold text-lg text-ink">52</div><div className="text-[8px] text-[#286957] uppercase font-semibold font-mono">Active (30d)</div></div>
-                <div><div className="font-bold text-lg text-ink">46%</div><div className="text-[8px] text-muted-custom uppercase">Active Rate</div></div>
-                <div><div className="font-bold text-lg text-ink">288</div><div className="text-[8px] text-muted-custom uppercase font-mono">Classes/30d</div></div>
+                <div><div className="font-bold text-lg text-ink">{jltStudents.length}</div><div className="text-[8px] text-muted-custom uppercase">Students</div></div>
+                <div><div className="font-bold text-lg text-ink">{activeJlt}</div><div className="text-[8px] text-[#286957] uppercase font-semibold font-mono">Active (30d)</div></div>
+                <div><div className="font-bold text-lg text-ink">{activeRateJlt}%</div><div className="text-[8px] text-muted-custom uppercase">Active Rate</div></div>
+                <div><div className="font-bold text-lg text-ink">{jltClasses30d}</div><div className="text-[8px] text-muted-custom uppercase font-mono">Classes/30d</div></div>
               </div>
               <div className="grid grid-cols-4 gap-4 text-center">
-                <div><div className="font-bold text-sm text-[#286957]">AED 28K</div><div className="text-[8px] text-muted-custom uppercase font-semibold">Run-rate /mo</div></div>
-                <div><div className="font-bold text-sm text-hot-custom">AED 11K</div><div className="text-[8px] text-muted-custom uppercase">Unbilled</div></div>
-                <div><div className="font-bold text-sm text-ink">8</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">New Jul (MTD)</div></div>
-                <div><div className="font-bold text-sm text-ink">2</div><div className="text-[8px] text-muted-custom uppercase font-semibold">Coaches</div></div>
+                <div><div className="font-bold text-sm text-[#286957]">AED ${(jltRunrate / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase font-semibold">Run-rate /mo</div></div>
+                <div><div className="font-bold text-sm text-hot-custom">AED ${(jltUnbilled / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase">Unbilled</div></div>
+                <div><div className="font-bold text-sm text-ink">{newJltThisMonth}</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">New MTD</div></div>
+                <div><div className="font-bold text-sm text-ink">{jltCoaches}</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">Coaches</div></div>
               </div>
             </div>
 
@@ -424,24 +595,13 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                     </tr>
                   </thead>
                   <tbody>
-                    {[
-                      { idx: 1, name: 'Jayan Gupta', centre: 'Bay Avenue', coach: 'JAMES', classes: 17, left: 0, segment: 'HOT' },
-                      { idx: 2, name: 'Rayeesha Shah', centre: 'Bay Avenue', coach: 'JAMES', classes: 12, left: 0, segment: 'HOT' },
-                      { idx: 3, name: 'Mairav Jain', centre: 'Bay Avenue', coach: 'JOHN', classes: 11, left: 0, segment: 'HOT' },
-                      { idx: 4, name: 'Advik Jhawar', centre: 'JLT', coach: 'BRETT', classes: 11, left: 73, segment: 'HOT' },
-                      { idx: 5, name: 'Shrey Rupin Karani', centre: 'JLT', coach: 'BRETT', classes: 11, left: 41, segment: 'HEALTHY' },
-                      { idx: 6, name: 'Madav', centre: 'Bay Avenue', coach: 'Unassigned', classes: 10, left: 0, segment: 'HOT' },
-                      { idx: 7, name: 'Danial Nasab', centre: 'Bay Avenue', coach: 'JOHN', classes: 10, left: 0, segment: 'HOT' },
-                      { idx: 8, name: 'Joschua Lemke', centre: 'Bay Avenue', coach: 'JOHN', classes: 10, left: 0, segment: 'HOT' },
-                      { idx: 9, name: 'Avyaan Saraf', centre: 'Bay Avenue', coach: 'JAMES', classes: 10, left: 0, segment: 'HOT' },
-                      { idx: 10, name: 'Darsh Punjabi', centre: 'Bay Avenue', coach: 'JOHN', classes: 9, left: 0, segment: 'HOT' },
-                    ].map(row => (
-                      <tr key={row.idx} className="border-b border-line hover:bg-canvas/40 transition-all text-xs">
-                        <td className="py-2.5 px-3 text-muted-custom">{row.idx}</td>
+                    {activeAdvocates.map((row, idx) => (
+                      <tr key={row.id} className="border-b border-line hover:bg-canvas/40 transition-all text-xs">
+                        <td className="py-2.5 px-3 text-muted-custom">{idx + 1}</td>
                         <td className="py-2.5 px-3 font-semibold text-ink">{row.name}</td>
-                        <td className="py-2.5 px-3 text-ink">{row.centre}</td>
-                        <td className="py-2.5 px-3 text-ink">{row.coach}</td>
-                        <td className="py-2.5 px-3 text-right font-bold text-ink">{row.classes}</td>
+                        <td className="py-2.5 px-3 text-ink">{row.centre_id === jltCentreId ? 'JLT' : 'Bay Avenue'}</td>
+                        <td className="py-2.5 px-3 text-ink">{row.coachName}</td>
+                        <td className="py-2.5 px-3 text-right font-bold text-ink">{row.classes30d}</td>
                         <td className="py-2.5 px-3 text-right font-mono">{row.left}</td>
                         <td className="py-2.5 px-3 text-right">
                           <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full border ${
@@ -483,13 +643,13 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                   </thead>
                   <tbody>
                     {[
-                      { m: 'Students', bay: '248', jlt: '114', tot: '362' },
-                      { m: 'Active (30d)', bay: '97', jlt: '52', tot: '149' },
-                      { m: 'Active rate', bay: '39%', jlt: '46%', tot: '41%' },
-                      { m: 'Classes / 30d', bay: '657', jlt: '288', tot: '945' },
-                      { m: 'Run-rate / month', bay: 'AED 63,432', jlt: 'AED 28,156', tot: 'AED 91,588' },
-                      { m: 'Unbilled', bay: 'AED 50,935', jlt: 'AED 10,696', tot: 'AED 61,631' },
-                      { m: 'Enrolments (Jul MTD)', bay: '6', jlt: '8', tot: '14' },
+                      { m: 'Students', bay: bayStudents.length.toString(), jlt: jltStudents.length.toString(), tot: students.length.toString() },
+                      { m: 'Active (30d)', bay: activeBay.toString(), jlt: activeJlt.toString(), tot: (activeBay + activeJlt).toString() },
+                      { m: 'Active rate', bay: `${activeRateBay}%`, jlt: `${activeRateJlt}%`, tot: `${students.length > 0 ? Math.round(((activeBay + activeJlt) / students.length) * 100) : 0}%` },
+                      { m: 'Classes / 30d', bay: bayClasses30d.toString(), jlt: jltClasses30d.toString(), tot: (bayClasses30d + jltClasses30d).toString() },
+                      { m: 'Run-rate / month', bay: `AED ${bayRunrate.toLocaleString()}`, jlt: `AED ${jltRunrate.toLocaleString()}`, tot: `AED ${(bayRunrate + jltRunrate).toLocaleString()}` },
+                      { m: 'Unbilled', bay: `AED ${bayUnbilled.toLocaleString()}`, jlt: `AED ${jltUnbilled.toLocaleString()}`, tot: `AED ${(bayUnbilled + jltUnbilled).toLocaleString()}` },
+                      { m: 'Enrolments (Jul MTD)', bay: newBayThisMonth.toString(), jlt: newJltThisMonth.toString(), tot: (newBayThisMonth + newJltThisMonth).toString() },
                     ].map((row, idx) => (
                       <tr key={idx} className="border-b border-line hover:bg-canvas/30 text-ink">
                         <td className="py-2.5 font-medium">{row.m}</td>
@@ -506,7 +666,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
           </div>
 
           <div className="text-[10px] text-muted-custom text-center pt-2">
-            • Live data · 362 students · 996 packages - as at 12 Jul 2026. All figures computed, none hard-coded.
+            • Live data · {students.length} students · {packages.length} packages - as at 12 Jul 2026. All figures computed, none hard-coded.
           </div>
 
         </div>
@@ -647,22 +807,22 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                     {selectedMeasures.includes('Students') && (
                       <div className="bg-canvas/30 border border-line rounded-lg p-3">
                         <div className="text-[9px] font-bold text-muted-custom uppercase">Students</div>
-                        <div className="text-2xl font-bold mt-1 text-ink">362</div>
-                        <div className="text-[10px] text-muted-custom mt-0.5">362 students in scope</div>
+                        <div className="text-2xl font-bold mt-1 text-ink">{totalStudents}</div>
+                        <div className="text-[10px] text-muted-custom mt-0.5">{totalStudents} students in scope</div>
                       </div>
                     )}
                     {selectedMeasures.includes('Run-rate AED / month') && (
                       <div className="bg-canvas/30 border border-line rounded-lg p-3">
                         <div className="text-[9px] font-bold text-muted-custom uppercase">Run-rate AED / month</div>
-                        <div className="text-2xl font-bold mt-1 text-ink">AED 92K</div>
-                        <div className="text-[10px] text-muted-custom mt-0.5">362 students in scope</div>
+                        <div className="text-2xl font-bold mt-1 text-ink">AED {runRateK}K</div>
+                        <div className="text-[10px] text-muted-custom mt-0.5">{totalStudents} students in scope</div>
                       </div>
                     )}
                     {selectedMeasures.includes('Unbilled value — ledger (AED)') && (
                       <div className="bg-canvas/30 border border-line rounded-lg p-3">
                         <div className="text-[9px] font-bold text-muted-custom uppercase">Unbilled value — ledger (AED)</div>
-                        <div className="text-2xl font-bold mt-1 text-ink">AED 62K</div>
-                        <div className="text-[10px] text-muted-custom mt-0.5">362 students in scope</div>
+                        <div className="text-2xl font-bold mt-1 text-ink">AED {unbilledK}K</div>
+                        <div className="text-[10px] text-muted-custom mt-0.5">{totalStudents} students in scope</div>
                       </div>
                     )}
                   </div>
@@ -673,7 +833,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                   <div className="flex justify-between items-center border-b border-line pb-2">
                     <div>
                       <h4 className="font-bold text-sm text-[#C4A249]">⚙ Breakdown</h4>
-                      <span className="text-[10px] text-muted-custom">All students · 362 students</span>
+                      <span className="text-[10px] text-muted-custom">All students · {totalStudents} students</span>
                     </div>
                     <div className="flex gap-1 text-[10px] text-muted-custom">
                       <button className="border border-line rounded px-1.5 py-0.5 hover:bg-canvas">↑</button>
@@ -683,7 +843,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                   </div>
 
                   <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs">
-                    2 groups by Centre. Top: <b className="text-forest">Bay Avenue at AED 63K</b> (69% of AED 92K). Scope: 362 students.
+                    2 groups by Centre. Top: <b className="text-forest">Bay Avenue at AED {(bayRunrate / 1000).toFixed(0)}K</b> ({totalRunrate > 0 ? Math.round((bayRunrate / totalRunrate) * 100) : 0}% of AED {runRateK}K). Scope: {totalStudents} students.
                   </div>
 
                   <div className="h-44"><canvas ref={builderChartRef}></canvas></div>

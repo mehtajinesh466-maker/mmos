@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { db } from '../lib/db';
 import type { User, Student, Package, ScheduleSlot, Attendance, Coach } from '../lib/db';
 import { logAttendance, syncDatabaseToClient } from '../app/actions';
+import { exportTableToCSV, exportToPDF } from '../lib/export';
 
 interface ScheduleProps {
   currentUser: User;
@@ -14,6 +15,7 @@ interface ScheduleProps {
 export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre }) => {
   const router = useRouter();
   const [selectedCoachId, setSelectedCoachId] = useState<string>('');
+  const [selectedCentre, setSelectedCentre] = useState<string>('All');
   const [activeDay, setActiveDay] = useState<string>('Monday');
   const [expandedSlots, setExpandedSlots] = useState<{ [slotId: string]: boolean }>({});
   
@@ -26,6 +28,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [slots, setSlots] = useState<ScheduleSlot[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
+  const [centres, setCentres] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<string>('');
 
@@ -35,18 +38,21 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     const coas = db.getCoaches();
     const sls = db.getScheduleSlots();
     const atts = db.getAttendance();
+    const cens = db.getCentres();
 
     setStudents(stds);
     setPackages(pkgs);
     setCoaches(coas);
     setSlots(sls);
     setAttendance(atts);
+    setCentres(cens);
     setLoading(false);
 
     if (coas.length > 0 && !selectedCoachId) {
-      // Find James Estrada or default to first coach
+      // Find current user coach if applicable, else James Estrada, else first coach
+      const self = coas.find(c => c.user_id === currentUser.id);
       const james = coas.find(c => c.name.toUpperCase().includes('JAMES'));
-      setSelectedCoachId(james ? james.id : coas[0].id);
+      setSelectedCoachId(self ? self.id : (james ? james.id : coas[0].id));
     }
   };
 
@@ -56,25 +62,90 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     return () => window.removeEventListener('db-synced', loadData);
   }, [selectedCoachId]);
 
-  const activeCoach = coaches.find(c => c.id === selectedCoachId);
+  useEffect(() => {
+    if (activeCentre) {
+      setSelectedCentre(activeCentre);
+    }
+  }, [activeCentre]);
 
-  // Group slots by day
+  const activeCoachId = useMemo(() => {
+    if (currentUser.role === 'coach') {
+      const coach = coaches.find(c => c.user_id === currentUser.id);
+      return coach ? coach.id : '';
+    }
+    return selectedCoachId;
+  }, [currentUser, coaches, selectedCoachId]);
+
+  const activeCoach = coaches.find(c => c.id === activeCoachId);
+
+  // Get dynamic dates for the current week (Monday to Sunday)
+  const weekDates = useMemo(() => {
+    const current = new Date(); // Represents today (2026-07-17)
+    const day = current.getDay();
+    const distanceToMonday = day === 0 ? -6 : 1 - day; // Monday is 1, Sunday is 0
+    
+    const monday = new Date(current);
+    monday.setDate(current.getDate() + distanceToMonday);
+
+    const dates = [];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const fullMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      dates.push({
+        dateStr: `${d.getDate()} ${months[d.getMonth()]}`,
+        dayNum: d.getDate(),
+        monthName: fullMonths[d.getMonth()],
+        year: d.getFullYear()
+      });
+    }
+    return dates;
+  }, []);
+
+  const getDayLabel = (dayName: string) => {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const dayIndex = days.indexOf(dayName);
+    const dateObj = weekDates[dayIndex] || { dateStr: '', year: 2026 };
+    const shortNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return {
+      date: dateObj.dateStr,
+      label: shortNames[dayIndex] || dayName.substring(0, 3)
+    };
+  };
+
+  const weekRangeText = useMemo(() => {
+    if (weekDates.length === 0) return 'Week';
+    const mon = weekDates[0];
+    const sun = weekDates[6];
+    return `Week of Mon ${mon.dayNum} – Sun ${sun.dayNum} ${sun.monthName} ${sun.year}`;
+  }, [weekDates]);
+
+  // Filter slots by selected coach and centre
+  const filteredSlots = useMemo(() => {
+    return slots.filter(s => {
+      if (s.coach_id !== activeCoachId) return false;
+      if (selectedCentre !== 'All' && s.centre_id !== selectedCentre) return false;
+      return true;
+    });
+  }, [slots, activeCoachId, selectedCentre]);
+
+  // Group slots by day for tabs
   const dailySlotsCount = useMemo(() => {
     const countMap: { [day: string]: number } = {
       Monday: 0, Tuesday: 0, Wednesday: 0, Thursday: 0, Friday: 0, Saturday: 0, Sunday: 0
     };
-    slots.forEach(s => {
-      if (s.coach_id === selectedCoachId) {
-        countMap[s.day] = (countMap[s.day] || 0) + 1;
-      }
+    filteredSlots.forEach(s => {
+      countMap[s.day] = (countMap[s.day] || 0) + 1;
     });
     return countMap;
-  }, [slots, selectedCoachId]);
+  }, [filteredSlots]);
 
   // Display slot details for selected day
   const activeDaySlots = useMemo(() => {
-    return slots.filter(s => s.day === activeDay && s.coach_id === selectedCoachId);
-  }, [slots, activeDay, selectedCoachId]);
+    return filteredSlots.filter(s => s.day === activeDay);
+  }, [filteredSlots, activeDay]);
 
   // Auto-expand first slot
   useEffect(() => {
@@ -102,15 +173,15 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   };
 
   const getCentreName = (centreId: string) => {
-    return centreId === 'c-2' || centreId === 'JLT' ? 'JLT' : 'Bay Avenue';
+    const match = centres.find(c => c.id === centreId);
+    return match ? match.name : (centreId === 'c-2' || centreId === 'JLT' ? 'JLT' : 'Bay Avenue');
   };
 
   // Compute full week list and summation rows dynamically
   const fullWeekData = useMemo(() => {
     const list: any[] = [];
     const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    const sortedSlots = [...slots]
-      .filter(s => s.coach_id === selectedCoachId)
+    const sortedSlots = [...filteredSlots]
       .sort((a, b) => {
         const dayDiff = dayOrder.indexOf(a.day) - dayOrder.indexOf(b.day);
         if (dayDiff !== 0) return dayDiff;
@@ -145,11 +216,10 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       totalZeroBalance,
       uniqueStudentsCount: uniqueStudents.size
     };
-  }, [slots, selectedCoachId, students, packages]);
+  }, [filteredSlots, students, packages, centres]);
 
   const stats = useMemo(() => {
-    const coachSlots = slots.filter(s => s.coach_id === selectedCoachId);
-    const classesCount = coachSlots.length;
+    const classesCount = filteredSlots.length;
     const markedCount = Object.values(markings).filter(v => v !== null).length;
 
     return {
@@ -159,7 +229,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       studentsTaught: fullWeekData.uniqueStudentsCount,
       markedCount,
     };
-  }, [slots, selectedCoachId, fullWeekData, markings]);
+  }, [filteredSlots, fullWeekData, markings]);
 
   const handleMarkStatus = (slotId: string, studentId: string, status: 'present' | 'absent' | 'makeup') => {
     const key = `${slotId}-${studentId}`;
@@ -185,7 +255,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
         const [_, studentId] = key.split('-');
         const status = markings[key];
         if (status) {
-          await logAttendance(studentId, slotId, selectedCoachId, new Date().toISOString().split('T')[0], status, classTopic, '');
+          await logAttendance(studentId, status, activeCoachId);
           savedCount++;
         }
       }
@@ -200,19 +270,6 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     }
   };
 
-  const getDayLabel = (day: string) => {
-    const labels: { [key: string]: { date: string; label: string } } = {
-      Monday: { date: '13 Jul', label: 'Mon' },
-      Tuesday: { date: '14 Jul', label: 'Tue' },
-      Wednesday: { date: '15 Jul', label: 'Wed' },
-      Thursday: { date: '16 Jul', label: 'Thu' },
-      Friday: { date: '17 Jul', label: 'Fri' },
-      Saturday: { date: '18 Jul', label: 'Sat' },
-      Sunday: { date: '19 Jul', label: 'Sun' }
-    };
-    return labels[day] || { date: '', label: day.substring(0,3) };
-  };
-
   if (loading) {
     return <div className="p-10 text-center text-muted-custom">Loading Weekly Schedule...</div>;
   }
@@ -223,18 +280,24 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <div className="text-[10px] font-bold tracking-widest text-muted-custom uppercase">THIS WEEK</div>
+          <div className="text-[10px] font-bold tracking-widest text-[#C4A249] uppercase">THIS WEEK</div>
           <h1 className="text-2xl font-bold font-display text-ink mt-0.5">Weekly Schedule</h1>
         </div>
 
-        <select className="bg-white border border-line rounded-lg px-3 py-1.5 text-xs text-ink outline-none">
-          <option>JLT</option>
-          <option>Bay Avenue</option>
+        <select 
+          value={selectedCentre}
+          onChange={e => setSelectedCentre(e.target.value)}
+          className="bg-white border border-line rounded-lg px-3 py-1.5 text-xs text-ink outline-none cursor-pointer"
+        >
+          <option value="All">All centres</option>
+          {centres.map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
         </select>
       </div>
 
       <p className="text-xs text-muted-custom">
-        Week of <b className="text-ink">Mon 13 – Sun 19 July 2026</b> · {activeCoach?.name.toUpperCase()} · {stats.classesCount} classes · {stats.totalPlaces} student-places
+        {weekRangeText} · {activeCoach?.name.toUpperCase()} · {stats.classesCount} classes · {stats.totalPlaces} student-places
       </p>
 
       {/* Filter Toolbar */}
@@ -244,7 +307,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
           <select 
             value={selectedCoachId} 
             onChange={e => setSelectedCoachId(e.target.value)}
-            className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none w-64"
+            className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none w-64 cursor-pointer"
           >
             {coaches.map(c => (
               <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>
@@ -253,8 +316,18 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
-          <button className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">↓ Excel</button>
-          <button className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">⎙ PDF</button>
+          <button 
+            onClick={() => exportTableToCSV('#schedule-table', 'weekly_schedule.csv')}
+            className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all"
+          >
+            ↓ Excel
+          </button>
+          <button 
+            onClick={exportToPDF}
+            className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all"
+          >
+            ⎙ PDF
+          </button>
         </div>
       </div>
 
@@ -265,21 +338,23 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       )}
 
       {/* Zero Balance Warning Notice */}
-      <div className="p-4 rounded-[12px] bg-[#FBEEA] border border-[#EBC9BE] border-l-4 border-l-hot-custom flex gap-3 text-xs leading-relaxed">
-        <span className="text-xl">⚏</span>
-        <div>
-          <b className="text-hot-custom block font-bold">{stats.zeroBalancePlaces} student-places this week have zero classes remaining</b>
-          <span className="text-[#6a4a41]">
-            If they are marked Present, the platform creates an <b className="text-hot-custom">unbilled record</b> and alerts the front desk — it will not silently give the class away. Renew them before their next session.
-          </span>
+      {stats.zeroBalancePlaces > 0 && (
+        <div className="p-4 rounded-[12px] bg-[#FBEEEA] border border-[#FBEEEA] border-l-4 border-l-hot-custom flex gap-3 text-xs leading-relaxed">
+          <span className="text-xl">⚏</span>
+          <div>
+            <b className="text-hot-custom block font-bold">{stats.zeroBalancePlaces} student-places this week have zero classes remaining</b>
+            <span className="text-[#6a4a41]">
+              If they are marked Present, the platform creates an <b className="text-hot-custom">unbilled record</b> and alerts the front desk — it will not silently give the class away. Renew them before their next session.
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         
         {/* CLASSES THIS WEEK */}
-        <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm">
+        <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm relative overflow-hidden before:absolute before:top-0 before:left-0 before:w-full before:h-[3px] before:bg-forest">
           <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">Classes This Week</div>
           <h2 className="text-2xl font-bold font-display text-ink mt-1.5">
             {stats.classesCount}
@@ -288,7 +363,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
         </div>
 
         {/* MARKED */}
-        <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm">
+        <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm relative overflow-hidden before:absolute before:top-0 before:left-0 before:w-full before:h-[3px] before:bg-warm-custom">
           <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">Marked</div>
           <h2 className="text-2xl font-bold font-display text-forest mt-1.5">
             {stats.markedCount}
@@ -299,7 +374,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
         </div>
 
         {/* ZERO-BALANCE PLACES */}
-        <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm">
+        <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm relative overflow-hidden before:absolute before:top-0 before:left-0 before:w-full before:h-[3px] before:bg-hot-custom">
           <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">Zero-Balance Places</div>
           <h2 className="text-2xl font-bold font-display text-hot-custom mt-1.5">
             {stats.zeroBalancePlaces}
@@ -308,7 +383,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
         </div>
 
         {/* STUDENTS TAUGHT */}
-        <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm">
+        <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm relative overflow-hidden before:absolute before:top-0 before:left-0 before:w-full before:h-[3px] before:bg-brass">
           <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">Students Taught</div>
           <h2 className="text-2xl font-bold font-display text-ink mt-1.5">
             {stats.studentsTaught}
@@ -328,7 +403,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
             <button
               key={day}
               onClick={() => setActiveDay(day)}
-              className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all text-center ${
+              className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all text-center cursor-pointer ${
                 isActive
                   ? 'bg-[#173F35] border-[#173F35] text-white font-semibold shadow-md'
                   : 'bg-surface border-line text-ink hover:bg-canvas'
@@ -438,7 +513,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                                     <button
                                       key={st}
                                       onClick={() => handleMarkStatus(slot.id, student.id, st)}
-                                      className={`px-3 py-1 text-[10px] font-semibold rounded-lg border transition-all ${
+                                      className={`px-3 py-1 text-[10px] font-semibold rounded-lg border transition-all cursor-pointer ${
                                         isMarked 
                                           ? colors[st] 
                                           : 'bg-white border-line text-ink hover:bg-canvas'
@@ -462,7 +537,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                         <select
                           value={classTopic}
                           onChange={e => setClassTopic(e.target.value)}
-                          className="bg-white border border-line rounded-lg px-3 py-1.5 text-xs text-ink outline-none"
+                          className="bg-white border border-line rounded-lg px-3 py-1.5 text-xs text-ink outline-none cursor-pointer"
                         >
                           <option value="Rook endgames — technique">Rook endgames — technique</option>
                           <option value="Back-rank patterns">Back-rank patterns</option>
@@ -472,14 +547,14 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
 
                         <button
                           onClick={() => handleSaveAttendance(slot.id)}
-                          className="bg-[#173F35] hover:bg-[#122f28] text-white font-bold text-xs px-4 py-2 rounded-lg transition-all"
+                          className="bg-[#173F35] hover:bg-[#122f28] text-white font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
                         >
                           Save attendance
                         </button>
 
                         <button
                           onClick={() => router.push(`/progress?slotId=${slot.id}`)}
-                          className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all"
+                          className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
                         >
                           Log progress
                         </button>
@@ -508,13 +583,23 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
             <p className="text-[10px] text-muted-custom mt-0.5">Export the timetable and the rosters.</p>
           </div>
           <div className="flex items-center gap-2">
-            <button className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">↓ Excel</button>
-            <button className="bg-white border border-line text-[#5c5c5c] font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">⎙ PDF</button>
+            <button 
+              onClick={() => exportTableToCSV('#schedule-table', 'weekly_schedule_full.csv')}
+              className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all"
+            >
+              ↓ Excel
+            </button>
+            <button 
+              onClick={exportToPDF}
+              className="bg-white border border-line text-[#5c5c5c] font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all"
+            >
+              ⎙ PDF
+            </button>
           </div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-xs">
+          <table id="schedule-table" className="w-full border-collapse text-xs">
             <thead>
               <tr className="border-b border-line text-left text-muted-custom text-[9px] uppercase tracking-wider font-bold">
                 <th className="py-2.5 px-3">Day</th>
@@ -556,15 +641,8 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
         </div>
       </div>
 
-      {/* Explanatory Scaffolding Banner */}
-      <div className="p-4 rounded-[12px] bg-emerald-50/20 border border-emerald-100 border-l-4 border-l-forest text-xs text-ink/90 flex gap-2">
-        <span>
-          <b className="text-emerald-800 block mb-1">On the timetable itself.</b>
-          The students, levels, centres and balances above are real, from your live data. The <b className="text-emerald-800">day and time slots are a scaffold</b> — your source workbook holds no schedule fields. Once the platform stores a real timetable (class, day, time, room, recurrence), this screen renders it directly.
-        </span>
-      </div>
-
     </div>
   );
 };
+
 export default Schedule;

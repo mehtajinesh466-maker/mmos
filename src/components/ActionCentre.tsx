@@ -1,30 +1,36 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { db } from '../lib/db';
-import type { User, Student } from '../lib/db';
-import { renewPackage } from '../app/actions';
+import { getActionCentreData, renewPackage } from '../app/actions';
+import { exportTableToCSV, exportToPDF } from '../lib/export';
 
 interface ActionCentreProps {
-  currentUser: User;
+  currentUser: any;
   activeCentre: string;
 }
 
 export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeCentre }) => {
-  const [students, setStudents] = useState<Student[]>([]);
-  const [packages, setPackages] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
+  const [centres, setCentres] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
+  const [tiers, setTiers] = useState<any[]>([]);
+  
+  const [selectedCentre, setSelectedCentre] = useState<string>("All");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
-  const loadData = () => {
-    const stds = db.getStudents();
-    const pkgs = db.getPackages();
-    const chs = db.getCoaches();
-    setStudents(stds);
-    setPackages(pkgs);
-    setCoaches(chs);
-    setLoading(false);
+  const loadData = async () => {
+    try {
+      const data = await getActionCentreData();
+      setStudents(data.students);
+      setCentres(data.centres);
+      setCoaches(data.coaches);
+      setTiers(data.tiers);
+    } catch (error) {
+      console.error("Error loading action centre data:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -33,63 +39,151 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
     return () => window.removeEventListener('db-synced', loadData);
   }, []);
 
-  // Filter students attending with no paid packages (unpaid classes > 0)
-  const getUnpaidAttending = () => {
+  // Sync prop activeCentre to local selectedCentre state on initial load
+  useEffect(() => {
+    if (activeCentre) {
+      setSelectedCentre(activeCentre);
+    }
+  }, [activeCentre]);
+
+  // Filter students based on selected centre
+  const getFilteredStudents = () => {
     return students.filter(s => {
-      if (activeCentre !== 'All' && s.centre_id !== activeCentre) return false;
-      return ((s.flags as any)?.unpaid_classes || 0) > 0;
+      if (selectedCentre !== 'All' && s.centre_id !== selectedCentre) return false;
+      return true;
     });
   };
 
-  const unpaidStudents = getUnpaidAttending();
+  const filteredStudents = getFilteredStudents();
 
-  const handleBillNow = async (studentId: string) => {
-    try {
-      await renewPackage(studentId, db.getTiers()[1]?.id || 't-core-id', 'renewal');
-      setMessage('✓ Invoice generated and package renewed successfully!');
-      setTimeout(() => setMessage(''), 4000);
-      window.dispatchEvent(new Event('db-synced'));
-    } catch (e: any) {
-      alert('Error raising invoice: ' + e.message);
-    }
-  };
+  // List 1: Students attending with no paid packages (unpaid classes > 0)
+  const unpaidStudents = filteredStudents.filter(s => {
+    return ((s.flags as any)?.unpaid_classes || 0) > 0;
+  });
 
-  const getCoachName = (coachId: string | null) => {
-    if (!coachId) return 'Unassigned';
-    const c = coaches.find(co => co.id === coachId);
-    return c ? c.name : 'Unassigned';
-  };
+  // Sort unpaid students by classes unpaid descending
+  const sortedUnpaidStudents = [...unpaidStudents].sort((a, b) => {
+    const aVal = (a.flags as any)?.unpaid_classes || 0;
+    const bVal = (b.flags as any)?.unpaid_classes || 0;
+    return bVal - aVal;
+  });
 
-  const getCentreName = (centreId: string) => {
-    return centreId === 'c-2' || centreId === 'JLT' ? 'JLT' : 'Bay Avenue';
-  };
-
-  // Calculate Action Centre metrics
+  // Calculate unpaid aggregates
   const invoiceNowCount = unpaidStudents.length;
-  const renewNowCount = students.filter(s => (s.flags as any)?.low_package).length;
   const recoverableAmount = unpaidStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
   const classesGivenAway = unpaidStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_classes || 0), 0);
 
-  if (loading) {
-    return <div className="p-10 text-center text-muted-custom">Loading Action Centre...</div>;
+  // List 2: Expiring packages (classes left <= 3, classes left > 0)
+  const expiringPackages: any[] = [];
+  filteredStudents.forEach(s => {
+    const studentPkgs = s.packages || [];
+    // Sort packages by start_date asc
+    const sortedPkgs = [...studentPkgs].sort((a, b) => new Date(a.start_date || '').getTime() - new Date(b.start_date || '').getTime());
+    
+    sortedPkgs.forEach((pkg, idx) => {
+      // Package has classes remaining and is <= 3, and is not frozen
+      if (pkg.classes_remaining > 0 && pkg.classes_remaining <= 3 && !pkg.frozen) {
+        const rawCoachName = s.coach?.user?.name || 'Unassigned';
+        const displayCoachName = rawCoachName === 'Unassigned' ? 'Unassigned' : rawCoachName.split(' ')[0].toUpperCase();
+        expiringPackages.push({
+          id: pkg.id,
+          studentId: s.id,
+          studentName: s.name,
+          centreName: s.centre?.name || 'Bay Avenue',
+          coachName: displayCoachName,
+          packageName: `#${idx + 1} ${pkg.kind === 'renewal' ? 'Renewal' : pkg.kind === 'new' ? 'New' : 'Tournament'}`,
+          paid: pkg.classes_total,
+          used: pkg.classes_total - pkg.classes_remaining,
+          left: pkg.classes_remaining
+        });
+      }
+    });
+  });
+
+  // Sort expiring packages by fewest classes remaining first
+  const sortedExpiringPackages = [...expiringPackages].sort((a, b) => a.left - b.left);
+  const renewNowCount = sortedExpiringPackages.length;
+
+  // Calculate expiring counts per centre
+  const bayAvenueCentre = centres.find(c => c.name.toLowerCase().includes('bay avenue'));
+  const jltCentre = centres.find(c => c.name.toLowerCase().includes('jlt'));
+
+  const expiringBayAvenue = expiringPackages.filter(p => bayAvenueCentre && p.centreName === bayAvenueCentre.name).length;
+  const expiringJlt = expiringPackages.filter(p => jltCentre && p.centreName === jltCentre.name).length;
+  const totalToRenew = expiringPackages.length;
+
+  const handleAction = async (studentId: string) => {
+    setLoading(true);
+    try {
+      const student = students.find(s => s.id === studentId);
+      // Determine existing package tier or default to first/core tier
+      const currentTierId = student?.packages?.[0]?.tier_id || tiers[1]?.id || tiers[0]?.id || 't-core-id';
+      
+      await renewPackage(studentId, currentTierId, 'renewal');
+      setMessage('✓ Invoice generated and package renewed successfully!');
+      setTimeout(() => setMessage(''), 4000);
+      
+      // Reload from DB
+      await loadData();
+      window.dispatchEvent(new Event('db-synced'));
+    } catch (e: any) {
+      alert('Error updating record: ' + e.message);
+      setLoading(false);
+    }
+  };
+
+  const getCoachName = (coach: any) => {
+    if (!coach || !coach.user) return 'Unassigned';
+    return coach.user.name.split(' ')[0].toUpperCase();
+  };
+
+  if (loading && students.length === 0) {
+    return <div className="p-10 text-center text-muted-custom">Loading Action Centre from DB...</div>;
   }
 
   return (
     <div className="p-8 max-w-7xl mx-auto w-full space-y-8 text-ink">
-      {/* Head */}
-      <div>
-        <div className="text-xs font-bold tracking-widest text-forest uppercase">FRONT DESK</div>
-        <h1 className="text-3xl font-bold font-display text-ink mt-1">Action Centre</h1>
-        <p className="text-sm text-muted-custom mt-1">Your two lists. Work them to zero every week — this is the job.</p>
+      
+      {/* Top Header */}
+      <div className="flex justify-between items-start">
+        <div>
+          <div className="text-[10px] font-bold tracking-widest text-[#C4A249] uppercase">FRONT DESK</div>
+          <h1 className="text-3xl font-bold font-display text-ink mt-1">Action Centre</h1>
+          <p className="text-sm text-muted-custom mt-1">Your two lists. Work them to zero every week — this is the job.</p>
+        </div>
+
+        <select 
+          value={selectedCentre}
+          onChange={e => setSelectedCentre(e.target.value)}
+          className="bg-white border border-line rounded-lg px-4 py-2 text-xs text-ink outline-none cursor-pointer"
+        >
+          <option value="All">All centres</option>
+          {centres.map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
       </div>
 
       {message && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-4 text-sm font-semibold">
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-4 text-sm font-semibold transition-all">
           {message}
         </div>
       )}
 
-      {/* KPIs */}
+      {/* Warning Banner */}
+      {invoiceNowCount > 0 && (
+        <div className="flex gap-4 p-5 rounded-[14px] bg-[#FBEEEA] border border-[#FBEEEA] border-l-4 border-l-hot-custom">
+          <span className="text-xl">⌛</span>
+          <div>
+            <div className="font-bold text-hot-custom">{invoiceNowCount} students are attending with no paid package</div>
+            <div className="text-xs text-ink/80 mt-1">
+              Every class they take is revenue given away — AED {recoverableAmount.toLocaleString()} so far. Invoice them, then sell the next package before the next class.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Top KPIs Grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {[
           { label: 'INVOICE NOW', value: invoiceNowCount, desc: 'attending unpaid', color: 'before:bg-forest' },
@@ -105,81 +199,192 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
         ))}
       </div>
 
-      {/* Alert Banner */}
-      <div className="flex gap-4 p-5 rounded-[14px] bg-red-50 border border-red-200 border-l-4 border-l-hot-custom">
-        <span className="text-xl">⌛</span>
-        <div>
-          <div className="font-bold text-hot-custom">{invoiceNowCount} students are attending with no paid package</div>
-          <div className="text-xs text-ink/80 mt-1">
-            Every class they take is revenue given away — AED {recoverableAmount.toLocaleString()} so far. Invoice them, then sell the next package before the next class.
-          </div>
+      {/* Middle Center-specific Expiring Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm">
+          <div className="text-[10px] font-bold text-muted-custom tracking-wider uppercase">EXPIRING — BAY AVENUE</div>
+          <div className="text-3xl font-bold font-display text-ink mt-2">{expiringBayAvenue}</div>
+          <div className="text-xs text-muted-custom mt-1">≤3 classes left</div>
+        </div>
+        <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm">
+          <div className="text-[10px] font-bold text-muted-custom tracking-wider uppercase">EXPIRING — JLT</div>
+          <div className="text-3xl font-bold font-display text-ink mt-2">{expiringJlt}</div>
+          <div className="text-xs text-muted-custom mt-1">≤3 classes left</div>
+        </div>
+        <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm">
+          <div className="text-[10px] font-bold text-muted-custom tracking-wider uppercase">TOTAL TO RENEW</div>
+          <div className="text-3xl font-bold font-display text-ink mt-2">{totalToRenew}</div>
+          <div className="text-xs text-muted-custom mt-1">work this list weekly</div>
         </div>
       </div>
 
-      {/* Table Container */}
+      {/* Table 1: Attending with no paid package */}
       <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm">
-        <h3 className="text-lg font-bold font-display text-ink flex items-center gap-2 mb-1">
-          <span className="text-forest">♜</span> Attending with no paid package
-        </h3>
-        <p className="text-xs text-muted-custom mb-6">Roster of students active in the current cycle with zero class balance.</p>
+        <div className="flex justify-between items-center mb-1">
+          <h3 className="text-lg font-bold font-display text-ink flex items-center gap-2">
+            <span className="text-forest">♜</span> Attending with no paid package
+          </h3>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => exportTableToCSV('#unpaid-table', 'unpaid_students.csv')}
+              className="bg-white border border-line text-ink font-bold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1 cursor-pointer transition-all"
+            >
+              ↓ Excel
+            </button>
+            <button 
+              onClick={exportToPDF}
+              className="bg-white border border-line text-ink font-bold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1 cursor-pointer transition-all"
+            >
+              ⎙ PDF
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-muted-custom mb-6">Every class here is revenue given away.</p>
 
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
+          <table id="unpaid-table" className="w-full border-collapse">
             <thead>
-              <tr className="border-b border-line">
-                <th className="text-left text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Student</th>
-                <th className="text-left text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Centre</th>
-                <th className="text-left text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Coach</th>
+              <tr className="border-b border-line text-left">
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Student</th>
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Centre</th>
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Coach</th>
                 <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Classes Unpaid</th>
                 <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Value</th>
-                <th className="text-left text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Since</th>
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Since</th>
                 <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Action</th>
               </tr>
             </thead>
             <tbody>
-              {unpaidStudents.length === 0 ? (
+              {sortedUnpaidStudents.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center text-muted-custom py-8">
                     ✓ Zero students outstanding! Great job!
                   </td>
                 </tr>
               ) : (
-                unpaidStudents.map(s => {
-                  const unpaidCount = (s.flags as any)?.unpaid_classes || 0;
-                  const val = (s.flags as any)?.unpaid_value || 0;
-                  return (
-                    <tr key={s.id} className="border-b border-line hover:bg-canvas/50 transition-all">
-                      <td className="py-4 px-4">
-                        <div className="font-semibold text-ink">
-                          <a href={`/student-dashboard?studentId=${s.id}`} className="hover:text-forest hover:underline">
-                            {s.name}
-                          </a>
-                        </div>
-                        <div className="text-xs text-muted-custom">Level: {s.level}</div>
-                      </td>
-                      <td className="py-4 px-4 text-ink">{getCentreName(s.centre_id)}</td>
-                      <td className="py-4 px-4 text-ink">{getCoachName(s.coach_id)}</td>
-                      <td className="py-4 px-4 text-right font-bold text-hot-custom">{unpaidCount}</td>
-                      <td className="py-4 px-4 text-right font-mono font-semibold text-ink">AED {val.toLocaleString()}</td>
-                      <td className="py-4 px-4 text-muted-custom text-sm">
-                        {s.join_date ? new Date(s.join_date).toISOString().split('T')[0] : '2026-04-12'}
-                      </td>
-                      <td className="py-4 px-4 text-right">
-                        <button
-                          onClick={() => handleBillNow(s.id)}
-                          className="bg-forest hover:bg-forest/90 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg transition-all active:scale-95"
-                        >
-                          Bill now
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
+                <>
+                  {sortedUnpaidStudents.map(s => {
+                    const unpaidCount = (s.flags as any)?.unpaid_classes || 0;
+                    const val = (s.flags as any)?.unpaid_value || 0;
+                    return (
+                      <tr key={s.id} className="border-b border-line hover:bg-canvas/50 transition-all">
+                        <td className="py-4 px-4">
+                          <div className="font-semibold text-ink">
+                            <a href={`/student-dashboard?studentId=${s.id}`} className="hover:text-forest hover:underline">
+                              {s.name}
+                            </a>
+                          </div>
+                          <div className="text-xs text-muted-custom">Level: {s.level}</div>
+                        </td>
+                        <td className="py-4 px-4 text-ink">{s.centre?.name || '—'}</td>
+                        <td className="py-4 px-4 text-ink">{getCoachName(s.coach)}</td>
+                        <td className="py-4 px-4 text-right font-bold text-hot-custom">{unpaidCount}</td>
+                        <td className="py-4 px-4 text-right font-mono font-semibold text-ink">AED {val.toLocaleString()}</td>
+                        <td className="py-4 px-4 text-muted-custom text-sm">
+                          {s.join_date ? new Date(s.join_date).toISOString().split('T')[0] : '—'}
+                        </td>
+                        <td className="py-4 px-4 text-right">
+                          <button
+                            onClick={() => handleAction(s.id)}
+                            className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-3.5 py-1.5 rounded-lg transition-all active:scale-95 cursor-pointer"
+                          >
+                            Bill now
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {/* Aggregated Total Row matching Image 1 */}
+                  <tr className="bg-canvas/40 font-bold border-t-2 border-line">
+                    <td className="py-4 px-4 text-ink">Total</td>
+                    <td className="py-4 px-4"></td>
+                    <td className="py-4 px-4"></td>
+                    <td className="py-4 px-4 text-right text-ink font-mono">{classesGivenAway}</td>
+                    <td className="py-4 px-4 text-right text-ink font-mono">AED {recoverableAmount.toLocaleString()}</td>
+                    <td className="py-4 px-4 text-muted-custom">{invoiceNowCount} students</td>
+                    <td className="py-4 px-4"></td>
+                  </tr>
+                </>
               )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Table 2: Packages expiring — renew now */}
+      <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm">
+        <div className="flex justify-between items-center mb-1">
+          <h3 className="text-lg font-bold font-display text-ink flex items-center gap-2">
+            <span className="text-[#C4A249]">👑</span> Packages expiring — renew now
+          </h3>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => exportTableToCSV('#expiring-table', 'expiring_packages.csv')}
+              className="bg-white border border-line text-ink font-bold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1 cursor-pointer transition-all"
+            >
+              ↓ Excel
+            </button>
+            <button 
+              onClick={exportToPDF}
+              className="bg-white border border-line text-ink font-bold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1 cursor-pointer transition-all"
+            >
+              ⎙ PDF
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-muted-custom mb-6">Fewest classes remaining first.</p>
+
+        <div className="overflow-x-auto">
+          <table id="expiring-table" className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-line text-left">
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Student</th>
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Centre</th>
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Coach</th>
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Package</th>
+                <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Paid</th>
+                <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Used</th>
+                <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Left</th>
+                <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedExpiringPackages.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="text-center text-muted-custom py-8">
+                    ✓ Zero expiring packages! Great job!
+                  </td>
+                </tr>
+              ) : (
+                sortedExpiringPackages.map(pkg => (
+                  <tr key={pkg.id} className="border-b border-line hover:bg-canvas/50 transition-all">
+                    <td className="py-4 px-4 font-semibold text-ink">
+                      <a href={`/student-dashboard?studentId=${pkg.studentId}`} className="hover:text-forest hover:underline">
+                        {pkg.studentName}
+                      </a>
+                    </td>
+                    <td className="py-4 px-4 text-ink">{pkg.centreName}</td>
+                    <td className="py-4 px-4 text-ink">{pkg.coachName}</td>
+                    <td className="py-4 px-4 text-ink font-medium">{pkg.packageName}</td>
+                    <td className="py-4 px-4 text-right font-mono text-ink">{pkg.paid}</td>
+                    <td className="py-4 px-4 text-right font-mono text-ink">{pkg.used}</td>
+                    <td className="py-4 px-4 text-right font-mono font-bold text-hot-custom">{pkg.left}</td>
+                    <td className="py-4 px-4 text-right">
+                      <button
+                        onClick={() => handleAction(pkg.studentId)}
+                        className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-3.5 py-1.5 rounded-lg transition-all active:scale-95 cursor-pointer"
+                      >
+                        Renew
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
   );
 };
