@@ -344,7 +344,14 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                 ) : (
                   filtered.map(row => (
                     <tr key={row.id} className="border-b border-line hover:bg-canvas/50 transition-all font-medium text-ink">
-                      <td className="py-4 px-4 font-bold text-ink">
+                      <td className="py-4 px-4 font-bold text-ink flex items-center gap-2">
+                        {row.photo_url ? (
+                          <img src={row.photo_url} alt="" className="w-6 h-6 object-cover rounded-full border border-line" />
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-canvas border border-line flex items-center justify-center text-[10px] text-muted-custom font-bold">
+                            {row.name.charAt(0)}
+                          </div>
+                        )}
                         <a href={`/student-dashboard?studentId=${row.id}`} className="hover:text-forest hover:underline">
                           {row.name}
                         </a>
@@ -502,7 +509,14 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                     onClick={() => setSelected(row)}
                     className="border-b border-line hover:bg-canvas/40 transition-colors cursor-pointer"
                   >
-                    <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                    <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      {row.photo_url ? (
+                        <img src={row.photo_url} alt="" className="w-6 h-6 object-cover rounded-full border border-line" />
+                      ) : (
+                        <div className="w-6 h-6 rounded-full bg-canvas border border-line flex items-center justify-center text-[10px] text-muted-custom font-bold">
+                          {row.name.charAt(0)}
+                        </div>
+                      )}
                       <a href={`/student-dashboard?studentId=${row.id}`} className="hover:text-forest hover:underline">
                         {row.name}
                       </a>
@@ -610,6 +624,46 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${selected.status === 'active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
                         {selected.status}
                       </span>
+                    </div>
+                  </div>
+
+                  {/* Documents & File Attachments */}
+                  <div className="pt-4 border-t border-line space-y-3">
+                    <span className="text-muted-custom block uppercase tracking-wider text-[10px] font-bold">Uploaded Documents</span>
+                    
+                    <div className="space-y-2.5 text-xs">
+                      {/* Photo */}
+                      <div className="flex items-center justify-between bg-canvas/30 p-2.5 rounded-lg border border-line">
+                        <span className="font-semibold text-ink">Student Photo</span>
+                        {selected.photo_url ? (
+                          <div className="flex items-center gap-2">
+                            <img src={selected.photo_url} alt="" className="w-8 h-8 object-cover rounded-full border border-line" />
+                            <a href={selected.photo_url} target="_blank" rel="noreferrer" className="text-forest font-bold hover:underline">Watch ↗</a>
+                          </div>
+                        ) : (
+                          <span className="text-muted-custom text-[11px]">Not uploaded</span>
+                        )}
+                      </div>
+
+                      {/* Registration Form */}
+                      <div className="flex items-center justify-between bg-canvas/30 p-2.5 rounded-lg border border-line">
+                        <span className="font-semibold text-ink">Registration Form</span>
+                        {(selected.flags as any)?.reg_form_url ? (
+                          <a href={(selected.flags as any).reg_form_url} target="_blank" rel="noreferrer" className="text-forest font-bold hover:underline">Watch Document ↗</a>
+                        ) : (
+                          <span className="text-muted-custom text-[11px]">Not uploaded</span>
+                        )}
+                      </div>
+
+                      {/* Emirates ID */}
+                      <div className="flex items-center justify-between bg-canvas/30 p-2.5 rounded-lg border border-line">
+                        <span className="font-semibold text-ink">Emirates ID / Passport</span>
+                        {(selected.flags as any)?.emirates_id_url ? (
+                          <a href={(selected.flags as any).emirates_id_url} target="_blank" rel="noreferrer" className="text-forest font-bold hover:underline">Watch Document ↗</a>
+                        ) : (
+                          <span className="text-muted-custom text-[11px]">Not uploaded</span>
+                        )}
+                      </div>
                     </div>
                   </div>
 

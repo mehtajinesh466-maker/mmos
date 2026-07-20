@@ -168,13 +168,13 @@ export const Billing: React.FC<BillingProps> = ({ currentUser, activeCentre }) =
                   <span>Standard Chess Coaching Package</span>
                   <span className="font-mono">AED {selectedInvoice.amount.toLocaleString()}</span>
                 </div>
-                <div className="flex justify-between text-muted-custom text-xs py-1 border-b border-line pb-2">
+                <div className="flex justify-between text-muted-custom text-xs py-1 border-b border-line pb-2 font-sans">
                   <span>VAT @ 5%</span>
-                  <span className="font-mono">AED {(selectedInvoice.vat || selectedInvoice.amount * 0.05).toLocaleString()}</span>
+                  <span className="font-mono">AED {Number(selectedInvoice.vat || Number(selectedInvoice.amount) * 0.05).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
-                <div className="flex justify-between text-ink font-bold text-sm pt-3">
+                <div className="flex justify-between text-ink font-bold text-sm pt-3 font-sans">
                   <span>Total Paid</span>
-                  <span className="font-mono text-forest">AED {(selectedInvoice.amount + (selectedInvoice.vat || selectedInvoice.amount * 0.05)).toLocaleString()}</span>
+                  <span className="font-mono text-forest">AED {(Number(selectedInvoice.amount) + Number(selectedInvoice.vat || Number(selectedInvoice.amount) * 0.05)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
 

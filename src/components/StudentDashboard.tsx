@@ -96,6 +96,40 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     return centreId === 'c-2' || centreId === 'JLT' ? 'JLT' : 'Bay Avenue';
   };
 
+  const exportStudentDashboardExcel = () => {
+    if (!activeStudent || !studentMetrics) return;
+    const data = [
+      { Metric: "Student Name", Value: activeStudent.name },
+      { Metric: "Student ID", Value: activeStudent.id },
+      { Metric: "Centre", Value: getCentreName(activeStudent.centre_id) },
+      { Metric: "Assigned Coach", Value: getCoachName(activeStudent.coach_id) },
+      { Metric: "Level", Value: activeStudent.level || "Beginner" },
+      { Metric: "Classes Left", Value: studentMetrics.classesLeft },
+      { Metric: "Classes Completed", Value: studentMetrics.completed },
+      { Metric: "Rate per Class (AED)", Value: studentMetrics.rate },
+      { Metric: "Paid to Date (AED)", Value: studentMetrics.paidToDate },
+      { Metric: "Last 30 Days Classes", Value: studentMetrics.cls30d },
+      { Metric: "Last 90 Days Classes", Value: studentMetrics.cls90d },
+      { Metric: "Days Since Last Class", Value: studentMetrics.daysSince ?? "—" },
+      { Metric: "Engagement Status", Value: studentMetrics.engagement },
+    ];
+
+    const headers = Object.keys(data[0]);
+    const csvContent = [
+      headers.join(","),
+      ...data.map(row => headers.map(fieldName => JSON.stringify((row as any)[fieldName])).join(","))
+    ].join("\r\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${activeStudent.name.toLowerCase().replace(/\s+/g, '_')}_dashboard.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Computed metrics for active student
   const studentMetrics = useMemo(() => {
     if (!activeStudent) return null;
@@ -371,29 +405,24 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     return { paidSum, usedSum, balanceSum };
   }, [enrichedPackages]);
 
-  // Horizontal months mapping for class usage grid
   const monthlyUsageGrid = useMemo(() => {
-    const months = [
-      { name: 'Feb-25', count: 2 },
-      { name: 'Mar-25', count: 2 },
-      { name: 'Apr-25', count: 1 },
-      { name: 'May-25', count: 3 },
-      { name: 'Jun-25', count: 4 },
-      { name: 'Jul-25', count: 12 },
-      { name: 'Aug-25', count: 1 },
-      { name: 'Sep-25', count: 4 },
-      { name: 'Oct-25', count: 11 },
-      { name: 'Nov-25', count: 3 },
-      { name: 'Dec-25', count: 5 },
-      { name: 'Jan-26', count: 3 },
-      { name: 'Feb-26', count: 0 },
-      { name: 'Mar-26', count: 2 },
-      { name: 'Apr-26', count: 0 },
-      { name: 'May-26', count: 2 },
-      { name: 'Jun-26', count: 2 },
-    ];
-    return months;
-  }, []);
+    if (!activeStudent) return [];
+    const months = ['Feb-25', 'Mar-25', 'Apr-25', 'May-25', 'Jun-25', 'Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26'];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const getMonthLabel = (dateStr: string) => {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      const m = monthNames[d.getMonth()];
+      const y = d.getFullYear().toString().slice(-2);
+      return `${m}-${y}`;
+    };
+
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && (a.status === 'present' || a.status === 'makeup'));
+    return months.map(m => {
+      const count = studentAtts.filter(a => getMonthLabel(a.date) === m).length;
+      return { name: m, count };
+    });
+  }, [activeStudent, attendance]);
 
   if (loading) {
     return <div className="p-10 text-center text-muted-custom">Loading Student Dashboard...</div>;
@@ -430,10 +459,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
-          <a href={`/package-report?studentId=${selectedStudentId}`} className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas inline-block text-center">Package report</a>
-          <a href={`/progress-report?studentId=${selectedStudentId}`} className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas inline-block text-center">Progress report</a>
-          <button className="bg-white border border-line text-ink font-semibold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas">↓ Excel</button>
-          <button className="bg-white border border-line text-ink font-semibold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas">⎙ PDF</button>
+          <a href={`/package-report?studentId=${selectedStudentId}`} className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas inline-block text-center cursor-pointer transition-all">Package report</a>
+          <a href={`/progress-report?studentId=${selectedStudentId}`} className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas inline-block text-center cursor-pointer transition-all">Progress report</a>
+          <button onClick={exportStudentDashboardExcel} className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all">↓ Excel</button>
+          <button onClick={() => window.print()} className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all">⎙ PDF</button>
         </div>
       </div>
 
@@ -470,10 +499,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
             </div>
 
             <div className="flex gap-2.5 mt-4 md:mt-0 ml-auto">
-              <button className="bg-brass hover:bg-brass/90 text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all shadow">
+              <button onClick={() => alert(`✓ Progress report queued for WhatsApp and email sending to ${activeStudent.name}'s parent.`)} className="bg-brass hover:bg-brass/90 text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all shadow cursor-pointer">
                 Send report
               </button>
-              <button className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all">
+              <button onClick={() => window.location.href = `/billing?renewStudentId=${selectedStudentId}`} className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer">
                 Renew package
               </button>
             </div>

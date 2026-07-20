@@ -2,8 +2,22 @@
 
 import prisma from '../lib/prisma';
 import bcrypt from 'bcrypt';
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../lib/auth";
+
+async function verifySession() {
+  const session = await getServerSession(authOptions);
+  if (!session || !session.user) {
+    throw new Error("Unauthorized: No session found");
+  }
+  return session;
+}
 
 export async function registerUser(data: any) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   const hashedPassword = await bcrypt.hash(data.password, 10);
   return await prisma.user.create({
     data: {
@@ -21,6 +35,10 @@ export async function registerUser(data: any) {
 // -------------------------------------------------------------
 
 export async function addCoachDB(name: string, centreId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   // Create a user account for the coach first
   const user = await prisma.user.create({
     data: {
@@ -42,6 +60,10 @@ export async function addCoachDB(name: string, centreId: string) {
 }
 
 export async function updateCoachDB(coachId: string, name: string, centreId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   const coach = await prisma.coach.findUnique({ where: { id: coachId }, include: { user: true } });
   if (coach?.user_id) {
     await prisma.user.update({ where: { id: coach.user_id }, data: { name, centre_id: centreId || null } });
@@ -53,6 +75,10 @@ export async function updateCoachDB(coachId: string, name: string, centreId: str
 }
 
 export async function reassignCoachDB(fromCoachId: string, toCoachId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   // Move all students from one coach to another
   return await prisma.student.updateMany({
     where: { coach_id: fromCoachId },
@@ -61,6 +87,10 @@ export async function reassignCoachDB(fromCoachId: string, toCoachId: string) {
 }
 
 export async function deleteCoachDB(coachId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   return await prisma.coach.update({
     where: { id: coachId },
     data: { active: false }
@@ -68,12 +98,20 @@ export async function deleteCoachDB(coachId: string) {
 }
 
 export async function saveCentreDB(data: { name: string; status: string }) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   return await prisma.centre.create({
     data: { name: data.name, status: data.status }
   });
 }
 
 export async function updateCentreStatusDB(centreId: string, status: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   return await prisma.centre.update({
     where: { id: centreId },
     data: { status }
@@ -81,6 +119,10 @@ export async function updateCentreStatusDB(centreId: string, status: string) {
 }
 
 export async function deleteCentreDB(centreId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   return await prisma.centre.update({
     where: { id: centreId },
     data: { status: 'inactive' }
@@ -93,6 +135,16 @@ export async function deleteCentreDB(centreId: string) {
 // -------------------------------------------------------------
 
 export async function createScheduleSlot(centreId: string, coachId: string, day: string, time: string, level: string, capacity: number = 10) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'coach') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'coach') {
+    const coachRecord = await prisma.coach.findFirst({ where: { user_id: session.user.id } });
+    if (!coachRecord || coachRecord.id !== coachId) {
+      throw new Error("Unauthorized");
+    }
+  }
   return await prisma.scheduleSlot.create({
     data: {
       centre_id: centreId,
@@ -106,6 +158,16 @@ export async function createScheduleSlot(centreId: string, coachId: string, day:
 }
 
 export async function enrollStudent(studentId: string, slotId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'front_desk' && session.user.centre_id) {
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    if (student?.centre_id !== session.user.centre_id) {
+      throw new Error("Unauthorized");
+    }
+  }
   return await prisma.enrollment.create({
     data: {
       student_id: studentId,
@@ -115,6 +177,16 @@ export async function enrollStudent(studentId: string, slotId: string) {
 }
 
 export async function logProgress(studentId: string, coachId: string, focusArea: string, evaluation: number, notes: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'coach') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'coach') {
+    const coachRecord = await prisma.coach.findFirst({ where: { user_id: session.user.id } });
+    if (!coachRecord || coachRecord.id !== coachId) {
+      throw new Error("Unauthorized");
+    }
+  }
   return await prisma.progressLog.create({
     data: {
       student_id: studentId,
@@ -128,34 +200,232 @@ export async function logProgress(studentId: string, coachId: string, focusArea:
 
 
 export async function syncDatabaseToClient() {
-  const centres = await prisma.centre.findMany();
-  const users = await prisma.user.findMany();
-  const coachesRaw = await prisma.coach.findMany({ include: { user: true } });
-  // Denormalize coach name from user relation
-  const coaches = coachesRaw.map(c => ({
-    ...c,
-    name: c.user?.name || 'Unassigned',
-  }));
-  const families = await prisma.family.findMany();
-  const students = await prisma.student.findMany();
-  const tiers = await prisma.tier.findMany();
-  const packages = await prisma.package.findMany();
-  const scheduleSlots = await prisma.scheduleSlot.findMany();
-  const attendance = await prisma.attendance.findMany();
-  const invoices = await prisma.invoice.findMany();
+  const session = await verifySession();
+  const role = session.user.role;
+  const userCentreId = session.user.centre_id;
 
-  return JSON.parse(JSON.stringify({
-    centres,
-    users,
-    coaches,
-    families,
-    students,
-    tiers,
-    packages,
-    scheduleSlots,
-    attendance,
-    invoices,
-  }));
+  if (role === 'owner') {
+    const centres = await prisma.centre.findMany();
+    const users = await prisma.user.findMany();
+    const coachesRaw = await prisma.coach.findMany({ include: { user: true } });
+    const coaches = coachesRaw.map(c => ({
+      ...c,
+      name: c.user?.name || 'Unassigned',
+    }));
+    const families = await prisma.family.findMany();
+    const students = await prisma.student.findMany();
+    const tiers = await prisma.tier.findMany();
+    const packages = await prisma.package.findMany();
+    const scheduleSlots = await prisma.scheduleSlot.findMany();
+    const attendance = await prisma.attendance.findMany();
+    const invoices = await prisma.invoice.findMany();
+
+    return JSON.parse(JSON.stringify({
+      centres,
+      users,
+      coaches,
+      families,
+      students,
+      tiers,
+      packages,
+      scheduleSlots,
+      attendance,
+      invoices,
+    }));
+  }
+
+  if (role === 'front_desk') {
+    const centreFilter = userCentreId ? { id: userCentreId } : { id: 'none' };
+    const relationCentreFilter = userCentreId ? { centre_id: userCentreId } : { centre_id: 'none' };
+
+    const centres = await prisma.centre.findMany({ where: centreFilter });
+    const users = await prisma.user.findMany({
+      where: {
+        OR: [
+          { centre_id: userCentreId },
+          { role: 'coach', coaches: { some: { centre_id: userCentreId } } }
+        ]
+      }
+    });
+
+    const coachesRaw = await prisma.coach.findMany({
+      where: relationCentreFilter,
+      include: { user: true }
+    });
+    const coaches = coachesRaw.map(c => ({
+      ...c,
+      name: c.user?.name || 'Unassigned',
+    }));
+
+    const students = await prisma.student.findMany({ where: relationCentreFilter });
+    const studentIds = students.map(s => s.id);
+    const familyIds = students.map(s => s.family_id).filter(Boolean) as string[];
+
+    const families = await prisma.family.findMany({
+      where: { id: { in: familyIds } }
+    });
+
+    const tiers = await prisma.tier.findMany({ where: { active: true } });
+    const packages = await prisma.package.findMany({
+      where: { student_id: { in: studentIds } }
+    });
+    const scheduleSlots = await prisma.scheduleSlot.findMany({
+      where: relationCentreFilter
+    });
+    const attendance = await prisma.attendance.findMany({
+      where: { student_id: { in: studentIds } }
+    });
+    const invoices = await prisma.invoice.findMany({
+      where: { student_id: { in: studentIds } }
+    });
+
+    return JSON.parse(JSON.stringify({
+      centres,
+      users,
+      coaches,
+      families,
+      students,
+      tiers,
+      packages,
+      scheduleSlots,
+      attendance,
+      invoices,
+    }));
+  }
+
+  if (role === 'coach') {
+    const coachRecord = await prisma.coach.findFirst({
+      where: { user_id: session.user.id }
+    });
+
+    if (!coachRecord) {
+      return {
+        centres: [], users: [], coaches: [], families: [], students: [],
+        tiers: [], packages: [], scheduleSlots: [], attendance: [], invoices: []
+      };
+    }
+
+    const students = await prisma.student.findMany({
+      where: { coach_id: coachRecord.id }
+    });
+    const studentIds = students.map(s => s.id);
+    const familyIds = students.map(s => s.family_id).filter(Boolean) as string[];
+
+    const centres = coachRecord.centre_id 
+      ? await prisma.centre.findMany({ where: { id: coachRecord.centre_id } })
+      : [];
+
+    const users = await prisma.user.findMany({
+      where: { id: session.user.id }
+    });
+
+    const coachesRaw = await prisma.coach.findMany({
+      where: { id: coachRecord.id },
+      include: { user: true }
+    });
+    const coaches = coachesRaw.map(c => ({
+      ...c,
+      name: c.user?.name || 'Unassigned',
+    }));
+
+    const families = await prisma.family.findMany({
+      where: { id: { in: familyIds } }
+    });
+
+    const tiers = await prisma.tier.findMany({ where: { active: true } });
+    const packages = await prisma.package.findMany({
+      where: { student_id: { in: studentIds } }
+    });
+    const scheduleSlots = await prisma.scheduleSlot.findMany({
+      where: { coach_id: coachRecord.id }
+    });
+    const attendance = await prisma.attendance.findMany({
+      where: { student_id: { in: studentIds } }
+    });
+    const invoices = await prisma.invoice.findMany({
+      where: { student_id: { in: studentIds } }
+    });
+
+    return JSON.parse(JSON.stringify({
+      centres,
+      users,
+      coaches,
+      families,
+      students,
+      tiers,
+      packages,
+      scheduleSlots,
+      attendance,
+      invoices,
+    }));
+  }
+
+  if (role === 'parent') {
+    const family = await prisma.family.findFirst({
+      where: { email: session.user.email || 'none' }
+    });
+
+    if (!family) {
+      return {
+        centres: [], users: [], coaches: [], families: [], students: [],
+        tiers: [], packages: [], scheduleSlots: [], attendance: [], invoices: []
+      };
+    }
+
+    const families = [family];
+    const students = await prisma.student.findMany({
+      where: { family_id: family.id }
+    });
+    const studentIds = students.map(s => s.id);
+    const coachIds = students.map(s => s.coach_id).filter(Boolean) as string[];
+    const centreIds = students.map(s => s.centre_id).filter(Boolean) as string[];
+
+    const centres = await prisma.centre.findMany({
+      where: { id: { in: centreIds } }
+    });
+
+    const users = await prisma.user.findMany({
+      where: { id: session.user.id }
+    });
+
+    const coachesRaw = await prisma.coach.findMany({
+      where: { id: { in: coachIds } },
+      include: { user: true }
+    });
+    const coaches = coachesRaw.map(c => ({
+      ...c,
+      name: c.user?.name || 'Unassigned',
+    }));
+
+    const tiers = await prisma.tier.findMany({ where: { active: true } });
+    const packages = await prisma.package.findMany({
+      where: { student_id: { in: studentIds } }
+    });
+    const scheduleSlots = await prisma.scheduleSlot.findMany({
+      where: { centre_id: { in: centreIds } }
+    });
+    const attendance = await prisma.attendance.findMany({
+      where: { student_id: { in: studentIds } }
+    });
+    const invoices = await prisma.invoice.findMany({
+      where: { student_id: { in: studentIds } }
+    });
+
+    return JSON.parse(JSON.stringify({
+      centres,
+      users,
+      coaches,
+      families,
+      students,
+      tiers,
+      packages,
+      scheduleSlots,
+      attendance,
+      invoices,
+    }));
+  }
+
+  throw new Error("Unauthorized");
 }
 
 
@@ -172,6 +442,15 @@ export async function saveEnquiryDB(data: {
   coach_id?: string;
   notes?: string;
 }) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'front_desk' && session.user.centre_id) {
+    if (data.centre_id && data.centre_id !== session.user.centre_id) {
+      throw new Error("Unauthorized");
+    }
+  }
   return await prisma.enquiry.create({
     data: {
       child: data.child,
@@ -190,6 +469,16 @@ export async function saveEnquiryDB(data: {
 }
 
 export async function logAttendance(studentId: string, status: string, coachId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'coach') {
+    const coachRecord = await prisma.coach.findFirst({ where: { user_id: session.user.id } });
+    if (!coachRecord || coachRecord.id !== coachId) {
+      throw new Error("Unauthorized");
+    }
+  }
   await prisma.attendance.create({
     data: {
       student_id: studentId,
@@ -220,6 +509,15 @@ export async function logAttendance(studentId: string, status: string, coachId: 
 }
 
 export async function saveStudentDB(studentData: any) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'front_desk' && session.user.centre_id) {
+    if (studentData.centre_id && studentData.centre_id !== session.user.centre_id) {
+      throw new Error("Unauthorized");
+    }
+  }
   // Check if student exists
   const existing = await prisma.student.findUnique({
     where: { id: studentData.id }
@@ -259,6 +557,16 @@ export async function saveStudentDB(studentData: any) {
 }
 
 export async function saveProgressLogDB(logData: any) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'coach') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'coach') {
+    const coachRecord = await prisma.coach.findFirst({ where: { user_id: session.user.id } });
+    if (!coachRecord || coachRecord.id !== logData.coach_id) {
+      throw new Error("Unauthorized");
+    }
+  }
   await prisma.progressLog.create({
     data: {
       id: logData.id,
@@ -285,6 +593,16 @@ export async function syncOfflineQueueDB(records: any[]) {
 // -------------------------------------------------------------
 
 export async function registerStudent(data: any) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'front_desk' && session.user.centre_id) {
+    if (data.centre_id !== session.user.centre_id) {
+      throw new Error("Unauthorized");
+    }
+  }
+
   let familyId = data.family_id;
 
   // 1. Create family if not exists or no ID provided
@@ -315,6 +633,8 @@ export async function registerStudent(data: any) {
       status: 'active',
       fide_id: data.fide_id,
       join_date: new Date(),
+      photo_url: data.photo_url,
+      flags: data.flags || {},
     }
   });
 
@@ -354,6 +674,17 @@ export async function registerStudent(data: any) {
 }
 
 export async function renewPackage(studentId: string, tierId: string, kind: 'renewal' | 'tournament' = 'renewal') {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'front_desk' && session.user.centre_id) {
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    if (student?.centre_id !== session.user.centre_id) {
+      throw new Error("Unauthorized");
+    }
+  }
+
   const student = await prisma.student.findUnique({
     where: { id: studentId },
     include: { family: true }
@@ -394,7 +725,18 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
 }
 
 export async function getReconciliationData() {
+  const session = await verifySession();
+  const role = session.user.role;
+  const centreId = session.user.centre_id;
+
+  if (role !== 'owner' && role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+
+  const filter = (role === 'front_desk' && centreId) ? { centre_id: centreId } : {};
+
   const students = await prisma.student.findMany({
+    where: filter,
     include: {
       packages: true,
       coach: true,
@@ -424,6 +766,10 @@ export async function getReconciliationData() {
 }
 
 export async function deleteStudentDB(id: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   return await prisma.student.update({
     where: { id },
     data: { status: 'inactive' }
@@ -431,12 +777,29 @@ export async function deleteStudentDB(id: string) {
 }
 
 export async function deletePackageDB(id: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   return await prisma.package.delete({
     where: { id }
   });
 }
 
 export async function updatePackageDB(id: string, data: any) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'front_desk' && session.user.centre_id) {
+    const pkg = await prisma.package.findUnique({
+      where: { id },
+      include: { student: true }
+    });
+    if (pkg?.student.centre_id !== session.user.centre_id) {
+      throw new Error("Unauthorized");
+    }
+  }
   return await prisma.package.update({
     where: { id },
     data: {
@@ -448,12 +811,20 @@ export async function updatePackageDB(id: string, data: any) {
 }
 
 export async function deleteAttendanceDB(id: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   return await prisma.attendance.delete({
     where: { id }
   });
 }
 
 export async function updateAttendanceDB(id: string, status: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   return await prisma.attendance.update({
     where: { id },
     data: { status }
@@ -461,12 +832,29 @@ export async function updateAttendanceDB(id: string, status: string) {
 }
 
 export async function deleteInvoiceDB(id: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
   return await prisma.invoice.delete({
     where: { id }
   });
 }
 
 export async function updateInvoiceDB(id: string, status: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'front_desk' && session.user.centre_id) {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id },
+      include: { student: true }
+    });
+    if (invoice?.student?.centre_id !== session.user.centre_id) {
+      throw new Error("Unauthorized");
+    }
+  }
   return await prisma.invoice.update({
     where: { id },
     data: { status }
@@ -474,7 +862,19 @@ export async function updateInvoiceDB(id: string, status: string) {
 }
 
 export async function getActionCentreData() {
+  const session = await verifySession();
+  const role = session.user.role;
+  const centreId = session.user.centre_id;
+
+  if (role !== 'owner' && role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+
+  const relationCentreFilter = (role === 'front_desk' && centreId) ? { centre_id: centreId } : {};
+  const centreFilter = (role === 'front_desk' && centreId) ? { id: centreId } : {};
+
   const students = await prisma.student.findMany({
+    where: relationCentreFilter,
     include: {
       centre: true,
       coach: {
@@ -490,8 +890,11 @@ export async function getActionCentreData() {
     }
   });
 
-  const centres = await prisma.centre.findMany();
+  const centres = await prisma.centre.findMany({
+    where: centreFilter
+  });
   const coaches = await prisma.coach.findMany({
+    where: relationCentreFilter,
     include: {
       user: true
     }
@@ -505,4 +908,3 @@ export async function getActionCentreData() {
     tiers
   }));
 }
-

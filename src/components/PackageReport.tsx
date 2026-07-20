@@ -253,26 +253,23 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
   }, [enrichedPackages]);
 
   const monthlyUsageGrid = useMemo(() => {
-    return [
-      { name: 'Feb-25', count: 2 },
-      { name: 'Mar-25', count: 2 },
-      { name: 'Apr-25', count: 1 },
-      { name: 'May-25', count: 3 },
-      { name: 'Jun-25', count: 4 },
-      { name: 'Jul-25', count: 12 },
-      { name: 'Aug-25', count: 1 },
-      { name: 'Sep-25', count: 4 },
-      { name: 'Oct-25', count: 11 },
-      { name: 'Nov-25', count: 3 },
-      { name: 'Dec-25', count: 5 },
-      { name: 'Jan-26', count: 3 },
-      { name: 'Feb-26', count: 0 },
-      { name: 'Mar-26', count: 2 },
-      { name: 'Apr-26', count: 0 },
-      { name: 'May-26', count: 2 },
-      { name: 'Jun-26', count: 2 },
-    ];
-  }, []);
+    if (!activeStudent) return [];
+    const months = ['Feb-25', 'Mar-25', 'Apr-25', 'May-25', 'Jun-25', 'Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26'];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const getMonthLabel = (dateStr: string) => {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      const m = monthNames[d.getMonth()];
+      const y = d.getFullYear().toString().slice(-2);
+      return `${m}-${y}`;
+    };
+
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && (a.status === 'present' || a.status === 'makeup'));
+    return months.map(m => {
+      const count = studentAtts.filter(a => getMonthLabel(a.date) === m).length;
+      return { name: m, count };
+    });
+  }, [activeStudent, attendance]);
 
   const handleStudentChange = (id: string) => {
     setSelectedStudentId(id);

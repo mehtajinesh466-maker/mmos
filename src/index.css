@@ -105,4 +105,50 @@
     page-break-inside: avoid;
     page-break-after: auto;
   }
+
+  /* Override grid layout on print */
+  div.grid.grid-cols-\[240px_1fr\],
+  .grid-cols-\[240px_1fr\] {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+
+  /* Hide the sidebar */
+  div.grid.grid-cols-\[240px_1fr\] > aside,
+  div.grid.grid-cols-\[240px_1fr\] > :first-child,
+  .grid-cols-\[240px_1fr\] > :first-child {
+    display: none !important;
+    width: 0 !important;
+  }
+
+  /* Expand main container */
+  main {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  /* Hide headers, inputs, buttons, and filter bars */
+  header,
+  nav,
+  button,
+  select,
+  input,
+  .print\:hidden,
+  .bg-surface.border.border-line.rounded-\[14px\].p-3.shadow-sm.flex {
+    display: none !important;
+  }
+
+  /* Force background colors on print if supported */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
 }

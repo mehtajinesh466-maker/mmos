@@ -48,6 +48,42 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
   const [saveStatus, setSaveStatus] = useState('');
   const [studentIdAuto, setStudentIdAuto] = useState('BAY-363 (auto)');
 
+  const [photoUrl, setPhotoUrl] = useState('');
+  const [regFormUrl, setRegFormUrl] = useState('');
+  const [emiratesIdUrl, setEmiratesIdUrl] = useState('');
+  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: boolean }>({});
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: 'photo' | 'reg_form' | 'emirates_id') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadProgress(prev => ({ ...prev, [field]: true }));
+    const uploadData = new FormData();
+    uploadData.append('file', file);
+    uploadData.append('upload_preset', 'Master');
+
+    try {
+      const res = await fetch('https://api.cloudinary.com/v1_1/l3ec1ten/image/upload', {
+        method: 'POST',
+        body: uploadData,
+      });
+      const data = await res.json();
+      if (data.secure_url) {
+        if (field === 'photo') setPhotoUrl(data.secure_url);
+        else if (field === 'reg_form') setRegFormUrl(data.secure_url);
+        else if (field === 'emirates_id') setEmiratesIdUrl(data.secure_url);
+        setSaveStatus(`✓ Uploaded successfully to Cloudinary!`);
+      } else {
+        alert('Upload failed: ' + (data.error?.message || 'Unknown error'));
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error uploading file to Cloudinary');
+    } finally {
+      setUploadProgress(prev => ({ ...prev, [field]: false }));
+    }
+  };
+
   const filteredCoaches = formData.centre_id ? coaches.filter(c => c.centre_id === formData.centre_id) : coaches;
 
   // Auto student ID calculation based on centre selection
@@ -112,6 +148,11 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       tier_id: tierId,
       consent_ops: formData.consent_ops,
       consent_mktg: formData.consent_mktg,
+      photo_url: photoUrl,
+      flags: {
+        reg_form_url: regFormUrl,
+        emirates_id_url: emiratesIdUrl
+      }
     };
 
     try {
@@ -121,6 +162,9 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       db.syncFromNeon(freshData);
       
       setSaveStatus('✓ Student registered and package created successfully!');
+      setPhotoUrl('');
+      setRegFormUrl('');
+      setEmiratesIdUrl('');
       
       // Reset form
       setFormData(prev => ({
@@ -444,24 +488,80 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
             {/* Registration Form File Upload */}
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-ink">Registration form</label>
-              <div className="border border-dashed border-line hover:bg-canvas rounded-lg p-5 flex flex-col items-center justify-center text-xs text-muted-custom cursor-pointer transition-all">
-                <span>⤒ Drop file or <b className="text-forest hover:underline">browse</b></span>
+              <input 
+                type="file" 
+                onChange={e => handleFileUpload(e, 'reg_form')}
+                className="hidden" 
+                id="reg-form-file-input"
+              />
+              <div 
+                onClick={() => document.getElementById('reg-form-file-input')?.click()}
+                className="border border-dashed border-line hover:bg-canvas rounded-lg p-5 flex flex-col items-center justify-center text-xs text-muted-custom cursor-pointer transition-all"
+              >
+                {uploadProgress['reg_form'] ? (
+                  <span className="text-forest animate-pulse font-semibold">Uploading to Cloudinary...</span>
+                ) : regFormUrl ? (
+                  <div className="flex flex-col items-center gap-1.5 text-center">
+                    <span className="text-forest font-bold">✓ Uploaded Registration Form</span>
+                    <a href={regFormUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-[10px] text-muted-custom hover:underline font-mono truncate max-w-xs">{regFormUrl}</a>
+                  </div>
+                ) : (
+                  <span>⤒ Drop file or <b className="text-forest hover:underline">browse</b></span>
+                )}
               </div>
             </div>
 
             {/* Student Photo File Upload */}
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-ink">Student photo</label>
-              <div className="border border-dashed border-line hover:bg-canvas rounded-lg p-5 flex flex-col items-center justify-center text-xs text-muted-custom cursor-pointer transition-all">
-                <span>⤒ Drop file or <b className="text-forest hover:underline">browse</b></span>
+              <input 
+                type="file" 
+                accept="image/*"
+                onChange={e => handleFileUpload(e, 'photo')}
+                className="hidden" 
+                id="student-photo-file-input"
+              />
+              <div 
+                onClick={() => document.getElementById('student-photo-file-input')?.click()}
+                className="border border-dashed border-line hover:bg-canvas rounded-lg p-5 flex flex-col items-center justify-center text-xs text-muted-custom cursor-pointer transition-all"
+              >
+                {uploadProgress['photo'] ? (
+                  <span className="text-forest animate-pulse font-semibold">Uploading to Cloudinary...</span>
+                ) : photoUrl ? (
+                  <div className="flex flex-col items-center gap-1.5 text-center">
+                    <img src={photoUrl} alt="" className="w-10 h-10 object-cover rounded-full border border-line" />
+                    <span className="text-forest font-bold">✓ Uploaded Photo</span>
+                    <a href={photoUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-[10px] text-muted-custom hover:underline font-mono truncate max-w-xs">{photoUrl}</a>
+                  </div>
+                ) : (
+                  <span>⤒ Drop file or <b className="text-forest hover:underline">browse</b></span>
+                )}
               </div>
             </div>
 
             {/* Emirates ID File Upload */}
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-ink">Emirates ID / passport</label>
-              <div className="border border-dashed border-line hover:bg-canvas rounded-lg p-5 flex flex-col items-center justify-center text-xs text-muted-custom cursor-pointer transition-all">
-                <span>⤒ Drop file or <b className="text-forest hover:underline">browse</b></span>
+              <input 
+                type="file" 
+                onChange={e => handleFileUpload(e, 'emirates_id')}
+                className="hidden" 
+                id="emirates-id-file-input"
+              />
+              <div 
+                onClick={() => document.getElementById('emirates-id-file-input')?.click()}
+                className="border border-dashed border-line hover:bg-canvas rounded-lg p-5 flex flex-col items-center justify-center text-xs text-muted-custom cursor-pointer transition-all"
+              >
+                {uploadProgress['emirates_id'] ? (
+                  <span className="text-forest animate-pulse font-semibold">Uploading to Cloudinary...</span>
+                ) : emiratesIdUrl ? (
+                  <div className="flex flex-col items-center gap-1.5 text-center">
+                    <span className="text-forest font-bold">✓ Uploaded Emirates ID / Passport</span>
+                    <a href={emiratesIdUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-[10px] text-muted-custom hover:underline font-mono truncate max-w-xs">{emiratesIdUrl}</a>
+                  </div>
+                ) : (
+                  <span>⤒ Drop file or <b className="text-forest hover:underline">browse</b></span>
+                )}
               </div>
             </div>
 

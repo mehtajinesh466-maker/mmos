@@ -39,6 +39,41 @@ export default function ExecutivePage() {
     });
   }, []);
 
+  const exportDashboardExcel = () => {
+    const data = filteredStudents.map((s, idx) => {
+      const centreName = centres.find(c => c.id === s.centre_id)?.name || '—';
+      return {
+        Index: idx + 1,
+        Name: s.name,
+        Level: s.level,
+        Status: s.status,
+        Centre: centreName,
+        UnbilledValue: (s.flags as any)?.unpaid_value || 0,
+        UnbilledClasses: (s.flags as any)?.unpaid_classes || 0,
+      };
+    });
+
+    if (data.length === 0) {
+      alert("No data to export");
+      return;
+    }
+
+    const headers = Object.keys(data[0]);
+    const csvContent = [
+      headers.join(","),
+      ...data.map(row => headers.map(fieldName => JSON.stringify((row as any)[fieldName])).join(","))
+    ].join("\r\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `executive_dashboard_export.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Dashboard Slices / Filters
   const [filterCentre, setFilterCentre] = useState('All');
   const [filterSegment, setFilterSegment] = useState('All');
@@ -59,25 +94,51 @@ export default function ExecutivePage() {
 
     return students.filter(s => {
       if (filterCentre !== 'All' && s.centre_id !== (filterCentre === 'JLT' ? jltCentreId : bayCentreId)) return false;
-      if (filterLevel !== 'All' && s.level !== filterLevel) return false;
-
-      if (filterSegment !== 'All') {
-        const heat = (s.flags?.low_package) ? 'HOT' : 'HEALTHY';
-        if (heat !== filterSegment) return false;
+      
+      // Filter level
+      if (filterLevel !== 'All') {
+        if (filterLevel === 'Not assigned') {
+          if (s.level && s.level !== 'Not assigned') return false;
+        } else {
+          if (s.level !== filterLevel) return false;
+        }
       }
 
+      // Filter segment
+      if (filterSegment !== 'All') {
+        const pkgs = packages.filter(p => p.student_id === s.id && !p.frozen);
+        const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
+        const classesLeft = activePkg?.classes_remaining ?? 0;
+        const pkgSize = activePkg?.classes_total ?? 0;
+
+        let seg = 'HEALTHY';
+        if (pkgSize === 0 || classesLeft === 0) seg = 'COLD';
+        else if (classesLeft <= 2) seg = 'HOT';
+        else if (classesLeft <= 4) seg = 'WARM';
+
+        if (seg !== filterSegment) return false;
+      }
+
+      // Filter engagement
       if (filterEngagement !== 'All') {
         const today = new Date();
-        const daysSince = s.last_attended
-          ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000)
-          : 999;
-        const engStatus = daysSince <= 14 ? 'Engaged' : daysSince <= 30 ? 'Slipping' : 'Dormant';
-        if (engStatus.toLowerCase() !== filterEngagement.toLowerCase()) return false;
+        const daysSince = s.last_attended ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000) : 999;
+        let eng = 'Dormant';
+        if (daysSince === 999) eng = 'Never attended';
+        else if (daysSince <= 14) eng = 'Engaged';
+        else if (daysSince <= 30) eng = 'Slipping';
+        else if (daysSince <= 60) eng = 'Cold';
+
+        if (eng !== filterEngagement) return false;
       }
 
       return true;
     });
-  }, [students, centres, filterCentre, filterSegment, filterEngagement, filterLevel]);
+  }, [students, centres, filterCentre, filterSegment, filterEngagement, filterLevel, packages]);
+
+  const isFiltered = useMemo(() => {
+    return filterCentre !== 'All' || filterSegment !== 'All' || filterEngagement !== 'All' || filterLevel !== 'All';
+  }, [filterCentre, filterSegment, filterEngagement, filterLevel]);
 
   const trendData = useMemo(() => {
     const months = ['Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26'];
@@ -298,12 +359,47 @@ export default function ExecutivePage() {
     .filter(s => s.status === 'active' && ((s.flags as any)?.unpaid_classes || 0) > 0)
     .reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
 
-  const hotStudentsCount = filteredStudents.filter(s => (s.flags as any)?.at_risk).length;
-  const coldStudentsCount = filteredStudents.filter(s => (s.flags as any)?.inactive).length;
-  const healthyStudentsCount = filteredStudents.filter(s => !(s.flags as any)?.at_risk && !(s.flags as any)?.inactive).length;
+  const segmentsStats = useMemo(() => {
+    let hot = 0;
+    let warm = 0;
+    let cold = 0;
+    let healthy = 0;
+    filteredStudents.forEach(s => {
+      const pkgs = packages.filter(p => p.student_id === s.id && !p.frozen);
+      const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
+      const classesLeft = activePkg?.classes_remaining ?? 0;
+      const pkgSize = activePkg?.classes_total ?? 0;
+
+      let seg = 'HEALTHY';
+      if (pkgSize === 0 || classesLeft === 0) seg = 'COLD';
+      else if (classesLeft <= 2) seg = 'HOT';
+      else if (classesLeft <= 4) seg = 'WARM';
+
+      if (seg === 'COLD') cold++;
+      else if (seg === 'HOT') hot++;
+      else if (seg === 'WARM') warm++;
+      else healthy++;
+    });
+    return { hot, warm, cold, healthy };
+  }, [filteredStudents, packages]);
+
+  const hotStudentsCount = segmentsStats.hot;
+  const coldStudentsCount = segmentsStats.cold;
+  const healthyStudentsCount = segmentsStats.healthy;
 
   const totalCollected = invoices.filter(i => i.status === 'paid' && filteredStudents.some(s => s.id === i.student_id)).reduce((sum, i) => sum + Number(i.amount), 0);
   const totalCollectedM = (totalCollected / 1000000).toFixed(2);
+  const totalCollectedK = (totalCollected / 1000).toFixed(0);
+
+  // Data Quality Gaps variables
+  const noLevelCount = filteredStudents.filter(s => !s.level || s.level === 'Not assigned').length;
+  const noLevelPct = filteredStudents.length > 0 ? Math.round((noLevelCount / filteredStudents.length) * 100) : 0;
+
+  const noPackageCount = filteredStudents.filter(s => s.status === 'active' && !packages.some(p => p.student_id === s.id && p.classes_remaining > 0)).length;
+  const noPackageClasses = filteredStudents.filter(s => s.status === 'active' && !packages.some(p => p.student_id === s.id && p.classes_remaining > 0)).reduce((sum, s) => sum + ((s.flags as any)?.unpaid_classes || 0), 0);
+
+  const noCoachCount = filteredStudents.filter(s => !s.coach_id).length;
+  const neverAttendedCount = filteredStudents.filter(s => !s.last_attended).length;
 
   const bayCentreId = centres.find(c => c.name === 'Bay Avenue')?.id || 'c-1';
   const jltCentreId = centres.find(c => c.name === 'JLT')?.id || 'c-2';
@@ -449,9 +545,9 @@ export default function ExecutivePage() {
       )}
 
       {/* Slices Controls bar */}
-      <div className="bg-surface border border-line rounded-[14px] p-3 shadow-sm flex flex-wrap gap-4 items-center justify-between">
-        <div className="flex flex-wrap gap-3 items-center text-xs">
-          <span className="font-bold text-[#C4A249] uppercase tracking-wider">SLICE</span>
+      <div className="bg-surface border border-line rounded-[14px] p-3 shadow-sm flex items-center justify-between gap-4 overflow-x-auto whitespace-nowrap text-xs">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-[#C4A249] uppercase tracking-wider text-[10px] mr-1">SLICE</span>
           <select value={filterCentre} onChange={e => setFilterCentre(e.target.value)} className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none">
             <option value="All">All centres</option>
             <option value="Bay Avenue">Bay Avenue</option>
@@ -460,25 +556,44 @@ export default function ExecutivePage() {
           <select value={filterSegment} onChange={e => setFilterSegment(e.target.value)} className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none">
             <option value="All">All segments</option>
             <option value="HOT">HOT</option>
+            <option value="WARM">WARM</option>
+            <option value="COLD">COLD</option>
             <option value="HEALTHY">HEALTHY</option>
           </select>
           <select value={filterEngagement} onChange={e => setFilterEngagement(e.target.value)} className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none">
             <option value="All">All engagement</option>
             <option value="Engaged">Engaged</option>
             <option value="Slipping">Slipping</option>
+            <option value="Dormant">Dormant</option>
+            <option value="Cold">Cold</option>
+            <option value="Never attended">Never attended</option>
           </select>
           <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none">
             <option value="All">All levels</option>
-            <option value="Beginner">Beginner</option>
-            <option value="Intermediate">Intermediate</option>
+            <option value="Assessment">Assessment</option>
+            <option value="Early Starters-Beginner 1">Early Starters-Beginner 1</option>
+            <option value="Early Starters-Beginner 2">Early Starters-Beginner 2</option>
+            <option value="Early Starters-Intermediate">Early Starters-Intermediate</option>
+            <option value="FIDE rated">FIDE rated</option>
+            <option value="Juniors-Beginner">Juniors-Beginner</option>
+            <option value="Juniors-Intermediate A">Juniors-Intermediate A</option>
+            <option value="Juniors-Intermediate B">Juniors-Intermediate B</option>
+            <option value="Not assigned">Not assigned</option>
+            <option value="Seniors-Advanced">Seniors-Advanced</option>
+            <option value="Seniors-Beginner">Seniors-Beginner</option>
+            <option value="Seniors-Intermediate">Seniors-Intermediate</option>
           </select>
         </div>
 
-        <div className="flex flex-wrap gap-3 items-center text-xs">
-          <span className="font-bold text-[#C4A249] uppercase tracking-wider">DICE</span>
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-[#C4A249] uppercase tracking-wider text-[10px] mr-1">DICE</span>
           <select value={diceBy} onChange={e => setDiceBy(e.target.value)} className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none">
             <option value="By Centre">By Centre</option>
             <option value="By Coach">By Coach</option>
+            <option value="By Engagement">By Engagement</option>
+            <option value="By Segment">By Segment</option>
+            <option value="By Level">By Level</option>
+            <option value="By Rate band">By Rate band</option>
           </select>
 
           <div className="flex border border-line rounded-lg overflow-hidden bg-white text-xs">
@@ -493,11 +608,45 @@ export default function ExecutivePage() {
             ))}
           </div>
 
-          <button className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all">Reset</button>
-          <button className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all">↓ Excel</button>
-          <button className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all">PDF</button>
+          <button onClick={() => { setFilterCentre('All'); setFilterSegment('All'); setFilterEngagement('All'); setFilterLevel('All'); }} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">Reset</button>
+          <button onClick={exportDashboardExcel} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">↓ Excel</button>
+          <button onClick={() => window.print()} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">PDF</button>
         </div>
       </div>
+
+      {/* Yellow filter status alert bar */}
+      {isFiltered && (
+        <div className="bg-[#FDF6E2] border border-[#F5E0B3] rounded-[14px] p-4 shadow-sm flex justify-between items-center text-xs text-amber-900">
+          <div className="flex items-center gap-2">
+            <span className="text-amber-600 font-bold text-sm">⚑</span>
+            <span>
+              <b>Filtered view</b> — showing{' '}
+              <span className="font-semibold text-amber-950 capitalize">
+                {[
+                  filterCentre !== 'All' && filterCentre,
+                  filterSegment !== 'All' && filterSegment,
+                  filterEngagement !== 'All' && filterEngagement,
+                  filterLevel !== 'All' && filterLevel
+                ]
+                  .filter(Boolean)
+                  .join(', ')}
+              </span>{' '}
+              ({filteredStudents.length} of {students.length} students). These are <span className="font-bold">not</span> club-wide totals.
+            </span>
+          </div>
+          <button 
+            onClick={() => {
+              setFilterCentre('All');
+              setFilterSegment('All');
+              setFilterEngagement('All');
+              setFilterLevel('All');
+            }}
+            className="bg-white border border-[#E3C588] hover:bg-amber-50 text-amber-950 font-bold px-3.5 py-1.5 rounded-lg transition-all cursor-pointer shadow-sm text-xs"
+          >
+            Show whole club
+          </button>
+        </div>
+      )}
 
       {/* KPI Cards Rows */}
       {viewMode === 'overview' && (
@@ -505,9 +654,9 @@ export default function ExecutivePage() {
           {[
             { label: 'RUN-RATE / MONTH', value: `AED ${runRateK}K`, desc: `${activePackages.length} active packages` },
             { label: 'UNBILLED EXPOSURE', value: `AED ${unbilledK}K`, desc: 'revenue at risk', color: 'text-hot-custom' },
-            { label: 'STUDENTS', value: `${totalStudentsCount}`, desc: `${activeStudentsCount} engaged (${activePercentage}%)` },
-            { label: 'HEALTHY', value: `${healthyStudentsCount}`, desc: `${Math.round(healthyStudentsCount/totalStudentsCount*100)}% of base · HOT ${hotStudentsCount} COLD ${coldStudentsCount}` },
-            { label: 'LIFETIME COLLECTED', value: `AED ${totalCollectedM}M`, desc: 'since inception' }
+            { label: isFiltered ? 'STUDENTS IN SCOPE' : 'STUDENTS', value: `${totalStudentsCount}`, desc: `${activeStudentsCount} engaged (${activePercentage}%)` },
+            { label: 'HEALTHY', value: `${healthyStudentsCount}`, desc: totalStudentsCount > 0 ? `${Math.round(healthyStudentsCount/totalStudentsCount*100)}% of base · HOT ${hotStudentsCount} WARM ${segmentsStats.warm} COLD ${coldStudentsCount}` : '0%' },
+            { label: 'LIFETIME COLLECTED', value: isFiltered ? `AED ${totalCollectedK}K` : `AED ${totalCollectedM}M`, desc: isFiltered ? 'in this scope' : 'since inception' }
           ].map((kpi, idx) => (
             <div key={idx} className="bg-surface border border-line rounded-[14px] p-5 shadow-sm space-y-1">
               <div className="text-[9px] font-bold text-muted-custom tracking-wider uppercase">{kpi.label}</div>
@@ -613,6 +762,70 @@ export default function ExecutivePage() {
               ) : (
                 <canvas ref={donutChartRef}></canvas>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trust & Data quality gaps widgets */}
+      {(viewMode === 'overview' || viewMode === 'diligence') && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Trust widget */}
+          <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-base font-bold font-display text-ink flex items-center gap-2">
+                <span className="text-[#C4A249]">⚖</span> What you can trust today
+              </h3>
+              <p className="text-xs text-muted-custom">Not all of the legacy data is equally sound. Read accordingly.</p>
+            </div>
+
+            <div className="space-y-3 pt-2 text-xs">
+              {[
+                { status: 'TRUSTED', badge: 'bg-emerald-50 border-emerald-200 text-emerald-800', title: 'Package ledger — classes paid vs used', desc: 'Auditable, row-level' },
+                { status: 'TRUSTED', badge: 'bg-emerald-50 border-emerald-200 text-emerald-800', title: 'Attendance counts, enrolment dates, rates, centres', desc: 'Consistent across sheets' },
+                { status: 'PARTIAL', badge: 'bg-amber-50 border-amber-200 text-warm-custom', title: 'Student level', desc: `${noLevelPct}% missing` },
+                { status: 'DO NOT USE', badge: 'bg-red-50 border-red-200 text-hot-custom', title: 'Overdue_Classes / Overdue_Value', desc: 'Contradicted by the ledger' },
+                { status: 'DO NOT USE', badge: 'bg-red-50 border-red-200 text-hot-custom', title: 'Coach assignment on student records', desc: 'Known to be wrong' },
+              ].map((row, idx) => (
+                <div key={idx} className="flex justify-between items-center border-b border-line pb-2.5 last:border-0 last:pb-0">
+                  <div className="flex items-center gap-3">
+                    <span className={`text-[8px] font-bold px-2 py-0.5 rounded border uppercase ${row.badge}`}>{row.status}</span>
+                    <span className="font-semibold text-ink">{row.title}</span>
+                  </div>
+                  <span className="text-muted-custom text-[11px]">{row.desc}</span>
+                </div>
+              ))}
+            </div>
+            
+            <div className="text-[10px] text-muted-custom italic border-t border-line pt-3">
+              The platform fixes each of these at source — that is the point of building it.
+            </div>
+          </div>
+
+          {/* Quality Gaps widget */}
+          <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-base font-bold font-display text-ink flex items-center gap-2">
+                <span className="text-[#C4A249]">⚑</span> Data quality gaps
+              </h3>
+              <p className="text-xs text-muted-custom">Fix at migration — these distort every report.</p>
+            </div>
+
+            <div className="space-y-3 pt-2 text-xs">
+              {[
+                { title: 'No level assigned', count: noLevelCount, extra: `${noLevelPct}%` },
+                { title: 'Attending with no paid package', count: noPackageCount, extra: `${noPackageClasses} classes` },
+                { title: 'No coach assigned', count: noCoachCount, extra: '—' },
+                { title: 'Never attended', count: neverAttendedCount, extra: '—' },
+              ].map((row, idx) => (
+                <div key={idx} className="flex justify-between items-center border-b border-line pb-2.5 last:border-0 last:pb-0">
+                  <span className="font-semibold text-ink">{row.title}</span>
+                  <div className="flex gap-8 items-center text-right font-mono">
+                    <span className="font-bold text-hot-custom">{row.count}</span>
+                    <span className="text-muted-custom text-[11px] w-20">{row.extra}</span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

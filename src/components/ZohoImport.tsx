@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../lib/db';
 import { syncDatabaseToClient } from '../app/actions';
+import { exportTableToCSV } from '../lib/export';
 
 export const ZohoImport: React.FC = () => {
   const [fileSelected, setFileSelected] = useState(false);
@@ -127,10 +128,19 @@ export const ZohoImport: React.FC = () => {
     { legacy: '>> UNPAID << status', platform: 'unbilled_classes', treatment: 'Becomes the opening unbilled balance', style: 'default' },
   ];
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const handleFileChoose = () => {
-    setFileSelected(true);
-    setFileName(`zoho_export_${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toLowerCase().replace(' ', '')}.csv`);
-    setImportStatus('✓ File loaded. Running validation engine...');
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setFileSelected(true);
+      setFileName(file.name);
+      setImportStatus('✓ File loaded. Running validation engine...');
+    }
   };
 
   const handleRunValidation = async () => {
@@ -201,11 +211,18 @@ export const ZohoImport: React.FC = () => {
       <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-3">
         <h3 className="text-sm font-bold text-ink">↑ Import a Zoho export</h3>
         <p className="text-xs text-muted-custom">Accepts .xlsx or .csv straight from Zoho Creator. Column mapping is below; the validation table runs automatically on upload.</p>
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-4 flex-wrap font-sans">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            accept=".csv,.xlsx" 
+            className="hidden" 
+          />
           <button
             onClick={handleFileChoose}
             disabled={isProcessing}
-            className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all"
+            className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
           >
             ↑ Choose Zoho export (.xlsx / .csv)
           </button>
@@ -279,13 +296,13 @@ export const ZohoImport: React.FC = () => {
             </p>
           </div>
           <div className="flex gap-2">
-            <button className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas">↓ Excel</button>
-            <button className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas">⎙ PDF</button>
+            <button onClick={() => exportTableToCSV('#zoho-validation-results-table', 'zoho_validation_results.csv')} className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all">↓ Excel</button>
+            <button onClick={() => window.print()} className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all">⎙ PDF</button>
           </div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
+          <table id="zoho-validation-results-table" className="w-full border-collapse">
             <thead>
               <tr className="border-b border-line">
                 <th className="text-left text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 px-3">Check</th>
