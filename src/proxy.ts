@@ -33,6 +33,19 @@ export default withAuth(
       "/audit": ["owner"],
     };
 
+    // Instant edge redirect for Root Page to correct dashboard
+    if (pathname === "/") {
+      if (role === 'owner') {
+        return NextResponse.redirect(new URL("/analytics", req.url));
+      } else if (role === 'front_desk') {
+        return NextResponse.redirect(new URL("/action-centre", req.url));
+      } else if (role === 'coach') {
+        return NextResponse.redirect(new URL("/schedule", req.url));
+      } else if (role === 'parent') {
+        return NextResponse.redirect(new URL("/student-dashboard", req.url));
+      }
+    }
+
     // Find if the current pathname matches or starts with any restricted route
     for (const [route, allowedRoles] of Object.entries(routeAccess)) {
       if (pathname === route || pathname.startsWith(route + "/")) {

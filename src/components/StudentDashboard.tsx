@@ -57,8 +57,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
       if (queryStudentId && stds.some(s => s.id === queryStudentId)) {
         setSelectedStudentId(queryStudentId);
       } else if (currentUser.role === 'parent') {
-        const parentChild = stds.find(s => s.id === 's-alex-sterling-id') || stds[0];
-        setSelectedStudentId(parentChild.id);
+        const parentChild = stds[0];
+        if (parentChild) {
+          setSelectedStudentId(parentChild.id);
+        }
       } else {
         setSelectedStudentId(stds[0].id);
       }

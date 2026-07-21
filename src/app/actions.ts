@@ -219,6 +219,18 @@ export async function syncDatabaseToClient() {
     const scheduleSlots = await prisma.scheduleSlot.findMany();
     const attendance = await prisma.attendance.findMany();
     const invoices = await prisma.invoice.findMany();
+    const enquiries = await prisma.enquiry.findMany();
+    const progressLogsRaw = await prisma.progressLog.findMany();
+    const progressLogs = progressLogsRaw.map(l => ({
+      id: l.id,
+      student_id: l.student_id,
+      coach_id: l.coach_id,
+      date: l.date ? l.date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      topic: l.focus_area || '',
+      mastery: (l.evaluation ?? 0) >= 5 ? 'Mastered' : (l.evaluation ?? 0) >= 4 ? 'Practising' : 'Learning',
+      skills: l.skills || { openings: 3, tactics: 3, endgames: 3, strategy: 3, focus: 3 },
+      note: l.notes || ''
+    }));
 
     return JSON.parse(JSON.stringify({
       centres,
@@ -231,6 +243,8 @@ export async function syncDatabaseToClient() {
       scheduleSlots,
       attendance,
       invoices,
+      enquiries,
+      progressLogs
     }));
   }
 
@@ -278,6 +292,9 @@ export async function syncDatabaseToClient() {
     const invoices = await prisma.invoice.findMany({
       where: { student_id: { in: studentIds } }
     });
+    const enquiries = userCentreId 
+      ? await prisma.enquiry.findMany({ where: { centre_id: userCentreId } })
+      : await prisma.enquiry.findMany();
 
     return JSON.parse(JSON.stringify({
       centres,
@@ -290,6 +307,7 @@ export async function syncDatabaseToClient() {
       scheduleSlots,
       attendance,
       invoices,
+      enquiries,
     }));
   }
 
@@ -569,14 +587,13 @@ export async function saveProgressLogDB(logData: any) {
   }
   await prisma.progressLog.create({
     data: {
-      id: logData.id,
       student_id: logData.student_id,
       coach_id: logData.coach_id,
-      date: new Date(logData.date),
-      topic: logData.topic,
-      mastery: logData.mastery,
-      skills: logData.skills,
-      note: logData.note
+      date: logData.date ? new Date(logData.date) : new Date(),
+      focus_area: logData.topic || logData.focus_area || '',
+      evaluation: logData.mastery === 'Learning' ? 2 : logData.mastery === 'Practising' ? 4 : (logData.evaluation || 5),
+      notes: logData.note || logData.notes || '',
+      skills: logData.skills || null
     }
   });
 }

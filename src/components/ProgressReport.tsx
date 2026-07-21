@@ -59,8 +59,10 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
       if (queryStudentId && stds.some(s => s.id === queryStudentId)) {
         setSelectedStudentId(queryStudentId);
       } else if (currentUser.role === 'parent') {
-        const parentChild = stds.find(s => s.id === 's-alex-sterling-id') || stds[0];
-        setSelectedStudentId(parentChild.id);
+        const parentChild = stds[0];
+        if (parentChild) {
+          setSelectedStudentId(parentChild.id);
+        }
       } else {
         setSelectedStudentId(stds[0].id);
       }
@@ -87,7 +89,7 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
 
   const activeStudentId = useMemo(() => {
     if (currentUser.role === 'parent') {
-      const alex = students.find(s => s.id === 's-alex-sterling-id') || students[0];
+      const alex = students[0];
       return alex ? alex.id : '';
     }
     return selectedStudentId;

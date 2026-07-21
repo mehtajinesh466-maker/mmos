@@ -171,6 +171,8 @@ export const db = {
     if (data.scheduleSlots) this.save('schedule_slots', data.scheduleSlots);
     if (data.attendance) this.save('attendance', data.attendance);
     if (data.invoices) this.save('invoices', data.invoices);
+    if (data.progressLogs) this.save('progress_logs', data.progressLogs);
+    if (data.enquiries) this.save('enquiries', data.enquiries);
     window.dispatchEvent(new Event('db-synced'));
   },
   // Helper loaders & savers

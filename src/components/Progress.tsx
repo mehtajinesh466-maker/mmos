@@ -69,11 +69,22 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
       s.status === 'active'
     );
 
-    setRoster(matchedStudents.map(student => ({
-      student,
-      mastery: 'Learning',
-      note: ''
-    })));
+    const existingLogs = db.getProgressLogs();
+
+    setRoster(matchedStudents.map(student => {
+      // Find latest progress log for this student
+      const studentLogs = existingLogs
+        .filter(l => l.student_id === student.id)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      const latestLog = studentLogs[0];
+
+      return {
+        student,
+        mastery: latestLog ? latestLog.mastery : 'Learning',
+        note: latestLog ? (latestLog.note || '') : ''
+      };
+    }));
   }, [selectedSlotId]);
 
   const handleMasteryClick = (studentId: string, level: 'Learning' | 'Practising' | 'Mastered') => {
@@ -100,16 +111,37 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
     let count = 0;
     try {
       for (const item of roster) {
-        // Map mastery read to rating 1-5
+        // Save to local database (localStorage)
+        db.saveProgressLog({
+          id: 'log-' + Math.random().toString(36).substring(2, 9),
+          student_id: item.student.id,
+          coach_id: coachId,
+          date: new Date().toISOString().split('T')[0],
+          topic: topicCovered,
+          mastery: item.mastery,
+          skills: { openings: 3, tactics: 3, endgames: 3, strategy: 3, focus: 3 },
+          note: item.note
+        });
+
+        // Map mastery read to rating 1-5 for server action
         const rating = item.mastery === 'Learning' ? 2 : item.mastery === 'Practising' ? 4 : 5;
-        await logProgress(item.student.id, coachId, topicCovered, rating, item.note);
+        try {
+          await logProgress(item.student.id, coachId, topicCovered, rating, item.note);
+        } catch (serverErr) {
+          // Fallback gracefully if server session/auth isn't active
+          console.warn('Server logProgress skipped:', serverErr);
+        }
         count++;
       }
-      // Refresh local cache with latest from DB
-      const freshData = await syncDatabaseToClient();
-      db.syncFromNeon(freshData);
+      
+      try {
+        const freshData = await syncDatabaseToClient();
+        db.syncFromNeon(freshData);
+      } catch (syncErr) {
+        console.warn('Server sync skipped:', syncErr);
+      }
 
-      setSaveStatus(`✓ Progress saved to database for ${count} student${count > 1 ? 's' : ''}!`);
+      setSaveStatus(`✓ Progress saved for ${count} student${count > 1 ? 's' : ''}!`);
     } catch (err: any) {
       setSaveStatus('❌ Error: ' + err.message);
     } finally {

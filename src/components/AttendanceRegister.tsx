@@ -239,7 +239,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
   }, [enriched]);
 
   const parentChild = useMemo(() => {
-    return students.find(s => s.id === 's-alex-sterling-id') || students[0] || null;
+    return students[0] || null;
   }, [students]);
 
   const childLogs = useMemo(() => {

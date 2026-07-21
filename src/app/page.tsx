@@ -27,9 +27,5 @@ export default function RootPage() {
     }
   }, [status, session, router]);
 
-  return (
-    <div style={{ padding: '40px', textAlign: 'center' }}>
-      Loading Dashboard...
-    </div>
-  );
+  return null;
 }

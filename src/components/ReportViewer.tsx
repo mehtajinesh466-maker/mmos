@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -2065,7 +2065,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       };
     }
 
-    if (reportId === 'coach-utilisation') {
+    if (reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') {
       const CAPACITY_PER_COACH = 400; // student-classes/month; configurable in Settings
 
       // Date window anchored on latest attendance date (or today)
@@ -2692,22 +2692,77 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       return;
     }
 
-    if (reportId === 'coach-utilisation') {
+    if (reportId === 'coach-utilisation' || reportId === 'load-capacity') {
       const coachRows = reportData.coachRows || [];
       const labels = coachRows.map((r: any) => r.coachName.split(' ')[0]);
-      const data = coachRows.map((r: any) => r.utilisationPct);
-      const colors = data.map((v: number) => v >= 60 ? '#286957' : v >= 30 ? '#C4A249' : '#A23B3B');
+      const deliveredData = coachRows.map((r: any) => r.classes30D);
+      const spareData = coachRows.map((r: any) => r.spareCapacity);
+
+      chartInstance.current = new Chart(chartRef.current, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Delivered',
+              data: deliveredData,
+              backgroundColor: '#286957',
+              borderWidth: 0,
+              borderRadius: 0
+            },
+            {
+              label: 'Spare capacity',
+              data: spareData,
+              backgroundColor: '#E4DFD2',
+              borderWidth: 0,
+              borderRadius: 0
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: true, position: 'top', align: 'center' },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` ${ctx.dataset.label}: ${ctx.raw} student-classes`
+              }
+            }
+          },
+          scales: {
+            y: {
+              stacked: true,
+              beginAtZero: true,
+              max: 400,
+              grid: { color: '#E4DFD2' }
+            },
+            x: {
+              stacked: true,
+              grid: { display: false }
+            }
+          }
+        }
+      });
+      return;
+    }
+
+    if (reportId === 'coach-retention') {
+      const coachRows = reportData.coachRows || [];
+      const labels = coachRows.map((r: any) => r.coachName.split(' ')[0]);
+      const data = coachRows.map((r: any) => r.engagementPct);
+      const colors = ['#286957', '#C4A249', '#4BD1D9', '#95DAC1', '#72A99A', '#B8863B', '#A23B3B'];
 
       chartInstance.current = new Chart(chartRef.current, {
         type: 'bar',
         data: {
           labels,
           datasets: [{
-            label: 'Utilisation %',
+            label: 'Engagement %',
             data,
             backgroundColor: colors,
             borderWidth: 0,
-            borderRadius: 6
+            borderRadius: 4
           }]
         },
         options: {
@@ -2717,15 +2772,57 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
             legend: { display: false },
             tooltip: {
               callbacks: {
-                label: (ctx) => ` ${ctx.raw}% utilisation`
+                label: (ctx) => ` ${ctx.raw}% engagement`
               }
             }
           },
           scales: {
             y: {
               beginAtZero: true,
-              max: 100,
-              ticks: { callback: (v) => `${v}%` },
+              max: 70,
+              ticks: { stepSize: 10, callback: (v) => `${v}` },
+              grid: { color: '#E4DFD2' }
+            },
+            x: { grid: { display: false } }
+          }
+        }
+      });
+      return;
+    }
+
+    if (reportId === 'revenue-contribution') {
+      const coachRows = reportData.coachRows || [];
+      const labels = coachRows.map((r: any) => r.coachName.split(' ')[0]);
+      const data = coachRows.map((r: any) => r.revenuePerMonth);
+      const colors = ['#286957', '#C4A249', '#4BD1D9', '#95DAC1', '#72A99A', '#B8863B', '#A23B3B'];
+
+      chartInstance.current = new Chart(chartRef.current, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Revenue / month',
+            data,
+            backgroundColor: colors,
+            borderWidth: 0,
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` AED ${(ctx.raw as number).toLocaleString()}`
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { callback: (v) => `${Number(v) / 1000}K` },
               grid: { color: '#E4DFD2' }
             },
             x: { grid: { display: false } }
@@ -3149,7 +3246,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         </div>
       )}
 
-      {reportId === 'coach-utilisation' && (
+      {(reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') && (
         <div className="p-4 rounded-[12px] bg-red-50/30 border border-red-100 border-l-4 border-l-hot-custom text-xs text-ink/90 space-y-1.5">
           <div className="font-bold text-hot-custom flex items-center gap-1.5 text-sm">
             <span>⚑</span> Structure ready — awaiting clean coach data
@@ -3159,6 +3256,8 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           </div>
         </div>
       )}
+
+
 
       {/* KPI Cards */}
       {reportId === 'membership-economics' || reportId === 'cohort-retention' ? (
@@ -3251,8 +3350,8 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
             <div className="text-[9px] text-muted-custom mt-1">invoice today</div>
           </div>
         </div>
-      ) : (reportId === 'board-investor-pack' || reportId === 'new-centre-model' || reportId === 'coach-utilisation') ? (
-        reportId === 'coach-utilisation' ? (
+      ) : (reportId === 'board-investor-pack' || reportId === 'new-centre-model' || reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') ? (
+        (reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
               <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1?.label || 'COACHES'}</div>
@@ -3300,20 +3399,28 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         </div>
       )}
 
-      {/* Custom layout for revenue-summary, unbilled-leak, data-reconciliation, collection-list, membership-economics, lifetime-value, rate-card, attendance-summary, engagement-report, cohort-retention, slow-risk, package-expiry, unpaid-attendance, growth-trajectory, centre-perf, board-investor-pack, new-centre-model, coach-utilisation */}
-      {(reportId === 'revenue-summary' || reportId === 'unbilled-leak' || reportId === 'data-reconciliation' || reportId === 'collection-list' || reportId === 'membership-economics' || reportId === 'lifetime-value' || reportId === 'rate-card' || reportId === 'attendance-summary' || reportId === 'engagement-report' || reportId === 'cohort-retention' || reportId === 'slow-risk' || reportId === 'package-expiry' || reportId === 'unpaid-attendance' || reportId === 'growth-trajectory' || reportId === 'centre-perf' || reportId === 'board-investor-pack' || reportId === 'new-centre-model' || reportId === 'coach-utilisation') ? (
-        reportId === 'coach-utilisation' ? (
+      {/* Custom layout for all reports */}
+      {(reportId === 'revenue-summary' || reportId === 'unbilled-leak' || reportId === 'data-reconciliation' || reportId === 'collection-list' || reportId === 'membership-economics' || reportId === 'lifetime-value' || reportId === 'rate-card' || reportId === 'attendance-summary' || reportId === 'engagement-report' || reportId === 'cohort-retention' || reportId === 'slow-risk' || reportId === 'package-expiry' || reportId === 'unpaid-attendance' || reportId === 'growth-trajectory' || reportId === 'centre-perf' || reportId === 'board-investor-pack' || reportId === 'new-centre-model' || reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') ? (
+        (reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') ? (
           <div className="space-y-6">
-            {/* Utilisation % chart */}
+            {/* Utilisation / Retention / Revenue % chart */}
             <div className="bg-white border border-line rounded-2xl p-5 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-bold text-forest">↑ Utilisation % by coach</h3>
+                  <h3 className="text-sm font-bold text-ink font-display flex items-center gap-1.5">
+                    <span className="text-[#C4A249]">♟</span> {reportId === 'coach-retention' ? 'Engagement % by coach' : reportId === 'revenue-contribution' ? 'Revenue / month by coach' : reportId === 'load-capacity' ? 'Student-classes 30d by coach' : 'Utilisation % by coach'}
+                  </h3>
                   <p className="text-[10px] text-muted-custom mt-0.5">All data</p>
                 </div>
               </div>
-              <div className="text-[10px] text-[#286957] bg-emerald-50/40 border border-emerald-100 rounded-lg px-3 py-2 leading-relaxed">
-                Utilisation is measured in <span className="font-bold">student-classes (attendances)</span> against a configurable capacity of 400/month — one group class of 8 children is 8 student-classes. <span className="font-bold">This is the structure; the current numbers are not reliable</span> — see the banner above.
+              <div className="text-[10px] text-[#286957] bg-emerald-50/40 border border-emerald-100 border-l-4 border-l-forest rounded-lg px-3 py-2 leading-relaxed">
+                {reportId === 'coach-retention' ? (
+                  <>This report will show retention per coach. <b className="text-forest">It cannot be read yet</b> — the coach field in the legacy student records is known to be wrong, so any per-coach conclusion drawn from it today would be an artefact of bad data, not a fact about a coach.</>
+                ) : reportId === 'revenue-contribution' ? (
+                  <>Revenue per coach = student-classes delivered (30d) × centre median rate. Structure only until coach assignment is trustworthy.</>
+                ) : (
+                  <>Delivered vs spare capacity per coach — the structure the platform will populate once coach assignment is captured at source.</>
+                )}
               </div>
               <div className="h-64 relative">
                 <canvas ref={chartRef}></canvas>

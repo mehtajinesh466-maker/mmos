@@ -19,22 +19,23 @@ export default function DashboardLayout({
   useEffect(() => {
     if (status !== "authenticated" || !session?.user) return;
 
-    // Sync data from neon first
+    const user = session.user as any;
+    if (user.role !== "owner" && user.centre_id) {
+      setActiveCentre(user.centre_id);
+    } else if (user.role === "owner") {
+      setActiveCentre("All");
+    }
+
+    // Render immediately using local cached data
+    setIsReady(true);
+
+    // Sync data from neon in background
     syncDatabaseToClient()
       .then((data) => {
         db.syncFromNeon(data);
-        setIsReady(true);
-
-        const user = session.user as any;
-        if (user.role !== "owner" && user.centre_id) {
-          setActiveCentre(user.centre_id);
-        } else if (user.role === "owner") {
-          setActiveCentre("All");
-        }
       })
       .catch((e) => {
-        console.error("Failed to sync DB", e);
-        setIsReady(true); // fall back to local storage
+        console.error("Failed to sync DB in background", e);
       });
 
     const updateOfflineCount = () => {
@@ -64,11 +65,7 @@ export default function DashboardLayout({
   };
 
   if (status === "loading" || !isReady || !session?.user) {
-    return (
-      <div style={{ padding: "40px", textAlign: "center" }}>
-        Loading Application...
-      </div>
-    );
+    return null;
   }
 
   const currentUser = session.user as any;

@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/db';
-import type { User, Enquiry, Centre } from '../lib/db';
-import { saveEnquiryDB } from '../app/actions';
+import type { User, Enquiry, Centre, Student } from '../lib/db';
+import { saveEnquiryDB, syncDatabaseToClient } from '../app/actions';
 
 interface CRMProps {
   currentUser: User;
@@ -30,7 +30,13 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
   });
   const [message, setMessage] = useState('');
 
-  const loadData = () => {
+  const loadData = async () => {
+    try {
+      const freshData = await syncDatabaseToClient();
+      if (freshData) db.syncFromNeon(freshData);
+    } catch (e) {
+      // Fallback to local storage if sync fails
+    }
     const enqs = db.getEnquiries();
     const ctrs = db.getCentres();
     setEnquiries(enqs);
@@ -571,10 +577,44 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
             {/* Panel Footer */}
             <div className="p-6 border-t border-line bg-canvas flex gap-3">
               <button 
-                onClick={() => setSelectedEnquiry(null)}
-                className="flex-1 bg-[#173F35] hover:bg-[#173F35]/90 text-white font-bold text-xs py-2.5 rounded-lg transition-all"
+                onClick={() => {
+                  if (!selectedEnquiry) return;
+
+                  // 1. Create family
+                  const familyId = 'fam-' + Math.random().toString(36).substring(2, 9);
+                  
+                  // 2. Create student record from enquiry data
+                  const newStudent: Student = {
+                    id: 'stu-' + Math.random().toString(36).substring(2, 9),
+                    family_id: familyId,
+                    centre_id: selectedEnquiry.centre_id || (centres[0]?.id || 'c-1'),
+                    coach_id: selectedEnquiry.coach_id || null,
+                    name: selectedEnquiry.child || 'New Student',
+                    dob: new Date().toISOString().split('T')[0],
+                    gender: 'Boy',
+                    school: 'Primary School',
+                    level: selectedEnquiry.experience === 'Club player' ? 'Intermediate' : selectedEnquiry.experience === 'Tournament player' ? 'Advanced' : 'Beginner',
+                    status: 'active',
+                    join_date: new Date().toISOString().split('T')[0],
+                    last_attended: null,
+                    pace_status: 'New',
+                    pace_reason: null,
+                    flags: {}
+                  };
+
+                  // Save student locally & sync
+                  db.saveStudent(newStudent);
+
+                  // 3. Mark enquiry as converted
+                  handleUpdateStage(selectedEnquiry.id, 'converted');
+
+                  setMessage(`✓ ${selectedEnquiry.child} converted to active Enrolment! Student profile created.`);
+                  setSelectedEnquiry(null);
+                  setTimeout(() => setMessage(''), 6000);
+                }}
+                className="flex-1 bg-[#173F35] hover:bg-[#173F35]/90 text-white font-bold text-xs py-2.5 rounded-lg transition-all shadow"
               >
-                Convert to Enrolment
+                🎓 Convert to Enrolment
               </button>
               <button 
                 onClick={() => setSelectedEnquiry(null)}
