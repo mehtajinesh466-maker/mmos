@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/db';
 import type { User, Enquiry, Centre, Student } from '../lib/db';
-import { saveEnquiryDB, syncDatabaseToClient } from '../app/actions';
+import { saveEnquiryDB, syncDatabaseToClient, updateEnquiryStageDB } from '../app/actions';
 
 interface CRMProps {
   currentUser: User;
@@ -61,7 +61,7 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
     setIsSaving(true);
     try {
       const newEnq: Enquiry = {
-        id: 'enq-' + Math.random().toString(36).substr(2, 9),
+        id: 'enq-' + crypto.randomUUID(),
         child: formData.child,
         age: formData.age,
         parent: formData.parent,
@@ -116,7 +116,7 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
     }
   };
 
-  const handleUpdateStage = (enqId: string, stage: Enquiry['stage']) => {
+  const handleUpdateStage = async (enqId: string, stage: Enquiry['stage']) => {
     const enqs = db.getEnquiries();
     const idx = enqs.findIndex(e => e.id === enqId);
     if (idx !== -1) {
@@ -125,6 +125,14 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
       db.save('enquiries', enqs);
       db.logAudit('update_enquiry_stage', 'enquiries', before, enqs[idx]);
       window.dispatchEvent(new Event('db-synced'));
+
+      try {
+        await updateEnquiryStageDB(enqId, stage);
+        const freshData = await syncDatabaseToClient();
+        db.syncFromNeon(freshData);
+      } catch (err) {
+        console.error("Failed to sync enquiry stage to server:", err);
+      }
     }
   };
 
@@ -581,11 +589,11 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
                   if (!selectedEnquiry) return;
 
                   // 1. Create family
-                  const familyId = 'fam-' + Math.random().toString(36).substring(2, 9);
+                  const familyId = 'fam-' + crypto.randomUUID();
                   
                   // 2. Create student record from enquiry data
                   const newStudent: Student = {
-                    id: 'stu-' + Math.random().toString(36).substring(2, 9),
+                    id: 'stu-' + crypto.randomUUID(),
                     family_id: familyId,
                     centre_id: selectedEnquiry.centre_id || (centres[0]?.id || 'c-1'),
                     coach_id: selectedEnquiry.coach_id || null,

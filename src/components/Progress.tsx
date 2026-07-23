@@ -113,7 +113,7 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
       for (const item of roster) {
         // Save to local database (localStorage)
         db.saveProgressLog({
-          id: 'log-' + Math.random().toString(36).substring(2, 9),
+          id: 'log-' + crypto.randomUUID(),
           student_id: item.student.id,
           coach_id: coachId,
           date: new Date().toISOString().split('T')[0],

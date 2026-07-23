@@ -19,15 +19,33 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
-  const loadData = async () => {
+  const loadData = () => {
     try {
-      const data = await getActionCentreData();
-      setStudents(data.students);
-      setCentres(data.centres);
-      setCoaches(data.coaches);
-      setTiers(data.tiers);
+      const stds = db.getStudents();
+      const cens = db.getCentres();
+      const coas = db.getCoaches();
+      const trs = db.getTiers();
+      const pkgs = db.getPackages();
+
+      // Enrich students with packages & coaches for ActionCentre metrics
+      const enrichedStudents = stds.map(s => {
+        const studentPkgs = pkgs.filter(p => p.student_id === s.id);
+        const coachMatch = coas.find(c => c.id === s.coach_id);
+        const centreMatch = cens.find(c => c.id === s.centre_id);
+        return {
+          ...s,
+          packages: studentPkgs,
+          coach: coachMatch ? { user: { name: coachMatch.name } } : null,
+          centre: centreMatch ? { name: centreMatch.name } : null
+        };
+      });
+
+      setStudents(enrichedStudents);
+      setCentres(cens);
+      setCoaches(coas);
+      setTiers(trs);
     } catch (error) {
-      console.error("Error loading action centre data:", error);
+      console.error("Error loading action centre data from local DB:", error);
     } finally {
       setLoading(false);
     }

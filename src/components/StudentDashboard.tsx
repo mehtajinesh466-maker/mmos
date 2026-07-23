@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Chart, registerables } from 'chart.js';
 import { db } from '../lib/db';
 import type { User, Student, Package, Attendance, ProgressLog, Invoice } from '../lib/db';
+import { sendProgressReport, syncDatabaseToClient } from '../app/actions';
 
 Chart.register(...registerables);
 
@@ -22,6 +23,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [progressLogs, setProgressLogs] = useState<ProgressLog[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [statusMessage, setStatusMessage] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   // Chart Refs
@@ -45,12 +48,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     const atts = db.getAttendance();
     const logs = db.getProgressLogs();
     const invs = db.get<Invoice>('invoices') || [];
+    const notifs = db.getNotifications ? db.getNotifications() : [];
 
     setStudents(stds);
     setPackages(pkgs);
     setAttendance(atts);
     setProgressLogs(logs);
     setInvoices(invs);
+    setNotifications(notifs);
     setLoading(false);
 
     if (stds.length > 0 && !selectedStudentId) {
@@ -310,7 +315,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     // 3. Radar Chart (Skills profile)
     const logs = progressLogs.filter(p => p.student_id === activeStudent.id);
     const latestLog = logs[logs.length - 1];
-    const skillValues = latestLog?.skills || { openings: 65, tactics: 60, endgames: 55, strategy: 50, focus: 70 };
+    const rawSkills = latestLog?.skills || { openings: 3.5, tactics: 3, endgames: 3, strategy: 3, focus: 3.5 };
+    const normalizeSkill = (val: number) => val <= 5 ? Math.round((val / 5) * 100) : val;
+    const skillValues = {
+      openings: normalizeSkill(rawSkills.openings || 3),
+      tactics: normalizeSkill(rawSkills.tactics || 3),
+      endgames: normalizeSkill(rawSkills.endgames || 3),
+      strategy: normalizeSkill(rawSkills.strategy || 3),
+      focus: normalizeSkill(rawSkills.focus || 3)
+    };
 
     chartInstances.current.radar = new Chart(radarChartRef.current, {
       type: 'radar',
@@ -501,7 +514,23 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
             </div>
 
             <div className="flex gap-2.5 mt-4 md:mt-0 ml-auto">
-              <button onClick={() => alert(`✓ Progress report queued for WhatsApp and email sending to ${activeStudent.name}'s parent.`)} className="bg-brass hover:bg-brass/90 text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all shadow cursor-pointer">
+              <button
+                onClick={async () => {
+                  try {
+                    setStatusMessage('Sending progress report to parent...');
+                    const res = await sendProgressReport(activeStudent.id);
+                    const freshData = await syncDatabaseToClient();
+                    db.syncFromNeon(freshData);
+                    loadData();
+                    setStatusMessage(`✓ Progress report successfully sent to ${res.parentName}! WhatsApp: ${res.phone}, Email: ${res.email}`);
+                    setTimeout(() => setStatusMessage(''), 6000);
+                  } catch (err: any) {
+                    setStatusMessage(`❌ Error: ${err.message}`);
+                    setTimeout(() => setStatusMessage(''), 6000);
+                  }
+                }}
+                className="bg-brass hover:bg-brass/90 text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all shadow cursor-pointer"
+              >
                 Send report
               </button>
               <button onClick={() => window.location.href = `/billing?renewStudentId=${selectedStudentId}`} className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer">
@@ -509,6 +538,12 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
               </button>
             </div>
           </div>
+
+          {statusMessage && (
+            <div className={`p-4 rounded-xl border text-xs font-semibold ${statusMessage.startsWith('❌') ? 'bg-red-50 border-red-200 text-hot-custom' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+              {statusMessage}
+            </div>
+          )}
 
           {/* Slipping Alert Notification Banner */}
           {studentMetrics.engagement === 'SLIPPING' && (
@@ -760,7 +795,77 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
                 )}
               </div>
             </div>
+ 
+          </div>
 
+          {/* Live Notification History Log */}
+          <div className="bg-surface border border-line rounded-[14px] p-5 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
+                <span className="text-[#C4A249]">✉</span> Notification Log
+              </h3>
+              <p className="text-[10px] text-muted-custom mt-0.5">
+                Real-time history of WhatsApp and Email alerts dispatched to the parent.
+              </p>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-line text-left">
+                    <th className="py-2 px-3 text-muted-custom uppercase font-bold text-[9px] tracking-wider">Sent At</th>
+                    <th className="py-2 px-3 text-muted-custom uppercase font-bold text-[9px] tracking-wider">Alert Type</th>
+                    <th className="py-2 px-3 text-muted-custom uppercase font-bold text-[9px] tracking-wider">Channel</th>
+                    <th className="py-2 px-3 text-muted-custom uppercase font-bold text-[9px] tracking-wider">Status</th>
+                    <th className="py-2 px-3 text-muted-custom uppercase font-bold text-[9px] tracking-wider">Recipient Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {notifications.filter(n => n.student_id === activeStudent.id).length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-muted-custom">
+                        No notifications sent to this parent yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    [...notifications]
+                      .filter(n => n.student_id === activeStudent.id)
+                      .sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime())
+                      .map((n, idx) => {
+                        const parentPhone = activeStudent.family?.phone || 'No phone registered';
+                        const parentEmail = activeStudent.family?.email || 'No email registered';
+                        return (
+                          <tr key={n.id || idx} className="border-b border-line hover:bg-canvas/30 transition-colors font-medium">
+                            <td className="py-2.5 px-3 font-mono text-muted-custom">
+                              {new Date(n.sent_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                            </td>
+                            <td className="py-2.5 px-3 uppercase text-[10px] font-bold text-slate-700">
+                              {n.type?.replace('_', ' ')}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${
+                                n.channel === 'whatsapp'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                              }`}>
+                                {n.channel?.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="text-[9px] font-bold px-2 py-0.5 rounded border bg-slate-100 text-slate-600 border-slate-200">
+                                {n.status?.toUpperCase() || 'SENT'}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-muted-custom">
+                              {n.channel === 'whatsapp' ? parentPhone : parentEmail}
+                            </td>
+                          </tr>
+                        );
+                      })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
         </div>

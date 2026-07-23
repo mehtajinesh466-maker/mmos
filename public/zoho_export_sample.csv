@@ -1,0 +1,5 @@
+Name,Student Id,Assigned center,Coaches Details,Current Student levels,Rate_per_Class,Date Enrolled,Mobile/Whatsapp,Total_Paid_AED,Classes_Remaining,Overdue_Classes,Overdue_Value_AED,Pkg Timeline rows,>> UNPAID << status
+Alexander Sterling,MM-ST-0001,DXB-01,Coach Sarah,Intermediate,150,2025-09-15,+971501234567,1500,2,0,0,10,No
+Sophia Chen,MM-ST-0002,DXB-02,Coach Sarah,Beginner,150,2025-10-01,+971507654321,3000,0,2,300,20,Yes
+Marcus Aurelius,MM-ST-0003,DXB-01,Coach David,,180,2025-08-20,+971509998887,1800,5,0,0,12,No
+Emily Watson,MM-ST-0004,DXB-03,Coach Sarah,Beginner,150,2025-11-12,+971504445556,1500,0,0,0,8,No

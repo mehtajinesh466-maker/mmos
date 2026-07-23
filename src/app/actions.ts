@@ -13,13 +13,23 @@ async function verifySession() {
   return session;
 }
 
+function generateRandomPassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
+  let pass = "";
+  for (let i = 0; i < 10; i++) {
+    pass += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return pass;
+}
+
 export async function registerUser(data: any) {
   const session = await verifySession();
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
   }
-  const hashedPassword = await bcrypt.hash(data.password, 10);
-  return await prisma.user.create({
+  const rawPassword = data.password || generateRandomPassword();
+  const hashedPassword = await bcrypt.hash(rawPassword, 10);
+  const user = await prisma.user.create({
     data: {
       email: data.email,
       password: hashedPassword,
@@ -27,6 +37,26 @@ export async function registerUser(data: any) {
       role: data.role,
       centre_id: data.role === 'owner' ? null : data.centre_id,
     }
+  });
+  return { ...user, generatedPassword: rawPassword };
+}
+
+export async function updateUserCredentialsDB(userId: string, data: { name?: string; email?: string; password?: string; role?: string }) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
+  const updateData: any = {};
+  if (data.name) updateData.name = data.name;
+  if (data.email) updateData.email = data.email;
+  if (data.role) updateData.role = data.role;
+  if (data.password && data.password.trim().length > 0) {
+    updateData.password = await bcrypt.hash(data.password.trim(), 10);
+  }
+
+  return await prisma.user.update({
+    where: { id: userId },
+    data: updateData
   });
 }
 
@@ -39,24 +69,30 @@ export async function addCoachDB(name: string, centreId: string) {
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
   }
+  const rawPassword = generateRandomPassword();
+  const hashedPassword = await bcrypt.hash(rawPassword, 10);
+  const email = `${name.toLowerCase().replace(/\s+/g, '.')}@mastermoves.ae`;
+
   // Create a user account for the coach first
   const user = await prisma.user.create({
     data: {
       name,
-      email: `${name.toLowerCase().replace(/\s+/g, '.')}@mastermoves.ae`,
-      password: 'changeme123',
+      email,
+      password: hashedPassword,
       role: 'coach',
       centre_id: centreId || null,
     }
   });
   // Then create coach record
-  return await prisma.coach.create({
+  const coach = await prisma.coach.create({
     data: {
       user_id: user.id,
       centre_id: centreId || null,
       active: true,
     }
   });
+
+  return { ...coach, email, generatedPassword: rawPassword };
 }
 
 export async function updateCoachDB(coachId: string, name: string, centreId: string) {
@@ -176,6 +212,25 @@ export async function enrollStudent(studentId: string, slotId: string) {
   });
 }
 
+export async function unenrollStudent(studentId: string, slotId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  if (session.user.role === 'front_desk' && session.user.centre_id) {
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    if (student?.centre_id !== session.user.centre_id) {
+      throw new Error("Unauthorized");
+    }
+  }
+  return await prisma.enrollment.deleteMany({
+    where: {
+      student_id: studentId,
+      slot_id: slotId
+    }
+  });
+}
+
 export async function logProgress(studentId: string, coachId: string, focusArea: string, evaluation: number, notes: string) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach') {
@@ -204,23 +259,76 @@ export async function syncDatabaseToClient() {
   const role = session.user.role;
   const userCentreId = session.user.centre_id;
 
+  // Auto-backfill parent user accounts for any existing student family lacking one (optimized)
+  if (role === 'owner' || role === 'front_desk') {
+    const families = await prisma.family.findMany({ where: { email: { not: null } } });
+    const parentUsers = await prisma.user.findMany({
+      where: { role: 'parent' },
+      select: { email: true }
+    });
+    const existingParentEmails = new Set(parentUsers.map(u => u.email.toLowerCase().trim()));
+
+    const missingFamilies = families.filter(fam => {
+      if (!fam.email || !fam.email.trim()) return false;
+      return !existingParentEmails.has(fam.email.toLowerCase().trim());
+    });
+
+    if (missingFamilies.length > 0) {
+      for (const fam of missingFamilies) {
+        const cleanEmail = fam.email!.toLowerCase().trim();
+        const rawPassword = generateRandomPassword();
+        const hashedPassword = await bcrypt.hash(rawPassword, 10);
+        await prisma.user.create({
+          data: {
+            name: fam.primary_name || 'Parent',
+            email: cleanEmail,
+            password: hashedPassword,
+            role: 'parent',
+            centre_id: null
+          }
+        }).catch(() => {});
+      }
+    }
+  }
+
   if (role === 'owner') {
-    const centres = await prisma.centre.findMany();
-    const users = await prisma.user.findMany();
-    const coachesRaw = await prisma.coach.findMany({ include: { user: true } });
+    const [
+      centres,
+      users,
+      coachesRaw,
+      families,
+      students,
+      tiers,
+      packages,
+      scheduleSlots,
+      attendance,
+      invoices,
+      enquiries,
+      enrollments,
+      progressLogsRaw,
+      notifications
+    ] = await Promise.all([
+      prisma.centre.findMany(),
+      prisma.user.findMany(),
+      prisma.coach.findMany({ include: { user: true } }),
+      prisma.family.findMany(),
+      prisma.student.findMany(),
+      prisma.tier.findMany(),
+      prisma.package.findMany(),
+      prisma.scheduleSlot.findMany(),
+      prisma.attendance.findMany(),
+      prisma.invoice.findMany(),
+      prisma.enquiry.findMany(),
+      prisma.enrollment.findMany(),
+      prisma.progressLog.findMany(),
+      prisma.notification.findMany()
+    ]);
+
     const coaches = coachesRaw.map(c => ({
       ...c,
       name: c.user?.name || 'Unassigned',
     }));
-    const families = await prisma.family.findMany();
-    const students = await prisma.student.findMany();
-    const tiers = await prisma.tier.findMany();
-    const packages = await prisma.package.findMany();
-    const scheduleSlots = await prisma.scheduleSlot.findMany();
-    const attendance = await prisma.attendance.findMany();
-    const invoices = await prisma.invoice.findMany();
-    const enquiries = await prisma.enquiry.findMany();
-    const progressLogsRaw = await prisma.progressLog.findMany();
+
     const progressLogs = progressLogsRaw.map(l => ({
       id: l.id,
       student_id: l.student_id,
@@ -244,7 +352,9 @@ export async function syncDatabaseToClient() {
       attendance,
       invoices,
       enquiries,
-      progressLogs
+      enrollments,
+      progressLogs,
+      notifications
     }));
   }
 
@@ -252,49 +362,77 @@ export async function syncDatabaseToClient() {
     const centreFilter = userCentreId ? { id: userCentreId } : { id: 'none' };
     const relationCentreFilter = userCentreId ? { centre_id: userCentreId } : { centre_id: 'none' };
 
-    const centres = await prisma.centre.findMany({ where: centreFilter });
-    const users = await prisma.user.findMany({
-      where: {
-        OR: [
-          { centre_id: userCentreId },
-          { role: 'coach', coaches: { some: { centre_id: userCentreId } } }
-        ]
-      }
-    });
+    const students = await prisma.student.findMany({ where: relationCentreFilter });
+    const studentIds = students.map(s => s.id);
+    const familyIds = students.map(s => s.family_id).filter(Boolean) as string[];
 
-    const coachesRaw = await prisma.coach.findMany({
-      where: relationCentreFilter,
-      include: { user: true }
-    });
+    const [
+      centres,
+      users,
+      coachesRaw,
+      families,
+      tiers,
+      packages,
+      scheduleSlots,
+      attendance,
+      invoices,
+      enrollments,
+      progressLogsRaw,
+      notifications
+    ] = await Promise.all([
+      prisma.centre.findMany({ where: centreFilter }),
+      prisma.user.findMany({
+        where: {
+          OR: [
+            { centre_id: userCentreId },
+            { role: 'coach', coaches: { some: { centre_id: userCentreId } } }
+          ]
+        }
+      }),
+      prisma.coach.findMany({
+        where: relationCentreFilter,
+        include: { user: true }
+      }),
+      prisma.family.findMany({
+        where: { id: { in: familyIds } }
+      }),
+      prisma.tier.findMany({ where: { active: true } }),
+      prisma.package.findMany({
+        where: { student_id: { in: studentIds } }
+      }),
+      prisma.scheduleSlot.findMany({
+        where: relationCentreFilter
+      }),
+      prisma.attendance.findMany({
+        where: { student_id: { in: studentIds } }
+      }),
+      prisma.invoice.findMany({
+        where: { student_id: { in: studentIds } }
+      }),
+      prisma.enrollment.findMany(),
+      prisma.progressLog.findMany({
+        where: { student_id: { in: studentIds } }
+      }),
+      prisma.notification.findMany({
+        where: { student_id: { in: studentIds } }
+      })
+    ]);
+
     const coaches = coachesRaw.map(c => ({
       ...c,
       name: c.user?.name || 'Unassigned',
     }));
 
-    const students = await prisma.student.findMany({ where: relationCentreFilter });
-    const studentIds = students.map(s => s.id);
-    const familyIds = students.map(s => s.family_id).filter(Boolean) as string[];
-
-    const families = await prisma.family.findMany({
-      where: { id: { in: familyIds } }
-    });
-
-    const tiers = await prisma.tier.findMany({ where: { active: true } });
-    const packages = await prisma.package.findMany({
-      where: { student_id: { in: studentIds } }
-    });
-    const scheduleSlots = await prisma.scheduleSlot.findMany({
-      where: relationCentreFilter
-    });
-    const attendance = await prisma.attendance.findMany({
-      where: { student_id: { in: studentIds } }
-    });
-    const invoices = await prisma.invoice.findMany({
-      where: { student_id: { in: studentIds } }
-    });
-    const enquiries = userCentreId 
-      ? await prisma.enquiry.findMany({ where: { centre_id: userCentreId } })
-      : await prisma.enquiry.findMany();
+    const progressLogs = progressLogsRaw.map(l => ({
+      id: l.id,
+      student_id: l.student_id,
+      coach_id: l.coach_id,
+      date: l.date ? l.date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      topic: l.focus_area || '',
+      mastery: (l.evaluation ?? 0) >= 5 ? 'Mastered' : (l.evaluation ?? 0) >= 4 ? 'Practising' : 'Learning',
+      skills: l.skills || { openings: 3, tactics: 3, endgames: 3, strategy: 3, focus: 3 },
+      note: l.notes || ''
+    }));
 
     return JSON.parse(JSON.stringify({
       centres,
@@ -308,6 +446,9 @@ export async function syncDatabaseToClient() {
       attendance,
       invoices,
       enquiries,
+      enrollments,
+      progressLogs,
+      notifications
     }));
   }
 
@@ -319,7 +460,7 @@ export async function syncDatabaseToClient() {
     if (!coachRecord) {
       return {
         centres: [], users: [], coaches: [], families: [], students: [],
-        tiers: [], packages: [], scheduleSlots: [], attendance: [], invoices: []
+        tiers: [], packages: [], scheduleSlots: [], attendance: [], invoices: [], enquiries: [], enrollments: [], progressLogs: []
       };
     }
 
@@ -329,40 +470,73 @@ export async function syncDatabaseToClient() {
     const studentIds = students.map(s => s.id);
     const familyIds = students.map(s => s.family_id).filter(Boolean) as string[];
 
-    const centres = coachRecord.centre_id 
-      ? await prisma.centre.findMany({ where: { id: coachRecord.centre_id } })
-      : [];
+    const [
+      centres,
+      users,
+      coachesRaw,
+      families,
+      tiers,
+      packages,
+      scheduleSlots,
+      attendance,
+      invoices,
+      enquiries,
+      enrollments,
+      progressLogsRaw,
+      notifications
+    ] = await Promise.all([
+      coachRecord.centre_id 
+        ? prisma.centre.findMany({ where: { id: coachRecord.centre_id } })
+        : Promise.resolve([]),
+      prisma.user.findMany({
+        where: { id: session.user.id }
+      }),
+      prisma.coach.findMany({
+        where: { id: coachRecord.id },
+        include: { user: true }
+      }),
+      prisma.family.findMany({
+        where: { id: { in: familyIds } }
+      }),
+      prisma.tier.findMany({ where: { active: true } }),
+      prisma.package.findMany({
+        where: { student_id: { in: studentIds } }
+      }),
+      prisma.scheduleSlot.findMany({
+        where: { coach_id: coachRecord.id }
+      }),
+      prisma.attendance.findMany({
+        where: { student_id: { in: studentIds } }
+      }),
+      prisma.invoice.findMany({
+        where: { student_id: { in: studentIds } }
+      }),
+      prisma.enquiry.findMany(),
+      prisma.enrollment.findMany(),
+      prisma.progressLog.findMany({
+        where: { coach_id: coachRecord.id }
+      }),
+      prisma.notification.findMany({
+        where: { student_id: { in: studentIds } }
+      })
+    ]);
 
-    const users = await prisma.user.findMany({
-      where: { id: session.user.id }
-    });
-
-    const coachesRaw = await prisma.coach.findMany({
-      where: { id: coachRecord.id },
-      include: { user: true }
-    });
     const coaches = coachesRaw.map(c => ({
       ...c,
       name: c.user?.name || 'Unassigned',
     }));
 
-    const families = await prisma.family.findMany({
-      where: { id: { in: familyIds } }
-    });
+    const progressLogs = progressLogsRaw.map(l => ({
+      id: l.id,
+      student_id: l.student_id,
+      coach_id: l.coach_id,
+      date: l.date ? l.date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      topic: l.focus_area || '',
+      mastery: (l.evaluation ?? 0) >= 5 ? 'Mastered' : (l.evaluation ?? 0) >= 4 ? 'Practising' : 'Learning',
+      skills: l.skills || { openings: 3, tactics: 3, endgames: 3, strategy: 3, focus: 3 },
+      note: l.notes || ''
+    }));
 
-    const tiers = await prisma.tier.findMany({ where: { active: true } });
-    const packages = await prisma.package.findMany({
-      where: { student_id: { in: studentIds } }
-    });
-    const scheduleSlots = await prisma.scheduleSlot.findMany({
-      where: { coach_id: coachRecord.id }
-    });
-    const attendance = await prisma.attendance.findMany({
-      where: { student_id: { in: studentIds } }
-    });
-    const invoices = await prisma.invoice.findMany({
-      where: { student_id: { in: studentIds } }
-    });
 
     return JSON.parse(JSON.stringify({
       centres,
@@ -375,6 +549,10 @@ export async function syncDatabaseToClient() {
       scheduleSlots,
       attendance,
       invoices,
+      enquiries,
+      enrollments,
+      progressLogs,
+      notifications
     }));
   }
 
@@ -398,36 +576,49 @@ export async function syncDatabaseToClient() {
     const coachIds = students.map(s => s.coach_id).filter(Boolean) as string[];
     const centreIds = students.map(s => s.centre_id).filter(Boolean) as string[];
 
-    const centres = await prisma.centre.findMany({
-      where: { id: { in: centreIds } }
-    });
+    const [
+      centres,
+      users,
+      coachesRaw,
+      tiers,
+      packages,
+      scheduleSlots,
+      attendance,
+      invoices,
+      notifications
+    ] = await Promise.all([
+      prisma.centre.findMany({
+        where: { id: { in: centreIds } }
+      }),
+      prisma.user.findMany({
+        where: { id: session.user.id }
+      }),
+      prisma.coach.findMany({
+        where: { id: { in: coachIds } },
+        include: { user: true }
+      }),
+      prisma.tier.findMany({ where: { active: true } }),
+      prisma.package.findMany({
+        where: { student_id: { in: studentIds } }
+      }),
+      prisma.scheduleSlot.findMany({
+        where: { centre_id: { in: centreIds } }
+      }),
+      prisma.attendance.findMany({
+        where: { student_id: { in: studentIds } }
+      }),
+      prisma.invoice.findMany({
+        where: { student_id: { in: studentIds } }
+      }),
+      prisma.notification.findMany({
+        where: { student_id: { in: studentIds } }
+      })
+    ]);
 
-    const users = await prisma.user.findMany({
-      where: { id: session.user.id }
-    });
-
-    const coachesRaw = await prisma.coach.findMany({
-      where: { id: { in: coachIds } },
-      include: { user: true }
-    });
     const coaches = coachesRaw.map(c => ({
       ...c,
       name: c.user?.name || 'Unassigned',
     }));
-
-    const tiers = await prisma.tier.findMany({ where: { active: true } });
-    const packages = await prisma.package.findMany({
-      where: { student_id: { in: studentIds } }
-    });
-    const scheduleSlots = await prisma.scheduleSlot.findMany({
-      where: { centre_id: { in: centreIds } }
-    });
-    const attendance = await prisma.attendance.findMany({
-      where: { student_id: { in: studentIds } }
-    });
-    const invoices = await prisma.invoice.findMany({
-      where: { student_id: { in: studentIds } }
-    });
 
     return JSON.parse(JSON.stringify({
       centres,
@@ -440,6 +631,7 @@ export async function syncDatabaseToClient() {
       scheduleSlots,
       attendance,
       invoices,
+      notifications
     }));
   }
 
@@ -486,7 +678,26 @@ export async function saveEnquiryDB(data: {
   });
 }
 
-export async function logAttendance(studentId: string, status: string, coachId: string) {
+export async function updateEnquiryStageDB(id: string, stage: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+
+  if (session.user.role === 'front_desk' && session.user.centre_id) {
+    const enquiry = await prisma.enquiry.findUnique({ where: { id } });
+    if (enquiry?.centre_id !== session.user.centre_id) {
+      throw new Error("Unauthorized");
+    }
+  }
+
+  return await prisma.enquiry.update({
+    where: { id },
+    data: { stage: stage.toLowerCase().replace(' ', '_') }
+  });
+}
+
+export async function logAttendance(studentId: string, status: string, coachId: string, slotId?: string) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
@@ -502,6 +713,7 @@ export async function logAttendance(studentId: string, status: string, coachId: 
       student_id: studentId,
       status: status,
       coach_id: coachId,
+      slot_id: slotId || null,
       date: new Date()
     }
   });
@@ -579,9 +791,15 @@ export async function saveProgressLogDB(logData: any) {
   if (session.user.role !== 'owner' && session.user.role !== 'coach') {
     throw new Error("Unauthorized");
   }
+  const student = await prisma.student.findUnique({ where: { id: logData.student_id } });
+  if (!student) throw new Error("Student not found");
+
   if (session.user.role === 'coach') {
     const coachRecord = await prisma.coach.findFirst({ where: { user_id: session.user.id } });
     if (!coachRecord || coachRecord.id !== logData.coach_id) {
+      throw new Error("Unauthorized");
+    }
+    if (student.centre_id !== coachRecord.centre_id) {
       throw new Error("Unauthorized");
     }
   }
@@ -599,6 +817,10 @@ export async function saveProgressLogDB(logData: any) {
 }
 
 export async function syncOfflineQueueDB(records: any[]) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
   // Batch insert
   for (const record of records) {
     await logAttendance(record.student_id, record.status, record.coach_id);
@@ -634,6 +856,26 @@ export async function registerStudent(data: any) {
       }
     });
     familyId = family.id;
+  }
+
+  // 2. Automatically create parent User account if user doesn't already exist for this email
+  if (data.email) {
+    const existingUser = await prisma.user.findUnique({
+      where: { email: data.email.toLowerCase().trim() }
+    });
+    if (!existingUser) {
+      const rawPassword = generateRandomPassword();
+      const hashedPassword = await bcrypt.hash(rawPassword, 10);
+      await prisma.user.create({
+        data: {
+          name: data.parent_name || data.name,
+          email: data.email.toLowerCase().trim(),
+          password: hashedPassword,
+          role: 'parent',
+          centre_id: data.centre_id || null
+        }
+      }).catch(err => console.warn("Parent user auto-creation skipped:", err));
+    }
   }
 
   // 2. Create the student
@@ -737,6 +979,19 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
       start_date: new Date(),
     }
   });
+
+  // Auto-generate invoice for billing ledger
+  const tierPrice = Number(tier.price) || 1000;
+  const finalAmount = Math.round(tierPrice * (1 - discount / 100));
+  await prisma.invoice.create({
+    data: {
+      student_id: student.id,
+      package_id: pkg.id,
+      amount: finalAmount,
+      status: 'paid',
+      created_at: new Date()
+    }
+  }).catch(err => console.warn("Auto invoice generation skipped:", err));
 
   return pkg;
 }
@@ -925,3 +1180,242 @@ export async function getActionCentreData() {
     tiers
   }));
 }
+
+export async function backfillParentUsersDB() {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
+
+  const families = await prisma.family.findMany({
+    where: { email: { not: null } }
+  });
+
+  let createdCount = 0;
+  for (const fam of families) {
+    if (!fam.email || !fam.email.trim()) continue;
+    const cleanEmail = fam.email.toLowerCase().trim();
+    const existing = await prisma.user.findUnique({
+      where: { email: cleanEmail }
+    });
+
+    if (!existing) {
+      const rawPassword = generateRandomPassword();
+      const hashedPassword = await bcrypt.hash(rawPassword, 10);
+      await prisma.user.create({
+        data: {
+          name: fam.primary_name || 'Parent',
+          email: cleanEmail,
+          password: hashedPassword,
+          role: 'parent',
+          centre_id: null
+        }
+      }).catch(err => console.warn("Backfill parent user error:", err));
+      createdCount++;
+    }
+  }
+
+  return { createdCount };
+}
+
+// -------------------------------------------------------------
+// Notification Helpers & Actions (WhatsApp & Email)
+// -------------------------------------------------------------
+
+// Helper to send transactional emails using Resend API with graceful local fallback
+async function sendEmailNotification(toEmail: string, subject: string, bodyHtml: string) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (apiKey) {
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: 'Master Moves OS <notifications@mastermoves.com>',
+          to: [toEmail],
+          subject: subject,
+          html: bodyHtml
+        })
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error(`Resend API Error: ${response.statusText} (${errText})`);
+      } else {
+        console.log(`✓ Email sent successfully via Resend API to ${toEmail}`);
+      }
+    } catch (e) {
+      console.error('Failed to send email via Resend:', e);
+    }
+  } else {
+    // Local development simulation logging
+    console.log('\n--- [EMAIL SIMULATION] ---');
+    console.log(`To: ${toEmail}`);
+    console.log(`Subject: ${subject}`);
+    console.log('Body:', bodyHtml.replace(/<[^>]*>/g, ' ')); // clean html tags for console
+    console.log('---------------------------\n');
+  }
+}
+
+// Helper to send WhatsApp messages using Meta Cloud API with graceful local fallback
+async function sendWhatsAppNotification(toPhone: string, bodyText: string) {
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  if (accessToken && phoneId) {
+    try {
+      const response = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: toPhone.replace(/\s+/g, ''), // strip spaces
+          type: "text",
+          text: { body: bodyText }
+        })
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error(`Meta WhatsApp API Error: ${response.statusText} (${errText})`);
+      } else {
+        console.log(`✓ WhatsApp sent successfully via Meta API to ${toPhone}`);
+      }
+    } catch (e) {
+      console.error('Failed to send WhatsApp via Meta API:', e);
+    }
+  } else {
+    // Local development simulation logging
+    console.log('\n--- [WHATSAPP SIMULATION] ---');
+    console.log(`To: ${toPhone}`);
+    console.log(`Message: ${bodyText}`);
+    console.log('------------------------------\n');
+  }
+}
+
+// Server Action: Send Student Progress Report
+export async function sendProgressReport(studentId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    include: { family: true, coach: { include: { user: true } }, centre: true }
+  });
+  if (!student) throw new Error("Student not found");
+
+  const parentName = student.family?.primary_name || 'Parent';
+  const email = student.family?.email;
+  const phone = student.family?.phone;
+  const coachName = student.coach?.user?.name || 'Coach';
+  const centreName = student.centre?.name || 'Centre';
+
+  const subject = `Master Moves Chess - Progress Report for ${student.name}`;
+  const bodyText = `Hi ${parentName}, here is the chess progress report for ${student.name} at ${centreName}. Assigned Coach: ${coachName}. Current level: ${student.level || 'Beginner'}. Pace Status: ${student.pace_status || 'On track'}. We are excited about their continuation!`;
+  const bodyHtml = `<p>Hi <b>${parentName}</b>,</p><p>Here is the chess progress report for <b>${student.name}</b> at ${centreName}.</p><ul><li><b>Assigned Coach:</b> ${coachName}</li><li><b>Current level:</b> ${student.level || 'Beginner'}</li><li><b>Pace Status:</b> ${student.pace_status || 'On track'}</li></ul><p>We are excited about their chess development and continuation!</p><p>Best regards,<br/>Master Moves Team</p>`;
+
+  if (email && email.trim()) {
+    await sendEmailNotification(email.trim(), subject, bodyHtml);
+    await prisma.notification.create({
+      data: {
+        student_id: studentId,
+        type: 'progress_report',
+        channel: 'email',
+        status: 'sent',
+        sent_at: new Date()
+      }
+    });
+  }
+
+  if (phone && phone.trim()) {
+    await sendWhatsAppNotification(phone.trim(), bodyText);
+    await prisma.notification.create({
+      data: {
+        student_id: studentId,
+        type: 'progress_report',
+        channel: 'whatsapp',
+        status: 'sent',
+        sent_at: new Date()
+      }
+    });
+  }
+
+  return {
+    success: true,
+    parentName,
+    email: email || 'No email registered',
+    phone: phone || 'No phone registered'
+  };
+}
+
+// Server Action: Notify all enrolled students for a schedule class slot
+export async function notifyEnrolledStudents(slotId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+
+  const slot = await prisma.scheduleSlot.findUnique({
+    where: { id: slotId },
+    include: { centre: true, coach: { include: { user: true } } }
+  });
+  if (!slot) throw new Error("Schedule slot not found");
+
+  const enrollments = await prisma.enrollment.findMany({
+    where: { slot_id: slotId },
+    include: { student: { include: { family: true } } }
+  });
+
+  const coachName = slot.coach?.user?.name || 'Coach';
+  const centreName = slot.centre?.name || 'Centre';
+
+  let count = 0;
+  for (const enr of enrollments) {
+    const student = enr.student;
+    if (!student) continue;
+
+    const parentName = student.family?.primary_name || 'Parent';
+    const email = student.family?.email;
+    const phone = student.family?.phone;
+
+    const subject = `Upcoming Chess Class Reminder - Master Moves`;
+    const bodyText = `Hi ${parentName}, this is a reminder that ${student.name} has a scheduled chess session on ${slot.day} at ${slot.time} at ${centreName} with ${coachName}. Please make sure they attend on time.`;
+    const bodyHtml = `<p>Hi <b>${parentName}</b>,</p><p>This is a reminder that <b>${student.name}</b> has a scheduled chess session on <b>${slot.day} at ${slot.time}</b> at ${centreName} with ${coachName}.</p><p>Please make sure they arrive on time.</p><p>Best regards,<br/>Master Moves Team</p>`;
+
+    if (email && email.trim()) {
+      await sendEmailNotification(email.trim(), subject, bodyHtml);
+      await prisma.notification.create({
+        data: {
+          student_id: student.id,
+          type: 'class_reminder',
+          channel: 'email',
+          status: 'sent',
+          sent_at: new Date()
+        }
+      });
+    }
+
+    if (phone && phone.trim()) {
+      await sendWhatsAppNotification(phone.trim(), bodyText);
+      await prisma.notification.create({
+        data: {
+          student_id: student.id,
+          type: 'class_reminder',
+          channel: 'whatsapp',
+          status: 'sent',
+          sent_at: new Date()
+        }
+      });
+    }
+    count++;
+  }
+
+  return { success: true, count };
+}
+

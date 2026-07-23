@@ -71,6 +71,13 @@ export interface Package {
   expiry_date?: string;
 }
 
+export interface Enrollment {
+  id: string;
+  student_id: string;
+  slot_id: string;
+  enrolled_at?: string;
+}
+
 export interface ScheduleSlot {
   id: string;
   centre_id: string;
@@ -78,6 +85,7 @@ export interface ScheduleSlot {
   day: 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun';
   time: string; // HH:MM
   level: string;
+  capacity?: number;
 }
 
 export interface Attendance {
@@ -153,6 +161,7 @@ function initStorage() {
     localStorage.setItem('mmos_enquiries', JSON.stringify([]));
     localStorage.setItem('mmos_invoices', JSON.stringify([]));
     localStorage.setItem('mmos_offline_queue', JSON.stringify([]));
+    localStorage.setItem('mmos_notifications', JSON.stringify([]));
     localStorage.setItem('mmos_initialized', 'true');
   }
 }
@@ -173,6 +182,8 @@ export const db = {
     if (data.invoices) this.save('invoices', data.invoices);
     if (data.progressLogs) this.save('progress_logs', data.progressLogs);
     if (data.enquiries) this.save('enquiries', data.enquiries);
+    if (data.enrollments) this.save('enrollments', data.enrollments);
+    if (data.notifications) this.save('notifications', data.notifications);
     window.dispatchEvent(new Event('db-synced'));
   },
   // Helper loaders & savers
@@ -248,9 +259,31 @@ export const db = {
     return this.get<Tier>('tiers');
   },
 
-  // Schedule Slots
+  // Schedule Slots & Enrollments
   getScheduleSlots(): ScheduleSlot[] {
     return this.get<ScheduleSlot>('schedule_slots');
+  },
+
+  getEnrollments(): Enrollment[] {
+    return this.get<Enrollment>('enrollments');
+  },
+
+  saveEnrollment(enr: Enrollment): void {
+    const enrollments = this.getEnrollments();
+    const existingIndex = enrollments.findIndex(e => e.id === enr.id || (e.student_id === enr.student_id && e.slot_id === enr.slot_id));
+    if (existingIndex !== -1) {
+      enrollments[existingIndex] = enr;
+    } else {
+      enrollments.push(enr);
+    }
+    this.save('enrollments', enrollments);
+    window.dispatchEvent(new Event('db-synced'));
+  },
+
+  removeEnrollment(studentId: string, slotId: string): void {
+    const enrollments = this.getEnrollments().filter(e => !(e.student_id === studentId && e.slot_id === slotId));
+    this.save('enrollments', enrollments);
+    window.dispatchEvent(new Event('db-synced'));
   },
 
   // Attendance
@@ -261,6 +294,10 @@ export const db = {
   // Enquiries
   getEnquiries(): Enquiry[] {
     return this.get<Enquiry>('enquiries');
+  },
+
+  getNotifications(): any[] {
+    return this.get<any>('notifications');
   },
 
   saveEnquiry(enq: Enquiry): void {
@@ -319,7 +356,7 @@ export const db = {
     const logs = this.get<AuditLog>('audit_log');
     const actor = this.getCurrentUser();
     const newLog: AuditLog = {
-      id: 'aud-' + Math.random().toString(36).substr(2, 9),
+      id: 'aud-' + crypto.randomUUID(),
       actor: actor.name,
       action,
       entity,

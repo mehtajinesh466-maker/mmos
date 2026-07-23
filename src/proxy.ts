@@ -62,7 +62,12 @@ export default withAuth(
     callbacks: {
       authorized: ({ token }) => !!token,
     },
-    secret: process.env.NEXTAUTH_SECRET || "my-secret-key-12345",
+    secret: process.env.NEXTAUTH_SECRET || (() => {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error("NEXTAUTH_SECRET environment variable is missing in production!");
+      }
+      return "my-secret-key-12345";
+    })(),
   }
 );
 

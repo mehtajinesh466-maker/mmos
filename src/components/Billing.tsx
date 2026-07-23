@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/db';
 import type { User, Student, Invoice } from '../lib/db';
+import { updateInvoiceDB, syncDatabaseToClient } from '../app/actions';
 
 interface BillingProps {
   currentUser: User;
@@ -40,7 +41,7 @@ export const Billing: React.FC<BillingProps> = ({ currentUser, activeCentre }) =
     return s.centre_id === 'c-2' || s.centre_id === 'JLT' ? 'JLT' : 'Bay Avenue';
   };
 
-  const handleMarkPaid = (invId: string) => {
+  const handleMarkPaid = async (invId: string) => {
     const invs = db.get<Invoice>('invoices') || [];
     const idx = invs.findIndex(i => i.id === invId);
     if (idx !== -1) {
@@ -50,6 +51,15 @@ export const Billing: React.FC<BillingProps> = ({ currentUser, activeCentre }) =
       window.dispatchEvent(new Event('db-synced'));
       if (selectedInvoice && selectedInvoice.id === invId) {
         setSelectedInvoice(invs[idx]);
+      }
+
+      try {
+        await updateInvoiceDB(invId, 'paid');
+        const freshData = await syncDatabaseToClient();
+        db.syncFromNeon(freshData);
+        loadData();
+      } catch (err) {
+        console.error("Failed to sync invoice payment to server:", err);
       }
     }
   };

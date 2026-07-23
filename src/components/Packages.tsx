@@ -192,6 +192,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
                 <option value="Card (NeoPay)">Card (NeoPay)</option>
                 <option value="Cash">Cash</option>
                 <option value="Bank Transfer">Bank Transfer</option>
+                <option value="Cheque">Cheque</option>
               </select>
             </div>
 

@@ -6,6 +6,7 @@ import type { User, Coach, Centre, Student } from '../lib/db';
 import {
   addCoachDB, updateCoachDB, reassignCoachDB, deleteCoachDB,
   saveCentreDB, updateCentreStatusDB, deleteCentreDB,
+  updateUserCredentialsDB, registerUser, backfillParentUsersDB,
   syncDatabaseToClient
 } from '../app/actions';
 
@@ -14,12 +15,25 @@ interface AdminUsersProps {
 }
 
 export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
-  const [tab, setTab] = useState<'centres' | 'coaches'>('coaches');
+  const [tab, setTab] = useState<'centres' | 'coaches' | 'users'>('coaches');
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [centres, setCentres] = useState<Centre[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [status, setStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+
+  // User management state
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [userEmailEdit, setUserEmailEdit] = useState('');
+  const [userNameEdit, setUserNameEdit] = useState('');
+  const [userPassEdit, setUserPassEdit] = useState('');
+  const [userRoleEdit, setUserRoleEdit] = useState('');
+
+  // Add new user state
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'owner' | 'coach' | 'front_desk' | 'parent'>('coach');
 
   // Add coach form
   const [newCoachName, setNewCoachName] = useState('');
@@ -41,9 +55,11 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
     const c = db.getCoaches().filter(ch => ch.active);
     const ct = db.getCentres();
     const s = db.getStudents();
+    const u = db.getUsers();
     setCoaches(c);
     setCentres(ct);
     setStudents(s);
+    setUsers(u);
     // Init rename + centre state from DB values
     const r: Record<string, string> = {};
     const cc: Record<string, string> = {};
@@ -100,11 +116,11 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
     if (!newCoachName.trim()) return;
     setIsSaving(true);
     try {
-      await addCoachDB(newCoachName.trim(), newCoachCentre);
+      const res = await addCoachDB(newCoachName.trim(), newCoachCentre);
       const fresh = await syncDatabaseToClient();
       db.syncFromNeon(fresh);
       setNewCoachName('');
-      toast('✓ Coach added and saved to database.');
+      toast(`✓ Coach added! Login Email: ${res.email} | Password: ${res.generatedPassword}`, 10000);
     } catch (err: any) {
       toast('❌ ' + err.message);
     } finally {
@@ -223,13 +239,13 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-canvas border border-line rounded-lg p-1 w-fit">
-        {(['centres', 'coaches'] as const).map(t => (
+        {(['centres', 'coaches', 'users'] as const).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`px-4 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${tab === t ? 'bg-[#173F35] text-white shadow' : 'text-muted-custom hover:text-ink'}`}
           >
-            {t.charAt(0).toUpperCase() + t.slice(1)}
+            {t === 'users' ? 'User Accounts' : t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
@@ -555,6 +571,217 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
           <p className="text-[10px] text-muted-custom">
             ✦ Centre edits are local to this reference build. In production these write to the centres table; students carry centre_id, so no report needs changing when a centre is added.
           </p>
+        </div>
+      )}
+
+      {/* ── USER ACCOUNTS TAB ─────────────────────────────────────────────── */}
+      {tab === 'users' && (
+        <div className="space-y-6">
+          <div className="p-4 rounded-[10px] bg-emerald-50 border border-emerald-200 border-l-4 border-l-forest text-xs text-ink/90">
+            <div className="font-bold text-forest mb-0.5">👤 User Account &amp; Credential Management</div>
+            Parent user accounts are automatically created for every student family. You can view, update emails, and reset passwords below.
+          </div>
+
+          {/* Create User Form */}
+          <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4">
+            <h3 className="text-xs font-bold text-[#C4A249] tracking-wider uppercase border-b border-line pb-2">+ Create User Account</h3>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!newUserEmail.trim() || !newUserName.trim()) return;
+                setIsSaving(true);
+                try {
+                  const res = await registerUser({
+                    name: newUserName.trim(),
+                    email: newUserEmail.trim(),
+                    role: newUserRole,
+                    centre_id: null
+                  });
+                  const fresh = await syncDatabaseToClient();
+                  db.syncFromNeon(fresh);
+                  setNewUserName('');
+                  setNewUserEmail('');
+                  toast(`✓ User created! Email: ${res.email} | Password: ${res.generatedPassword}`, 10000);
+                } catch (err: any) {
+                  toast('❌ ' + err.message);
+                } finally {
+                  setIsSaving(false);
+                }
+              }}
+              className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end"
+            >
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-muted-custom uppercase">Full Name *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Sarah Jenkins"
+                  value={newUserName}
+                  onChange={e => setNewUserName(e.target.value)}
+                  required
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-muted-custom uppercase">Email *</label>
+                <input
+                  type="email"
+                  placeholder="sarah@mastermoves.ae"
+                  value={newUserEmail}
+                  onChange={e => setNewUserEmail(e.target.value)}
+                  required
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-muted-custom uppercase">Role *</label>
+                <select
+                  value={newUserRole}
+                  onChange={(e: any) => setNewUserRole(e.target.value)}
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
+                >
+                  <option value="coach">Coach</option>
+                  <option value="front_desk">Front Desk</option>
+                  <option value="parent">Parent</option>
+                  <option value="owner">Owner</option>
+                </select>
+              </div>
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="bg-forest hover:bg-forest-light text-white font-bold text-xs py-2 px-4 rounded-lg transition-all"
+              >
+                + Create User
+              </button>
+            </form>
+          </div>
+
+          {/* User Accounts Table */}
+          <div className="bg-surface border border-line rounded-2xl overflow-hidden shadow-sm">
+            <div className="p-4 border-b border-line flex items-center justify-between">
+              <h3 className="text-xs font-bold text-ink font-display uppercase tracking-wider">All System Users ({users.length})</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-canvas border-b border-line text-left text-[9px] font-bold text-muted-custom uppercase tracking-widest">
+                    <th className="py-3 px-4">NAME</th>
+                    <th className="py-3 px-4">EMAIL</th>
+                    <th className="py-3 px-4">ROLE</th>
+                    <th className="py-3 px-4">NEW PASSWORD</th>
+                    <th className="py-3 px-4 text-right">ACTION</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {users.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-muted-custom text-xs">
+                        No user accounts loaded in local state.
+                      </td>
+                    </tr>
+                  ) : (
+                    users.map(u => {
+                      const isEditing = editingUserId === u.id;
+                      return (
+                        <tr key={u.id} className="hover:bg-canvas/40 transition-colors">
+                          <td className="py-3 px-4 font-bold text-ink">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={userNameEdit}
+                                onChange={e => setUserNameEdit(e.target.value)}
+                                className="bg-white border border-line rounded px-2 py-1 text-xs w-full"
+                              />
+                            ) : (
+                              u.name
+                            )}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-muted-custom">
+                            {isEditing ? (
+                              <input
+                                type="email"
+                                value={userEmailEdit}
+                                onChange={e => setUserEmailEdit(e.target.value)}
+                                className="bg-white border border-line rounded px-2 py-1 text-xs w-full"
+                              />
+                            ) : (
+                              u.email
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase ${
+                              u.role === 'owner' ? 'bg-amber-100 text-amber-800' : u.role === 'coach' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                            }`}>
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                placeholder="Type new password..."
+                                value={userPassEdit}
+                                onChange={e => setUserPassEdit(e.target.value)}
+                                className="bg-white border border-line rounded px-2 py-1 text-xs w-full font-mono"
+                              />
+                            ) : (
+                              <span className="text-muted-custom/60 font-mono">••••••••</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            {isEditing ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={async () => {
+                                    setIsSaving(true);
+                                    try {
+                                      await updateUserCredentialsDB(u.id, {
+                                        name: userNameEdit,
+                                        email: userEmailEdit,
+                                        password: userPassEdit
+                                      });
+                                      const fresh = await syncDatabaseToClient();
+                                      db.syncFromNeon(fresh);
+                                      setEditingUserId(null);
+                                      toast(`✓ Updated credentials for ${userNameEdit}!`, 6000);
+                                    } catch (err: any) {
+                                      toast('❌ ' + err.message);
+                                    } finally {
+                                      setIsSaving(false);
+                                    }
+                                  }}
+                                  className="bg-forest text-white font-bold text-[10px] px-3 py-1 rounded hover:bg-forest-light transition-all"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={() => setEditingUserId(null)}
+                                  className="bg-white border border-line text-ink font-bold text-[10px] px-2.5 py-1 rounded hover:bg-canvas"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setEditingUserId(u.id);
+                                  setUserNameEdit(u.name);
+                                  setUserEmailEdit(u.email);
+                                  setUserPassEdit('');
+                                }}
+                                className="bg-white border border-line hover:bg-canvas text-ink font-bold text-[10px] px-3 py-1 rounded transition-all"
+                              >
+                                ✏ Edit Credentials
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
     </div>

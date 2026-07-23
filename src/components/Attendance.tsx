@@ -34,6 +34,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [slots, setSlots] = useState<ScheduleSlot[]>([]);
   const [centres, setCentres] = useState<any[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceType[]>([]);
 
   const loadData = () => {
     setStudents(db.getStudents());
@@ -41,6 +42,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
     setCoaches(db.getCoaches());
     setSlots(db.getScheduleSlots());
     setCentres(db.getCentres());
+    setAttendance(db.getAttendance());
 
     const coas = db.getCoaches();
     if (coas.length > 0 && !selectedCoachId) {
@@ -55,6 +57,19 @@ export const Attendance: React.FC<AttendanceProps> = ({
     window.addEventListener('db-synced', loadData);
     return () => window.removeEventListener('db-synced', loadData);
   }, [selectedCoachId]);
+
+  // Load markings from database attendance records for the selected date
+  useEffect(() => {
+    const initialMarkings: { [key: string]: 'present' | 'absent' | 'makeup' | null } = {};
+    attendance.forEach(a => {
+      // a.date can be a ISO string like 2026-07-23T00:00:00.000Z or date only 2026-07-23
+      const recordDate = typeof a.date === 'string' ? a.date.split('T')[0] : '';
+      if (recordDate === selectedDate && a.slot_id && a.student_id) {
+        initialMarkings[`${a.slot_id}-${a.student_id}`] = a.status as 'present' | 'absent' | 'makeup';
+      }
+    });
+    setMarkings(initialMarkings);
+  }, [selectedDate, attendance]);
 
   useEffect(() => {
     if (activeCentre) {
@@ -100,11 +115,21 @@ export const Attendance: React.FC<AttendanceProps> = ({
     return d.toLocaleDateString('en-GB', options);
   }, [selectedDate]);
 
+  // Normalize short vs long day names
+  const normalizeDay = (day: string) => {
+    if (!day) return 'Monday';
+    const map: { [k: string]: string } = {
+      'Mon': 'Monday', 'Tue': 'Tuesday', 'Wed': 'Wednesday', 'Thu': 'Thursday', 'Fri': 'Friday', 'Sat': 'Saturday', 'Sun': 'Sunday',
+      'Monday': 'Monday', 'Tuesday': 'Tuesday', 'Wednesday': 'Wednesday', 'Thursday': 'Thursday', 'Friday': 'Friday', 'Saturday': 'Saturday', 'Sunday': 'Sunday'
+    };
+    return map[day] || day;
+  };
+
   // Filter slots by selected coach, centre, and day of selectedDate
   const activeDaySlots = useMemo(() => {
     return slots.filter(s => {
       if (s.coach_id !== activeCoachId) return false;
-      if (s.day !== dayOfWeek) return false;
+      if (normalizeDay(s.day) !== normalizeDay(dayOfWeek)) return false;
       if (selectedCentre !== 'All' && s.centre_id !== selectedCentre) return false;
       return true;
     }).sort((a, b) => a.time.localeCompare(b.time));
@@ -126,8 +151,14 @@ export const Attendance: React.FC<AttendanceProps> = ({
     return studentPkgs.every(p => p.classes_remaining === 0);
   };
 
-  // Roster logic per slot
+  // Roster logic per slot: uses explicit enrollments if present, else level filter
   const getSlotRoster = (slot: ScheduleSlot) => {
+    const enrollments = db.getEnrollments ? db.getEnrollments() : [];
+    const slotEnrollments = enrollments.filter(e => e.slot_id === slot.id);
+    if (slotEnrollments.length > 0) {
+      const enrolledIds = new Set(slotEnrollments.map(e => e.student_id));
+      return students.filter(s => enrolledIds.has(s.id));
+    }
     return students.filter(s => 
       s.centre_id === slot.centre_id && 
       s.level === slot.level && 
@@ -154,19 +185,20 @@ export const Attendance: React.FC<AttendanceProps> = ({
     const slot = slots.find(s => s.id === slotId);
     if (!slot) return;
 
-    const slotMarkings = Object.keys(markings).filter(key => key.startsWith(slotId));
+    const slotMarkings = Object.keys(markings).filter(key => key.startsWith(slotId) && markings[key] !== null);
     if (slotMarkings.length === 0) {
       setSaveStatus('❌ Error: No students marked for this class slot.');
       setTimeout(() => setSaveStatus(''), 4000);
       return;
     }
 
+    setSaveStatus('Saving attendance...');
     let savedCount = 0;
     let queuedCount = 0;
 
     try {
       for (const key of slotMarkings) {
-        const [_, studentId] = key.split('-');
+        const studentId = key.substring(slotId.length + 1);
         const status = markings[key];
         if (!status) continue;
 
@@ -184,7 +216,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
         if (isOnline) {
           db.processAttendanceRecord(record);
-          await logAttendance(record.student_id, record.status, record.coach_id);
+          await logAttendance(record.student_id, record.status, record.coach_id, record.slot_id || undefined);
           savedCount++;
         } else {
           db.addToOfflineQueue(record);
@@ -285,7 +317,13 @@ export const Attendance: React.FC<AttendanceProps> = ({
       </p>
 
       {saveStatus && (
-        <div className={`p-4 rounded-xl border text-xs font-semibold ${saveStatus.startsWith('❌') ? 'bg-red-50 border-red-200 text-hot-custom' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+        <div className={`p-4 rounded-xl border text-xs font-semibold ${
+          saveStatus.startsWith('❌') 
+            ? 'bg-red-50 border-red-200 text-hot-custom' 
+            : saveStatus === 'Saving attendance...'
+              ? 'bg-amber-50 border-amber-200 text-amber-800'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+        }`}>
           {saveStatus}
         </div>
       )}
@@ -413,9 +451,10 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
                         <button
                           onClick={() => handleSaveAttendance(slot.id)}
-                          className="bg-[#173F35] hover:bg-[#122f28] text-white font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
+                          disabled={saveStatus === 'Saving attendance...'}
+                          className={`bg-[#173F35] hover:bg-[#122f28] text-white font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer ${saveStatus === 'Saving attendance...' ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
-                          Save attendance
+                          {saveStatus === 'Saving attendance...' ? 'Saving...' : 'Save attendance'}
                         </button>
 
                         <span className="text-[10px] text-muted-custom italic">

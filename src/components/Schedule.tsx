@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '../lib/db';
 import type { User, Student, Package, ScheduleSlot, Attendance, Coach } from '../lib/db';
-import { logAttendance, syncDatabaseToClient } from '../app/actions';
+import { logAttendance, syncDatabaseToClient, createScheduleSlot, notifyEnrolledStudents } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
 
 interface ScheduleProps {
@@ -28,9 +28,22 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [slots, setSlots] = useState<ScheduleSlot[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
+  const [enrollments, setEnrollments] = useState<any[]>([]);
   const [centres, setCentres] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<string>('');
+  
+  // Drawer state for Roster Enrollment Management
+  const [rosterModalSlot, setRosterModalSlot] = useState<ScheduleSlot | null>(null);
+
+  // Add Class Slot Modal state
+  const [showAddSlotModal, setShowAddSlotModal] = useState(false);
+  const [newSlotDay, setNewSlotDay] = useState<'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun'>('Mon');
+  const [newSlotTime, setNewSlotTime] = useState('16:00');
+  const [newSlotLevel, setNewSlotLevel] = useState('Beginner');
+  const [newSlotCapacity, setNewSlotCapacity] = useState(10);
+  const [newSlotCentreId, setNewSlotCentreId] = useState('');
+  const [newSlotCoachId, setNewSlotCoachId] = useState('');
 
   const loadData = () => {
     const stds = db.getStudents();
@@ -38,6 +51,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     const coas = db.getCoaches();
     const sls = db.getScheduleSlots();
     const atts = db.getAttendance();
+    const enrs = db.getEnrollments ? db.getEnrollments() : [];
     const cens = db.getCentres();
 
     setStudents(stds);
@@ -45,6 +59,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     setCoaches(coas);
     setSlots(sls);
     setAttendance(atts);
+    setEnrollments(enrs);
     setCentres(cens);
     setLoading(false);
 
@@ -78,6 +93,21 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
 
   const activeCoach = coaches.find(c => c.id === activeCoachId);
 
+  // Roster logic per slot: uses explicit Enrollments if configured for slot, else falls back to level matching
+  const getSlotRoster = (slot: ScheduleSlot) => {
+    const slotEnrollments = enrollments.filter(e => e.slot_id === slot.id);
+    if (slotEnrollments.length > 0) {
+      const enrolledStudentIds = new Set(slotEnrollments.map(e => e.student_id));
+      return students.filter(s => enrolledStudentIds.has(s.id));
+    }
+    // Fallback: match by level & centre
+    return students.filter(s => 
+      s.centre_id === slot.centre_id && 
+      s.level === slot.level && 
+      s.status === 'active'
+    );
+  };
+
   // Get dynamic dates for the current week (Monday to Sunday)
   const weekDates = useMemo(() => {
     const current = new Date(); // Represents today (2026-07-17)
@@ -98,11 +128,37 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
         dateStr: `${d.getDate()} ${months[d.getMonth()]}`,
         dayNum: d.getDate(),
         monthName: fullMonths[d.getMonth()],
-        year: d.getFullYear()
+        year: d.getFullYear(),
+        isoDate: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       });
     }
     return dates;
   }, []);
+
+  // Load markings from DB for the current week's dates
+  useEffect(() => {
+    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const newMarkings: { [key: string]: 'present' | 'absent' | 'makeup' | null } = {};
+
+    attendance.forEach(a => {
+      const recordDate = typeof a.date === 'string' ? a.date.split('T')[0] : '';
+      if (!recordDate || !a.slot_id || !a.student_id) return;
+
+      const slot = slots.find(s => s.id === a.slot_id);
+      if (!slot) return;
+
+      const normDay = normalizeDay(slot.day);
+      const dayIndex = dayOrder.indexOf(normDay);
+      if (dayIndex === -1) return;
+
+      const weekDate = weekDates[dayIndex];
+      if (weekDate && weekDate.isoDate === recordDate) {
+        newMarkings[`${a.slot_id}-${a.student_id}`] = a.status as 'present' | 'absent' | 'makeup';
+      }
+    });
+
+    setMarkings(newMarkings);
+  }, [attendance, slots, weekDates]);
 
   const getDayLabel = (dayName: string) => {
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -131,20 +187,31 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     });
   }, [slots, activeCoachId, selectedCentre]);
 
+  // Normalize short vs long day names
+  const normalizeDay = (day: string) => {
+    if (!day) return 'Monday';
+    const map: { [k: string]: string } = {
+      'Mon': 'Monday', 'Tue': 'Tuesday', 'Wed': 'Wednesday', 'Thu': 'Thursday', 'Fri': 'Friday', 'Sat': 'Saturday', 'Sun': 'Sunday',
+      'Monday': 'Monday', 'Tuesday': 'Tuesday', 'Wednesday': 'Wednesday', 'Thursday': 'Thursday', 'Friday': 'Friday', 'Saturday': 'Saturday', 'Sunday': 'Sunday'
+    };
+    return map[day] || day;
+  };
+
   // Group slots by day for tabs
   const dailySlotsCount = useMemo(() => {
     const countMap: { [day: string]: number } = {
       Monday: 0, Tuesday: 0, Wednesday: 0, Thursday: 0, Friday: 0, Saturday: 0, Sunday: 0
     };
     filteredSlots.forEach(s => {
-      countMap[s.day] = (countMap[s.day] || 0) + 1;
+      const norm = normalizeDay(s.day);
+      countMap[norm] = (countMap[norm] || 0) + 1;
     });
     return countMap;
   }, [filteredSlots]);
 
   // Display slot details for selected day
   const activeDaySlots = useMemo(() => {
-    return filteredSlots.filter(s => s.day === activeDay);
+    return filteredSlots.filter(s => normalizeDay(s.day) === normalizeDay(activeDay));
   }, [filteredSlots, activeDay]);
 
   // Auto-expand first slot
@@ -163,14 +230,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     return studentPkgs.every(p => p.classes_remaining === 0);
   };
 
-  // Roster logic per slot
-  const getSlotRoster = (slot: ScheduleSlot) => {
-    return students.filter(s => 
-      s.centre_id === slot.centre_id && 
-      s.level === slot.level && 
-      s.status === 'active'
-    );
-  };
+
 
   const getCentreName = (centreId: string) => {
     const match = centres.find(c => c.id === centreId);
@@ -252,10 +312,10 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     try {
       let savedCount = 0;
       for (const key of slotMarkings) {
-        const [_, studentId] = key.split('-');
+        const studentId = key.substring(slotId.length + 1);
         const status = markings[key];
         if (status) {
-          await logAttendance(studentId, status, activeCoachId);
+          await logAttendance(studentId, status, activeCoachId, slotId);
           savedCount++;
         }
       }
@@ -304,18 +364,32 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-surface border border-line rounded-xl p-3.5 shadow-sm">
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-muted-custom uppercase">COACH</span>
-          <select 
-            value={selectedCoachId} 
-            onChange={e => setSelectedCoachId(e.target.value)}
-            className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none w-64 cursor-pointer"
-          >
-            {coaches.map(c => (
-              <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>
-            ))}
-          </select>
+          {currentUser.role === 'coach' ? (
+            <div className="bg-canvas border border-line rounded-lg px-3 py-1 text-xs font-bold text-ink w-64">
+              {activeCoach?.name.toUpperCase() || 'COACH'}
+            </div>
+          ) : (
+            <select 
+              value={selectedCoachId} 
+              onChange={e => setSelectedCoachId(e.target.value)}
+              className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none w-64 cursor-pointer"
+            >
+              {coaches.map(c => (
+                <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
+          {(currentUser.role === 'owner' || currentUser.role === 'front_desk') && (
+            <button
+              onClick={() => setShowAddSlotModal(true)}
+              className="bg-forest hover:bg-forest-light text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>+</span> Add Class Slot
+            </button>
+          )}
           <button 
             onClick={() => exportTableToCSV('#schedule-table', 'weekly_schedule.csv')}
             className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all"
@@ -457,6 +531,15 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                   </div>
 
                   <div className="flex items-center gap-3">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRosterModalSlot(slot);
+                      }}
+                      className="bg-white border border-line hover:bg-canvas text-ink text-[10px] font-bold px-2.5 py-1 rounded-md transition-colors"
+                    >
+                      ⚙ Manage Roster
+                    </button>
                     <span className="text-[10px] font-bold text-muted-custom font-mono">
                       {Object.keys(markings).filter(k => k.startsWith(slot.id) && markings[k] !== null).length} / {roster.length} marked
                     </span>
@@ -467,6 +550,20 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                 {/* Expanded Roster Dropdown Panel */}
                 {isExpanded && (
                   <div className="border-t border-line bg-canvas/10 p-4 space-y-4">
+                    <div className="flex items-center justify-between border-b border-line pb-2">
+                      <span className="text-[10px] font-bold text-muted-custom uppercase tracking-wider">
+                        Enrolled Students ({roster.length})
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRosterModalSlot(slot);
+                        }}
+                        className="bg-forest hover:bg-forest-light text-white text-[11px] font-bold px-3 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <span>⚙</span> Manage Class Roster
+                      </button>
+                    </div>
                     <div className="divide-y divide-line">
                       {roster.length === 0 ? (
                         <div className="py-4 text-center text-xs text-muted-custom">
@@ -559,6 +656,26 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                           Log progress
                         </button>
 
+                        <button
+                          onClick={async () => {
+                            try {
+                              setSaveStatus('Sending class notifications to enrolled students...');
+                              const res = await notifyEnrolledStudents(slot.id);
+                              const freshData = await syncDatabaseToClient();
+                              db.syncFromNeon(freshData);
+                              loadData();
+                              setSaveStatus(`✓ WhatsApp & Email reminders sent to ${res.count} parents!`);
+                              setTimeout(() => setSaveStatus(''), 5000);
+                            } catch (err: any) {
+                              setSaveStatus(`❌ Error: ${err.message}`);
+                              setTimeout(() => setSaveStatus(''), 5000);
+                            }
+                          }}
+                          className="bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer flex items-center gap-1"
+                        >
+                          <span>📢</span> Notify Enrolled
+                        </button>
+
                         <span className="text-[10px] text-muted-custom italic">
                           Present decrements the package · works offline
                         </span>
@@ -640,6 +757,229 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
           </table>
         </div>
       </div>
+
+      {/* Manage Roster Drawer Modal */}
+      {rosterModalSlot && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex justify-end animate-fadeIn">
+          <div className="bg-surface w-full max-w-md h-full shadow-2xl flex flex-col border-l border-line p-6 space-y-5 overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-line pb-4">
+              <div>
+                <h3 className="font-bold text-ink text-base flex items-center gap-2 font-display">
+                  <span>⚙</span> Class Roster Management
+                </h3>
+                <p className="text-xs text-muted-custom mt-0.5">
+                  {rosterModalSlot.day} {rosterModalSlot.time} · {rosterModalSlot.level} ({getCentreName(rosterModalSlot.centre_id)})
+                </p>
+              </div>
+              <button
+                onClick={() => setRosterModalSlot(null)}
+                className="w-8 h-8 rounded-full bg-canvas border border-line flex items-center justify-center text-ink font-bold hover:bg-line transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs text-muted-custom leading-relaxed">
+                Check students to enroll them in this explicit class slot. Deselecting all returns slot to level-filtered roster.
+              </p>
+              <div className="divide-y divide-line border border-line rounded-xl bg-white max-h-[60vh] overflow-y-auto">
+                {students
+                  .filter(s => s.centre_id === rosterModalSlot.centre_id && s.status === 'active')
+                  .map(student => {
+                    const isEnrolled = enrollments.some(e => e.slot_id === rosterModalSlot.id && e.student_id === student.id);
+                    return (
+                      <label key={student.id} className="flex items-center justify-between p-3.5 hover:bg-canvas/30 cursor-pointer transition-colors">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isEnrolled}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                db.saveEnrollment({
+                                  id: `enr-${crypto.randomUUID()}`,
+                                  student_id: student.id,
+                                  slot_id: rosterModalSlot.id,
+                                  enrolled_at: new Date().toISOString()
+                                });
+                              } else {
+                                db.removeEnrollment(student.id, rosterModalSlot.id);
+                              }
+                              setEnrollments(db.getEnrollments());
+                            }}
+                            className="w-4 h-4 rounded border-line text-forest focus:ring-forest cursor-pointer"
+                          />
+                          <div>
+                            <span className="font-bold text-xs text-ink block">{student.name}</span>
+                            <span className="text-[9px] text-muted-custom">{student.level || 'No level'}</span>
+                          </div>
+                        </div>
+                        {isEnrolled && (
+                          <span className="text-[9px] font-bold text-forest bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5">
+                            Enrolled
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-line flex justify-end">
+              <button
+                onClick={() => setRosterModalSlot(null)}
+                className="bg-forest text-white font-bold text-xs px-5 py-2.5 rounded-xl hover:bg-forest-light transition-all"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Class Slot Modal */}
+      {showAddSlotModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-surface w-full max-w-md rounded-2xl shadow-2xl border border-line p-6 space-y-5 animate-fadeIn">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="font-bold text-ink text-base flex items-center gap-2 font-display">
+                <span className="text-forest">+</span> Create New Class Slot
+              </h3>
+              <button
+                onClick={() => setShowAddSlotModal(false)}
+                className="w-7 h-7 rounded-full bg-canvas border border-line flex items-center justify-center text-ink font-bold hover:bg-line text-xs"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const targetCoachId = newSlotCoachId || selectedCoachId || (coaches[0]?.id || '');
+                const targetCentreId = newSlotCentreId || (centres[0]?.id || 'c-1');
+                
+                try {
+                  const newSlot: ScheduleSlot = {
+                    id: `slot-${crypto.randomUUID()}`,
+                    centre_id: targetCentreId,
+                    coach_id: targetCoachId,
+                    day: newSlotDay,
+                    time: newSlotTime,
+                    level: newSlotLevel,
+                    capacity: newSlotCapacity
+                  };
+
+                  const existingSlots = db.getScheduleSlots();
+                  existingSlots.push(newSlot);
+                  db.save('schedule_slots', existingSlots);
+                  
+                  try {
+                    await createScheduleSlot(targetCentreId, targetCoachId, newSlotDay, newSlotTime, newSlotLevel, newSlotCapacity);
+                  } catch (err) {
+                    console.warn("Server createScheduleSlot fallback:", err);
+                  }
+
+                  db.logAudit('create_schedule_slot', 'schedule_slots', null, newSlot);
+                  window.dispatchEvent(new Event('db-synced'));
+                  
+                  setShowAddSlotModal(false);
+                  setSaveStatus(`✓ Class slot created: ${newSlotDay} ${newSlotTime} (${newSlotLevel})`);
+                  setTimeout(() => setSaveStatus(''), 4000);
+                } catch (err: any) {
+                  alert("Error creating slot: " + err.message);
+                }
+              }}
+              className="space-y-4 text-xs"
+            >
+              <div className="flex flex-col gap-1.5">
+                <label className="font-bold text-ink">Day of Week *</label>
+                <select
+                  value={newSlotDay}
+                  onChange={(e: any) => setNewSlotDay(e.target.value)}
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
+                >
+                  <option value="Mon">Monday (Mon)</option>
+                  <option value="Tue">Tuesday (Tue)</option>
+                  <option value="Wed">Wednesday (Wed)</option>
+                  <option value="Thu">Thursday (Thu)</option>
+                  <option value="Fri">Friday (Fri)</option>
+                  <option value="Sat">Saturday (Sat)</option>
+                  <option value="Sun">Sunday (Sun)</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-bold text-ink">Time (HH:MM) *</label>
+                  <input
+                    type="text"
+                    value={newSlotTime}
+                    onChange={(e) => setNewSlotTime(e.target.value)}
+                    placeholder="16:00"
+                    required
+                    className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-bold text-ink">Level *</label>
+                  <select
+                    value={newSlotLevel}
+                    onChange={(e) => setNewSlotLevel(e.target.value)}
+                    className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
+                  >
+                    <option value="Beginner">Beginner</option>
+                    <option value="Intermediate">Intermediate</option>
+                    <option value="Advanced">Advanced</option>
+                    <option value="Pro-Track">Pro-Track</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-bold text-ink">Coach *</label>
+                  <select
+                    value={newSlotCoachId || selectedCoachId}
+                    onChange={(e) => setNewSlotCoachId(e.target.value)}
+                    className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
+                  >
+                    {coaches.map(c => (
+                      <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-bold text-ink">Seat Capacity</label>
+                  <input
+                    type="number"
+                    value={newSlotCapacity}
+                    onChange={(e) => setNewSlotCapacity(Number(e.target.value))}
+                    min={1}
+                    className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-line flex gap-3">
+                <button
+                  type="submit"
+                  className="flex-1 bg-forest hover:bg-forest-light text-white font-bold py-2.5 rounded-xl transition-all"
+                >
+                  Create Class Slot
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddSlotModal(false)}
+                  className="bg-white border border-line text-ink font-bold px-4 py-2.5 rounded-xl hover:bg-canvas"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

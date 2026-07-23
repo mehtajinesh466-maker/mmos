@@ -71,5 +71,11 @@ export const authOptions: AuthOptions = {
   session: {
     strategy: "jwt",
   },
-  secret: process.env.NEXTAUTH_SECRET || "my-default-dev-secret-key-123",
+  secret: process.env.NEXTAUTH_SECRET || (() => {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error("NEXTAUTH_SECRET environment variable is missing in production!");
+    }
+    return "my-default-dev-secret-key-123";
+  })(),
 };
+

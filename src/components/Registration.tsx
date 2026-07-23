@@ -143,7 +143,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       school: formData.school,
       fide_id: formData.fide_id,
       centre_id: formData.centre_id,
-      coach_id: formData.coach_id || (filteredCoaches[0]?.id || ''),
+      coach_id: formData.coach_id,
       level: formData.level || 'Beginner',
       tier_id: tierId,
       consent_ops: formData.consent_ops,
