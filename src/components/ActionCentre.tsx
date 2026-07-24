@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { getActionCentreData, renewPackage } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
 import { useRouter } from 'next/navigation';
+import { db } from '../lib/db';
 
 interface ActionCentreProps {
   currentUser: any;
@@ -210,7 +211,7 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
         {[
           { label: 'INVOICE NOW', value: invoiceNowCount, desc: 'attending unpaid', color: 'before:bg-forest' },
           { label: 'RENEW NOW', value: renewNowCount, desc: '≤3 classes left', color: 'before:bg-warm-custom' },
-          { label: 'RECOVERABLE', value: `AED ${(recoverableAmount / 1000).toFixed(0)}K`, desc: 'invoice today', color: 'before:bg-brass' },
+          { label: 'RECOVERABLE', value: recoverableAmount === 0 ? 'AED 0' : `AED ${(recoverableAmount / 1000).toFixed(0)}K`, desc: 'invoice today', color: 'before:bg-brass' },
           { label: 'CLASSES GIVEN AWAY', value: classesGivenAway, desc: 'never billed', color: 'before:bg-hot-custom' }
         ].map((kpi, idx) => (
           <div key={idx} className={`bg-surface border border-line rounded-[14px] p-6 shadow-sm relative overflow-hidden before:absolute before:top-0 before:left-0 before:w-full before:h-[3px] ${kpi.color}`}>

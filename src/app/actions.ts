@@ -376,6 +376,7 @@ export async function syncDatabaseToClient() {
       scheduleSlots,
       attendance,
       invoices,
+      enquiries,
       enrollments,
       progressLogsRaw,
       notifications
@@ -408,6 +409,9 @@ export async function syncDatabaseToClient() {
       }),
       prisma.invoice.findMany({
         where: { student_id: { in: studentIds } }
+      }),
+      prisma.enquiry.findMany({
+        where: userCentreId ? { centre_id: userCentreId } : {}
       }),
       prisma.enrollment.findMany(),
       prisma.progressLog.findMany({
@@ -1119,7 +1123,7 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
     }
   });
 
-  return pkg;
+  return JSON.parse(JSON.stringify(pkg));
 }
 
 export async function getReconciliationData() {
@@ -1198,14 +1202,14 @@ export async function updatePackageDB(id: string, data: any) {
       throw new Error("Unauthorized");
     }
   }
-  return await prisma.package.update({
+  return JSON.parse(JSON.stringify(await prisma.package.update({
     where: { id },
     data: {
       classes_total: Number(data.classes_total),
       classes_remaining: Number(data.classes_remaining),
       frozen: data.frozen === true || data.frozen === 'true'
     }
-  });
+  })));
 }
 
 export async function deleteAttendanceDB(id: string) {
@@ -1253,10 +1257,10 @@ export async function updateInvoiceDB(id: string, status: string) {
       throw new Error("Unauthorized");
     }
   }
-  return await prisma.invoice.update({
+  return JSON.parse(JSON.stringify(await prisma.invoice.update({
     where: { id },
     data: { status }
-  });
+  })));
 }
 
 export async function getActionCentreData() {
