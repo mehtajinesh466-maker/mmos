@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '../lib/db';
 import type { User, Student, Package, ScheduleSlot, Attendance, Coach } from '../lib/db';
-import { logAttendance, syncDatabaseToClient, createScheduleSlot, notifyEnrolledStudents } from '../app/actions';
+import { logAttendance, syncDatabaseToClient, createScheduleSlot, notifyEnrolledStudents, enrollStudent, unenrollStudent } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
 
 interface ScheduleProps {
@@ -792,21 +792,36 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                       <label key={student.id} className="flex items-center justify-between p-3.5 hover:bg-canvas/30 cursor-pointer transition-colors">
                         <div className="flex items-center gap-3">
                           <input
-                            type="checkbox"
-                            checked={isEnrolled}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                db.saveEnrollment({
-                                  id: `enr-${crypto.randomUUID()}`,
-                                  student_id: student.id,
-                                  slot_id: rosterModalSlot.id,
-                                  enrolled_at: new Date().toISOString()
-                                });
-                              } else {
-                                db.removeEnrollment(student.id, rosterModalSlot.id);
-                              }
-                              setEnrollments(db.getEnrollments());
-                            }}
+                             type="checkbox"
+                             checked={isEnrolled}
+                             onChange={async (e) => {
+                               const checked = e.target.checked;
+                               try {
+                                 if (checked) {
+                                   db.saveEnrollment({
+                                     id: `enr-${crypto.randomUUID()}`,
+                                     student_id: student.id,
+                                     slot_id: rosterModalSlot.id,
+                                     enrolled_at: new Date().toISOString()
+                                   });
+                                   setEnrollments(db.getEnrollments());
+                                   await enrollStudent(student.id, rosterModalSlot.id);
+                                 } else {
+                                   db.removeEnrollment(student.id, rosterModalSlot.id);
+                                   setEnrollments(db.getEnrollments());
+                                   await unenrollStudent(student.id, rosterModalSlot.id);
+                                 }
+                                 const freshData = await syncDatabaseToClient();
+                                 db.syncFromNeon(freshData);
+                                 setEnrollments(db.getEnrollments());
+                               } catch (err: any) {
+                                 console.error("Enrollment failed:", err);
+                                 alert("Roster update failed: " + err.message);
+                                 const freshData = await syncDatabaseToClient();
+                                 db.syncFromNeon(freshData);
+                                 setEnrollments(db.getEnrollments());
+                               }
+                             }}
                             className="w-4 h-4 rounded border-line text-forest focus:ring-forest cursor-pointer"
                           />
                           <div>
