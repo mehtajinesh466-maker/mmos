@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { getActionCentreData, renewPackage } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
+import { useRouter } from 'next/navigation';
 
 interface ActionCentreProps {
   currentUser: any;
@@ -10,6 +11,7 @@ interface ActionCentreProps {
 }
 
 export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeCentre }) => {
+  const router = useRouter();
   const [students, setStudents] = useState<any[]>([]);
   const [centres, setCentres] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
@@ -95,12 +97,14 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
   const expiringPackages: any[] = [];
   filteredStudents.forEach(s => {
     const studentPkgs = s.packages || [];
+    const totalRemaining = studentPkgs.reduce((sum, pkg) => sum + pkg.classes_remaining, 0);
+    
     // Sort packages by start_date asc
     const sortedPkgs = [...studentPkgs].sort((a, b) => new Date(a.start_date || '').getTime() - new Date(b.start_date || '').getTime());
     
     sortedPkgs.forEach((pkg, idx) => {
-      // Package has classes remaining and is <= 3, and is not frozen
-      if (pkg.classes_remaining > 0 && pkg.classes_remaining <= 3 && !pkg.frozen) {
+      // Package has classes remaining, and the student's TOTAL remaining classes is <= 3, and is not frozen
+      if (pkg.classes_remaining > 0 && totalRemaining <= 3 && !pkg.frozen) {
         const rawCoachName = s.coach?.user?.name || 'Unassigned';
         const displayCoachName = rawCoachName === 'Unassigned' ? 'Unassigned' : rawCoachName.split(' ')[0].toUpperCase();
         expiringPackages.push({
@@ -389,7 +393,7 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
                     <td className="py-4 px-4 text-right font-mono font-bold text-hot-custom">{pkg.left}</td>
                     <td className="py-4 px-4 text-right">
                       <button
-                        onClick={() => handleAction(pkg.studentId)}
+                        onClick={() => router.push(`/packages?studentId=${pkg.studentId}`)}
                         className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-3.5 py-1.5 rounded-lg transition-all active:scale-95 cursor-pointer"
                       >
                         Renew

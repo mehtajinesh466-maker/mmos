@@ -409,10 +409,13 @@ export const db = {
           student.status = 'active';
         }
 
-        // Auto-check if package is low now
-        if (activePkg && activePkg.classes_remaining <= 2) {
+        // Auto-check if package is low now based on total remaining classes
+        const studentPkgs = packages.filter(p => p.student_id === record.student_id && !p.frozen);
+        const totalRemaining = studentPkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
+
+        if (totalRemaining <= 2) {
           student.flags.low_package = true;
-        } else if (activePkg && activePkg.classes_remaining > 2) {
+        } else {
           delete student.flags.low_package;
         }
 

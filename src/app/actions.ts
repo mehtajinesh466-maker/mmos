@@ -730,10 +730,33 @@ export async function logAttendance(studentId: string, status: string, coachId: 
     });
     
     if (pkg) {
-      await prisma.package.update({
+      const updatedPkg = await prisma.package.update({
         where: { id: pkg.id },
         data: { classes_remaining: pkg.classes_remaining - 1 }
       });
+
+      // Calculate total remaining classes for student to update flags
+      const allPkgs = await prisma.package.findMany({
+        where: { student_id: studentId, frozen: false }
+      });
+      const totalRemaining = allPkgs.reduce((sum, p) => {
+        const rem = p.id === pkg.id ? updatedPkg.classes_remaining : p.classes_remaining;
+        return sum + rem;
+      }, 0);
+
+      const student = await prisma.student.findUnique({ where: { id: studentId } });
+      if (student) {
+        const flags = typeof student.flags === 'object' && student.flags ? { ...(student.flags as any) } : {};
+        if (totalRemaining <= 2) {
+          flags.low_package = true;
+        } else {
+          delete flags.low_package;
+        }
+        await prisma.student.update({
+          where: { id: studentId },
+          data: { flags }
+        });
+      }
     }
   }
 }
@@ -992,6 +1015,19 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
       created_at: new Date()
     }
   }).catch(err => console.warn("Auto invoice generation skipped:", err));
+
+  // Clear low_package flag on student
+  const updatedFlags = typeof student.flags === 'object' && student.flags
+    ? { ...(student.flags as any) }
+    : {};
+  delete updatedFlags.low_package;
+
+  await prisma.student.update({
+    where: { id: student.id },
+    data: {
+      flags: updatedFlags
+    }
+  });
 
   return pkg;
 }

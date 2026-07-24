@@ -1111,9 +1111,13 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
     if (reportId === 'package-expiry') {
       const studentCount = filteredStudents.length;
 
-      // Find active packages with <= 3 classes remaining for students in scope
+      // Find active packages with <= 3 classes remaining for students in scope,
+      // but only if the student's total remaining classes across all packages is <= 3
       const expiringPackages = packages.filter(p => {
-        return p.classes_remaining > 0 && p.classes_remaining <= 3 && filteredStudents.some(s => s.id === p.student_id);
+        if (p.classes_remaining <= 0 || p.classes_remaining > 3) return false;
+        const studentPkgs = packages.filter(pkg => pkg.student_id === p.student_id && !pkg.frozen);
+        const totalRemaining = studentPkgs.reduce((sum, pkg) => sum + pkg.classes_remaining, 0);
+        return totalRemaining <= 3 && filteredStudents.some(s => s.id === p.student_id);
       });
 
       let expiringBay = 0;
@@ -4385,7 +4389,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
                         <td className="py-3 px-2 text-right font-bold text-hot-custom">{row.left}</td>
                         <td className="py-3 px-2 text-center">
                           <button
-                            onClick={() => router.push(`/registration?studentId=${row.studentId}`)}
+                            onClick={() => router.push(`/packages?studentId=${row.studentId}`)}
                             className="bg-white hover:bg-canvas border border-line text-ink font-bold text-[10px] px-2.5 py-1 rounded-lg"
                           >
                             Renew
@@ -4503,7 +4507,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
                         <td className="py-3 px-2 font-mono text-muted-custom">{row.sinceDate}</td>
                         <td className="py-3 px-2 text-center">
                           <button
-                            onClick={() => router.push(`/registration?studentId=${row.studentId}`)}
+                            onClick={() => router.push(`/packages?studentId=${row.studentId}`)}
                             className="bg-white hover:bg-canvas border border-line text-ink font-bold text-[10px] px-2.5 py-1 rounded-lg"
                           >
                             Bill now

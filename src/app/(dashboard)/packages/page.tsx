@@ -2,7 +2,7 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, Suspense } from "react";
 import { Packages } from "../../../components/Packages";
 
 export default function PackagesPage() {
@@ -22,5 +22,9 @@ export default function PackagesPage() {
   const currentUser = session.user as any;
   const activeCentre = currentUser.centre_id || "All";
 
-  return <Packages currentUser={currentUser} activeCentre={activeCentre} />;
+  return (
+    <Suspense fallback={<div className="p-10 text-center text-muted-custom">Loading Package Form...</div>}>
+      <Packages currentUser={currentUser} activeCentre={activeCentre} />
+    </Suspense>
+  );
 }

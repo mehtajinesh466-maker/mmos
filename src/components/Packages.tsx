@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/db';
 import { renewPackage, syncDatabaseToClient } from '../app/actions';
+import { useSearchParams } from 'next/navigation';
 
 interface PackagesProps {
   currentUser: any;
@@ -10,9 +11,12 @@ interface PackagesProps {
 }
 
 export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre }) => {
+  const searchParams = useSearchParams();
+  const studentIdParam = searchParams?.get('studentId') || '';
+
   const [students, setStudents] = useState<any[]>([]);
   const [tiers, setTiers] = useState<any[]>([]);
-  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [selectedStudentId, setSelectedStudentId] = useState(studentIdParam);
   const [packageType, setPackageType] = useState('Renewal');
   const [packageSize, setPackageSize] = useState('12 classes');
   const [ratePerClass, setRatePerClass] = useState('100');
@@ -27,14 +31,16 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
   useEffect(() => {
     let list = db.getStudents().filter(s => s.status === 'active');
     if (activeCentre !== 'All') {
-      list = list.filter(s => s.centre_id === activeCentre);
+      list = list.filter(s => s.centre_id === activeCentre || s.id === studentIdParam);
     }
     setStudents(list);
-    if (list.length > 0) {
+    if (studentIdParam && list.some(s => s.id === studentIdParam)) {
+      setSelectedStudentId(studentIdParam);
+    } else if (list.length > 0) {
       setSelectedStudentId(list[0].id);
     }
     setTiers(db.getTiers());
-  }, [activeCentre]);
+  }, [activeCentre, studentIdParam]);
 
   // Dynamically calculate total
   const getPackageTotal = () => {
