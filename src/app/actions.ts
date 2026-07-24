@@ -697,7 +697,31 @@ export async function updateEnquiryStageDB(id: string, stage: string) {
   });
 }
 
-export async function logAttendance(studentId: string, status: string, coachId: string, slotId?: string) {
+async function updateStudentFlags(studentId: string, pkgId?: string, updatedRemaining?: number) {
+  const allPkgs = await prisma.package.findMany({
+    where: { student_id: studentId, frozen: false }
+  });
+  const totalRemaining = allPkgs.reduce((sum, p) => {
+    const rem = (pkgId && p.id === pkgId && updatedRemaining !== undefined) ? updatedRemaining : p.classes_remaining;
+    return sum + rem;
+  }, 0);
+
+  const student = await prisma.student.findUnique({ where: { id: studentId } });
+  if (student) {
+    const flags = typeof student.flags === 'object' && student.flags ? { ...(student.flags as any) } : {};
+    if (totalRemaining <= 2) {
+      flags.low_package = true;
+    } else {
+      delete flags.low_package;
+    }
+    await prisma.student.update({
+      where: { id: studentId },
+      data: { flags }
+    });
+  }
+}
+
+export async function logAttendance(studentId: string, status: string | null, coachId: string, slotId?: string) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
@@ -708,7 +732,95 @@ export async function logAttendance(studentId: string, status: string, coachId: 
       throw new Error("Unauthorized");
     }
   }
-  await prisma.attendance.create({
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+
+  const existing = await prisma.attendance.findFirst({
+    where: {
+      student_id: studentId,
+      slot_id: slotId || null,
+      date: {
+        gte: startOfToday,
+        lte: endOfToday
+      }
+    }
+  });
+
+  if (existing) {
+    if (!status) {
+      // Unmarked: delete the record and restore class if it was present
+      if (existing.status === 'present') {
+        const pkgs = await prisma.package.findMany({
+          where: { student_id: studentId, frozen: false },
+          orderBy: { start_date: 'asc' }
+        });
+        const pkgToRestore = pkgs.find(p => p.classes_remaining < p.classes_total);
+        if (pkgToRestore) {
+          const updatedPkg = await prisma.package.update({
+            where: { id: pkgToRestore.id },
+            data: { classes_remaining: pkgToRestore.classes_remaining + 1 }
+          });
+          await updateStudentFlags(studentId, pkgToRestore.id, updatedPkg.classes_remaining);
+        }
+      }
+      return await prisma.attendance.delete({
+        where: { id: existing.id }
+      });
+    }
+
+    if (existing.status === status) {
+      return existing;
+    }
+
+    const oldStatus = existing.status;
+    const updated = await prisma.attendance.update({
+      where: { id: existing.id },
+      data: { status }
+    });
+
+    if (oldStatus === 'present' && status !== 'present') {
+      // Restore class
+      const pkgs = await prisma.package.findMany({
+        where: { student_id: studentId, frozen: false },
+        orderBy: { start_date: 'asc' }
+      });
+      const pkgToRestore = pkgs.find(p => p.classes_remaining < p.classes_total);
+      if (pkgToRestore) {
+        const updatedPkg = await prisma.package.update({
+          where: { id: pkgToRestore.id },
+          data: { classes_remaining: pkgToRestore.classes_remaining + 1 }
+        });
+        await updateStudentFlags(studentId, pkgToRestore.id, updatedPkg.classes_remaining);
+      }
+    } else if (oldStatus !== 'present' && status === 'present') {
+      // Deduct class
+      const pkg = await prisma.package.findFirst({
+        where: {
+          student_id: studentId,
+          frozen: false,
+          classes_remaining: { gt: 0 }
+        },
+        orderBy: { start_date: 'asc' }
+      });
+      if (pkg) {
+        const updatedPkg = await prisma.package.update({
+          where: { id: pkg.id },
+          data: { classes_remaining: pkg.classes_remaining - 1 }
+        });
+        await updateStudentFlags(studentId, pkg.id, updatedPkg.classes_remaining);
+      }
+    }
+
+    return updated;
+  }
+
+  if (!status) return null;
+
+  const newRecord = await prisma.attendance.create({
     data: {
       student_id: studentId,
       status: status,
@@ -717,9 +829,8 @@ export async function logAttendance(studentId: string, status: string, coachId: 
       date: new Date()
     }
   });
-  
+
   if (status === 'present') {
-    // find active package and decrement
     const pkg = await prisma.package.findFirst({
       where: {
         student_id: studentId,
@@ -728,37 +839,16 @@ export async function logAttendance(studentId: string, status: string, coachId: 
       },
       orderBy: { start_date: 'asc' }
     });
-    
     if (pkg) {
       const updatedPkg = await prisma.package.update({
         where: { id: pkg.id },
         data: { classes_remaining: pkg.classes_remaining - 1 }
       });
-
-      // Calculate total remaining classes for student to update flags
-      const allPkgs = await prisma.package.findMany({
-        where: { student_id: studentId, frozen: false }
-      });
-      const totalRemaining = allPkgs.reduce((sum, p) => {
-        const rem = p.id === pkg.id ? updatedPkg.classes_remaining : p.classes_remaining;
-        return sum + rem;
-      }, 0);
-
-      const student = await prisma.student.findUnique({ where: { id: studentId } });
-      if (student) {
-        const flags = typeof student.flags === 'object' && student.flags ? { ...(student.flags as any) } : {};
-        if (totalRemaining <= 2) {
-          flags.low_package = true;
-        } else {
-          delete flags.low_package;
-        }
-        await prisma.student.update({
-          where: { id: studentId },
-          data: { flags }
-        });
-      }
+      await updateStudentFlags(studentId, pkg.id, updatedPkg.classes_remaining);
     }
   }
+
+  return newRecord;
 }
 
 export async function saveStudentDB(studentData: any) {

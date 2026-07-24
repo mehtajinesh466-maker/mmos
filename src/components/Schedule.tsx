@@ -314,10 +314,8 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       for (const key of slotMarkings) {
         const studentId = key.substring(slotId.length + 1);
         const status = markings[key];
-        if (status) {
-          await logAttendance(studentId, status, activeCoachId, slotId);
-          savedCount++;
-        }
+        await logAttendance(studentId, status, activeCoachId, slotId);
+        savedCount++;
       }
       const freshData = await syncDatabaseToClient();
       db.syncFromNeon(freshData);
