@@ -104,10 +104,12 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
     const sortedPkgs = [...studentPkgs].sort((a, b) => new Date(a.start_date || '').getTime() - new Date(b.start_date || '').getTime());
     
     sortedPkgs.forEach((pkg, idx) => {
-      // Package has classes remaining, and the student's TOTAL remaining classes is <= 3, and is not frozen
-      if (pkg.classes_remaining > 0 && totalRemaining <= 3 && !pkg.frozen) {
+      // Package has classes remaining, and total remaining classes is <= 20% of package size (or totalRemaining <= 3), and is not frozen
+      const isThresholdMet = pkg.classes_total > 0 && ((pkg.classes_remaining / pkg.classes_total) <= 0.20 || totalRemaining <= 3);
+      if (pkg.classes_remaining > 0 && isThresholdMet && !pkg.frozen) {
         const rawCoachName = s.coach?.user?.name || 'Unassigned';
         const displayCoachName = rawCoachName === 'Unassigned' ? 'Unassigned' : rawCoachName.split(' ')[0].toUpperCase();
+        const pctLeft = pkg.classes_total > 0 ? Math.round((pkg.classes_remaining / pkg.classes_total) * 100) : 0;
         expiringPackages.push({
           id: pkg.id,
           studentId: s.id,
@@ -117,7 +119,9 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
           packageName: `#${idx + 1} ${pkg.kind === 'renewal' ? 'Renewal' : pkg.kind === 'new' ? 'New' : 'Tournament'}`,
           paid: pkg.classes_total,
           used: pkg.classes_total - pkg.classes_remaining,
-          left: pkg.classes_remaining
+          left: pkg.classes_remaining,
+          pctLeft,
+          thresholdTrigger: pctLeft <= 20
         });
       }
     });
@@ -239,6 +243,22 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
           <div className="text-3xl font-bold font-display text-ink mt-2">{totalToRenew}</div>
           <div className="text-xs text-muted-custom mt-1">work this list weekly</div>
         </div>
+      {/* 20% Threshold Renewal Trigger Standalone Alert Banner */}
+      <div className="p-4 rounded-xl bg-amber-500/10 border-2 border-amber-500 text-amber-950 font-bold text-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shadow-sm">
+        <div className="flex items-center gap-2">
+          <span className="bg-amber-600 text-white text-[10px] font-black px-2.5 py-1 rounded uppercase tracking-wider shadow-sm flex items-center gap-1">
+            ⚡ 20% RENEWAL TRIGGER
+          </span>
+          <span>
+            <b>{sortedExpiringPackages.filter(p => p.pctLeft <= 20).length} Student Packages</b> are at or below the <b>20% remaining threshold</b>. Front office action required!
+          </span>
+        </div>
+        <button 
+          onClick={() => router.push('/packages')}
+          className="bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-extrabold text-xs px-4 py-2 rounded-lg transition-all shadow-md flex-shrink-0"
+        >
+          Open Package Renewals →
+        </button>
       </div>
 
       {/* Table 1: Attending with no paid package */}
@@ -355,7 +375,7 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
             </button>
           </div>
         </div>
-        <p className="text-xs text-muted-custom mb-6">Fewest classes remaining first.</p>
+        <p className="text-xs text-muted-custom mb-6">Flagged automatically when package balance reaches <b>≤20% threshold</b> (fewest classes remaining first).</p>
 
         <div className="overflow-x-auto">
           <table id="expiring-table" className="w-full border-collapse">
@@ -368,13 +388,14 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
                 <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Paid</th>
                 <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Used</th>
                 <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Left</th>
+                <th className="text-center text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Trigger</th>
                 <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Action</th>
               </tr>
             </thead>
             <tbody>
               {sortedExpiringPackages.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center text-muted-custom py-8">
+                  <td colSpan={9} className="text-center text-muted-custom py-8">
                     ✓ Zero expiring packages! Great job!
                   </td>
                 </tr>
@@ -391,11 +412,20 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
                     <td className="py-4 px-4 text-ink font-medium">{pkg.packageName}</td>
                     <td className="py-4 px-4 text-right font-mono text-ink">{pkg.paid}</td>
                     <td className="py-4 px-4 text-right font-mono text-ink">{pkg.used}</td>
-                    <td className="py-4 px-4 text-right font-mono font-bold text-hot-custom">{pkg.left}</td>
+                    <td className="py-4 px-4 text-right font-mono font-bold text-hot-custom">{pkg.left} ({pkg.pctLeft}%)</td>
+                    <td className="py-4 px-4 text-center">
+                      <span className={`inline-block text-[9px] font-extrabold px-2 py-0.5 rounded border uppercase ${
+                        pkg.pctLeft <= 20
+                          ? 'bg-amber-100 text-amber-800 border-amber-300'
+                          : 'bg-slate-100 text-slate-700 border-slate-200'
+                      }`}>
+                        {pkg.pctLeft <= 20 ? '⚡ 20% Trigger' : 'Expiring'}
+                      </span>
+                    </td>
                     <td className="py-4 px-4 text-right">
                       <button
                         onClick={() => router.push(`/packages?studentId=${pkg.studentId}`)}
-                        className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-3.5 py-1.5 rounded-lg transition-all active:scale-95 cursor-pointer"
+                        className="bg-forest hover:bg-forest/90 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg transition-all active:scale-95 cursor-pointer shadow-sm"
                       >
                         Renew
                       </button>

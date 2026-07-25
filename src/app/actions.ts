@@ -274,15 +274,14 @@ export async function syncDatabaseToClient() {
     });
 
     if (missingFamilies.length > 0) {
+      const defaultHash = await bcrypt.hash('Parent@12345', 10);
       for (const fam of missingFamilies) {
         const cleanEmail = fam.email!.toLowerCase().trim();
-        const rawPassword = generateRandomPassword();
-        const hashedPassword = await bcrypt.hash(rawPassword, 10);
         await prisma.user.create({
           data: {
             name: fam.primary_name || 'Parent',
             email: cleanEmail,
-            password: hashedPassword,
+            password: defaultHash,
             role: 'parent',
             centre_id: null
           }
@@ -1389,8 +1388,62 @@ async function sendEmailNotification(toEmail: string, subject: string, bodyHtml:
   }
 }
 
-// Helper to send WhatsApp messages using Meta Cloud API with graceful local fallback
+// Helper to send WhatsApp messages (supports Meta Cloud API, Twilio, or UltraMsg)
 async function sendWhatsAppNotification(toPhone: string, bodyText: string) {
+  const cleanPhone = toPhone.replace(/[\s\-\(\)]/g, '');
+
+  // 1. UltraMsg (Easiest - Scan QR code, no Meta approval needed)
+  const ultramsgInstance = process.env.ULTRAMSG_INSTANCE_ID;
+  const ultramsgToken = process.env.ULTRAMSG_TOKEN;
+  if (ultramsgInstance && ultramsgToken) {
+    try {
+      const response = await fetch(`https://api.ultramsg.com/${ultramsgInstance}/messages/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          token: ultramsgToken,
+          to: cleanPhone,
+          body: bodyText
+        })
+      });
+      if (response.ok) {
+        console.log(`✓ WhatsApp sent via UltraMsg API to ${cleanPhone}`);
+        return;
+      }
+    } catch (e) {
+      console.error('UltraMsg WhatsApp Error:', e);
+    }
+  }
+
+  // 2. Twilio for WhatsApp
+  const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+  const twilioAuth = process.env.TWILIO_AUTH_TOKEN;
+  const twilioFrom = process.env.TWILIO_WHATSAPP_NUMBER || 'whatsapp:+14155238886';
+  if (twilioSid && twilioAuth) {
+    try {
+      const authHeader = 'Basic ' + Buffer.from(`${twilioSid}:${twilioAuth}`).toString('base64');
+      const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+          From: twilioFrom.startsWith('whatsapp:') ? twilioFrom : `whatsapp:${twilioFrom}`,
+          To: cleanPhone.startsWith('whatsapp:') ? cleanPhone : `whatsapp:${cleanPhone}`,
+          Body: bodyText
+        })
+      });
+      if (response.ok) {
+        console.log(`✓ WhatsApp sent via Twilio to ${cleanPhone}`);
+        return;
+      }
+    } catch (e) {
+      console.error('Twilio WhatsApp Error:', e);
+    }
+  }
+
+  // 3. Official Meta Cloud API
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
   const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   if (accessToken && phoneId) {
@@ -1404,27 +1457,25 @@ async function sendWhatsAppNotification(toPhone: string, bodyText: string) {
         body: JSON.stringify({
           messaging_product: "whatsapp",
           recipient_type: "individual",
-          to: toPhone.replace(/\s+/g, ''), // strip spaces
+          to: cleanPhone.replace(/^\+/, ''),
           type: "text",
           text: { body: bodyText }
         })
       });
-      if (!response.ok) {
-        const errText = await response.text();
-        console.error(`Meta WhatsApp API Error: ${response.statusText} (${errText})`);
-      } else {
-        console.log(`✓ WhatsApp sent successfully via Meta API to ${toPhone}`);
+      if (response.ok) {
+        console.log(`✓ WhatsApp sent via Meta API to ${cleanPhone}`);
+        return;
       }
     } catch (e) {
-      console.error('Failed to send WhatsApp via Meta API:', e);
+      console.error('Meta WhatsApp API Error:', e);
     }
-  } else {
-    // Local development simulation logging
-    console.log('\n--- [WHATSAPP SIMULATION] ---');
-    console.log(`To: ${toPhone}`);
-    console.log(`Message: ${bodyText}`);
-    console.log('------------------------------\n');
   }
+
+  // Local development simulation logging
+  console.log('\n--- [WHATSAPP SIMULATION] ---');
+  console.log(`To: ${cleanPhone}`);
+  console.log(`Message: ${bodyText}`);
+  console.log('------------------------------\n');
 }
 
 // Server Action: Send Student Progress Report

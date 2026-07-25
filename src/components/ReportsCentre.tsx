@@ -41,13 +41,14 @@ export const ReportsCentre: React.FC = () => {
     },
     {
       title: 'Student',
-      count: '3 reports',
+      count: '4 reports',
       icon: '🎓',
       badgeColor: 'bg-slate-100 text-slate-800 border-slate-200',
       badgeLabel: 'STUDENT',
       reports: [
-        { id: 'package-utilisation', title: 'Package Utilisation', desc: '—', path: '/package-report' },
-        { id: 'progress-report', title: 'Progress Report', desc: '—', path: '/progress-report' },
+        { id: 'student-class-usage', title: 'Student Class Usage', desc: 'On-demand class usage, remaining balance & 20% renewal triggers' },
+        { id: 'package-utilisation', title: 'Package Utilisation', desc: 'Detailed per-student package burn down', path: '/package-report' },
+        { id: 'progress-report', title: 'Progress Report', desc: 'Student skill progress and mastery logs', path: '/progress-report' },
         { id: 'student-profile', title: 'Student Profile', desc: 'Centre · Engagement · Segment · Level · Rate band', path: '/student-dashboard' }
       ]
     },

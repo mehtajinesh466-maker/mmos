@@ -409,11 +409,13 @@ export const db = {
           student.status = 'active';
         }
 
-        // Auto-check if package is low now based on total remaining classes
+        // Auto-check if package is low based on 20% threshold of total package classes
         const studentPkgs = packages.filter(p => p.student_id === record.student_id && !p.frozen);
         const totalRemaining = studentPkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
+        const totalClasses = studentPkgs.reduce((sum, p) => sum + p.classes_total, 0);
 
-        if (totalRemaining <= 2) {
+        // 20% package threshold trigger (or remaining <= 2)
+        if (totalClasses > 0 && (totalRemaining / totalClasses <= 0.20 || totalRemaining <= 2)) {
           student.flags.low_package = true;
         } else {
           delete student.flags.low_package;

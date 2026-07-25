@@ -392,10 +392,25 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
             </div>
 
             {/* Status Alert Notice */}
-            <div className="p-4 rounded-xl bg-emerald-50/30 border border-emerald-100 border-l-4 border-l-forest text-xs text-ink/90 flex gap-2">
-              <span className="font-bold text-forest">Healthy.</span>
-              <span>{reportMetrics.balance} classes in hand and attending. No action needed.</span>
-            </div>
+            {reportMetrics.classesPaid > 0 && ((reportMetrics.balance / reportMetrics.classesPaid) <= 0.20 || activeStudent.flags?.low_package) ? (
+              <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 border-l-4 border-l-amber-600 text-xs text-amber-900 flex justify-between items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-extrabold text-amber-700 uppercase tracking-wide">⚡ 20% Renewal Trigger:</span>
+                  <span>Low remaining balance! {reportMetrics.balance} classes ({Math.round((reportMetrics.balance / reportMetrics.classesPaid) * 100)}%) remaining in package. Front office alert active.</span>
+                </div>
+                <button 
+                  onClick={() => router.push(`/packages?studentId=${activeStudent.id}`)}
+                  className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] px-3.5 py-1.5 rounded-lg transition-all shadow-sm flex-shrink-0"
+                >
+                  Renew Package
+                </button>
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-emerald-50/30 border border-emerald-100 border-l-4 border-l-forest text-xs text-ink/90 flex gap-2">
+                <span className="font-bold text-forest">Healthy.</span>
+                <span>{reportMetrics.balance} classes in hand and attending. No action needed.</span>
+              </div>
+            )}
 
             {/* Attendance Trend Chart */}
             <div className="space-y-3">

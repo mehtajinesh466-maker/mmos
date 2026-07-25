@@ -5,6 +5,7 @@ import { db } from '../lib/db';
 import type { User, Student, Package, Coach, Centre } from '../lib/db';
 import { updateInvoiceDB, deleteInvoiceDB, syncDatabaseToClient } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
+import { computeStudentStatus, getStatusBadgeClasses } from '../lib/segmentRules';
 interface PaymentUnbilledRegisterProps {
   currentUser: User;
   activeCentre: string;
@@ -157,13 +158,9 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
       // Engagement status
       const engagement = s.pace_status === 'Slow' ? 'SLIPPING' : s.pace_status === 'Stalled' ? 'COLD' : 'ENGAGED';
 
-      // Overdue segment label (HOT, WARM, HEALTHY)
-      let overdueSegment = 'HEALTHY';
-      if (overdueValue > 3000) {
-        overdueSegment = 'HOT';
-      } else if (overdueValue > 1000) {
-        overdueSegment = 'WARM';
-      }
+      // Overdue segment label (HOT, WARM, COLD, HEALTHY) using domain rules
+      const statusInfo = computeStudentStatus(s, packages, [], invoices);
+      const overdueSegment = statusInfo.segment;
 
       return {
         id: s.id,
@@ -352,6 +349,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
           <optgroup label="Overdue Alert">
             <option value="HOT">HOT</option>
             <option value="WARM">WARM</option>
+            <option value="COLD">COLD</option>
             <option value="HEALTHY">HEALTHY</option>
           </optgroup>
           <optgroup label="Pace Status">
@@ -485,7 +483,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
 
                     {/* Segment */}
                     <td className="py-3 px-4">
-                      <span className={`text-[9px] font-bold px-2.5 py-0.5 rounded-full border ${segmentBadge(row.overdueSegment)}`}>
+                      <span className={`text-[9px] px-2.5 py-0.5 rounded-full border uppercase ${getStatusBadgeClasses(row.overdueSegment as any)}`}>
                         {row.overdueSegment}
                       </span>
                     </td>

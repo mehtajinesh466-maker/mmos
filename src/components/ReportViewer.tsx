@@ -6,6 +6,7 @@ import { Chart, registerables } from 'chart.js';
 import { db } from '../lib/db';
 import type { Student, Package, Attendance, Coach } from '../lib/db';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
+import { computeStudentStatus } from '../lib/segmentRules';
 
 Chart.register(...registerables);
 
@@ -71,9 +72,10 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       'engagement-report': { title: 'Engagement Report', category: 'Operations', desc: 'Measure student engagement frequencies and average days since last session.' },
       'cohort-retention': { title: 'Cohort Retention', category: 'Operations', desc: 'Month-on-month retention rates grouped by signup cohorts.' },
       'slow-risk': { title: 'Slow / At-Risk', category: 'Operations', desc: 'Identify slipping students (no attendance in last 14+ days) or dormant profiles.' },
-      'package-expiry': { title: 'Package Expiry', category: 'Operations', desc: 'List active packages with low remaining classes (<= 2) or approaching expiry dates.' },
+      'package-expiry': { title: 'Package Expiry & 20% Triggers', category: 'Operations', desc: 'List active packages reaching ≤20% threshold balance or approaching expiry dates.' },
       'unpaid-attendance': { title: 'Unpaid Attendance', category: 'Operations', desc: 'Detailed view of attendance marked present that did not decrement a package class.' },
       
+      'student-class-usage': { title: 'Student Class Usage & Renewal Triggers', category: 'Student', desc: 'On-demand student class usage report, remaining balance, and 20% package renewal threshold triggers.' },
       'student-profile': { title: 'Student Profile Analysis', category: 'Student', desc: 'Demographic breakdown of student levels, locations, and active status.' },
       
       'centre-perf': { title: 'Centre Performance', category: 'Strategy', desc: 'Operational comparisons and key efficiency indicators between Bay Avenue and JLT.' },
@@ -89,29 +91,24 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
     return infos[reportId] || { title: 'Report Viewer', category: 'Reports', desc: 'Standard slice & dice viewer.' };
   }, [reportId]);
 
-  // Dynamic filter function
+  // Dynamic filter function with exact status rules (HOT, WARM, COLD, HEALTHY)
   const filteredStudents = useMemo(() => {
     return students.map(s => {
-      // Enrich student first
       const studentInvs = invoices.filter(i => i.student_id === s.id && i.status === 'paid');
       const totalPaidVal = studentInvs.reduce((sum, inv) => sum + Number(inv.amount), 0);
       
-      const today = new Date();
-      const daysSince = s.last_attended
-        ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000)
-        : 999;
-      
-      const engagement = daysSince <= 14 ? 'Engaged'
-        : daysSince <= 30 ? 'Slipping'
-        : daysSince <= 60 ? 'Cold'
-        : 'Dormant';
+      const statusInfo = computeStudentStatus(s, packages, attendance, invoices);
 
-      const segment = (s.flags?.low_package) ? 'HOT' : 'HEALTHY';
+      const engagement = statusInfo.daysSinceLastClass <= 14 ? 'Engaged'
+        : statusInfo.daysSinceLastClass <= 30 ? 'Slipping'
+        : statusInfo.daysSinceLastClass <= 60 ? 'Cold'
+        : 'Dormant';
 
       return {
         ...s,
         total_paid: totalPaidVal,
-        segment,
+        segment: statusInfo.segment,
+        statusInfo,
         engagement_status: engagement
       };
     }).filter(s => {
@@ -716,6 +713,94 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       };
     }
 
+    if (reportId === 'student-class-usage') {
+      let totalPaidSum = 0;
+      let totalUsedSum = 0;
+      let totalBalanceSum = 0;
+      let thresholdTriggerCount = 0;
+
+      const studentList = filteredStudents.map(s => {
+        const studentPkgs = packages.filter(p => p.student_id === s.id);
+        const classesPaid = studentPkgs.reduce((sum, p) => sum + p.classes_total, 0);
+        const balance = studentPkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
+        const classesUsed = Math.max(classesPaid - balance, 0);
+
+        totalPaidSum += classesPaid;
+        totalUsedSum += classesUsed;
+        totalBalanceSum += balance;
+
+        const pctLeft = classesPaid > 0 ? Math.round((balance / classesPaid) * 100) : 0;
+        const is20PctTrigger = (classesPaid > 0 && pctLeft <= 20) || (s.flags?.low_package ?? false);
+        if (is20PctTrigger) thresholdTriggerCount++;
+
+        const coach = coaches.find(c => c.id === s.coach_id);
+        const centre = centres.find(c => c.id === s.centre_id);
+
+        return {
+          id: s.id,
+          name: s.name,
+          centre: centre ? centre.name : 'Bay Avenue',
+          coach: coach ? coach.name : 'Unassigned',
+          level: s.level || 'Beginner',
+          segment: is20PctTrigger ? '20% TRIGGER' : 'HEALTHY',
+          classesPaid,
+          classesUsed,
+          balance,
+          pctLeft,
+          is20PctTrigger,
+          totalPaid: s.total_paid || 0
+        };
+      });
+
+      const kpi1 = { label: 'CLASSES PAID', val: totalPaidSum.toString() };
+      const kpi2 = { label: 'CLASSES USED', val: totalUsedSum.toString() };
+      const kpi3 = { label: 'RENEWAL TRIGGERS (≤20%)', val: thresholdTriggerCount.toString() };
+
+      const groups: { [key: string]: { paid: number; used: number; bal: number; count: number } } = {};
+      studentList.forEach(s => {
+        let groupKey = s.centre;
+        if (diceBy === 'By Coach') groupKey = s.coach;
+        else if (diceBy === 'By Level') groupKey = s.level;
+        else if (diceBy === 'By Segment') groupKey = s.segment;
+
+        if (!groups[groupKey]) {
+          groups[groupKey] = { paid: 0, used: 0, bal: 0, count: 0 };
+        }
+        groups[groupKey].paid += s.classesPaid;
+        groups[groupKey].used += s.classesUsed;
+        groups[groupKey].bal += s.balance;
+        groups[groupKey].count += 1;
+      });
+
+      const labels = Object.keys(groups);
+      const datasetData = labels.map(l => groups[l].bal);
+
+      const tableRows = labels.map(l => ({
+        name: l,
+        runRate: groups[l].bal,
+        classes: groups[l].used,
+        students: groups[l].count
+      }));
+
+      return {
+        kpi1,
+        kpi2,
+        kpi3,
+        labels,
+        datasetData,
+        totalStudentsVal: studentList.length,
+        totalClassesVal: totalUsedSum,
+        totalRunRateVal: totalBalanceSum,
+        totalPackagesVal: packages.filter(p => filteredStudents.some(s => s.id === p.student_id)).length,
+        annualisedVal: thresholdTriggerCount,
+        tableRows,
+        sumRunRate: totalBalanceSum,
+        sumClasses: totalUsedSum,
+        sumStudents: studentList.length,
+        rawList: studentList
+      };
+    }
+
     if (reportId === 'attendance-summary') {
       const studentCount = filteredStudents.length;
 
@@ -1111,13 +1196,13 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
     if (reportId === 'package-expiry') {
       const studentCount = filteredStudents.length;
 
-      // Find active packages with <= 3 classes remaining for students in scope,
-      // but only if the student's total remaining classes across all packages is <= 3
+      // Find active packages with <= 20% remaining (or <= 3 classes) for students in scope
       const expiringPackages = packages.filter(p => {
-        if (p.classes_remaining <= 0 || p.classes_remaining > 3) return false;
+        if (p.classes_remaining <= 0) return false;
         const studentPkgs = packages.filter(pkg => pkg.student_id === p.student_id && !pkg.frozen);
         const totalRemaining = studentPkgs.reduce((sum, pkg) => sum + pkg.classes_remaining, 0);
-        return totalRemaining <= 3 && filteredStudents.some(s => s.id === p.student_id);
+        const is20PctOrLow = (p.classes_total > 0 && (p.classes_remaining / p.classes_total <= 0.20)) || totalRemaining <= 3;
+        return is20PctOrLow && filteredStudents.some(s => s.id === p.student_id);
       });
 
       let expiringBay = 0;
@@ -1139,6 +1224,8 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         const studentPkgs = packages.filter(pkg => pkg.student_id === p.student_id).sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime());
         const pkgIndex = studentPkgs.findIndex(pkg => pkg.id === p.id);
         const pkgLabel = pkgIndex <= 0 ? '#1 New' : `#${pkgIndex} Renewal`;
+        const pctLeft = p.classes_total > 0 ? Math.round((p.classes_remaining / p.classes_total) * 100) : 0;
+        const is20PctTrigger = pctLeft <= 20 || p.classes_remaining <= 2;
 
         return {
           id: p.id,
@@ -1149,7 +1236,9 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           pkgLabel,
           paid: p.classes_total,
           used: p.classes_total - p.classes_remaining,
-          left: p.classes_remaining
+          left: p.classes_remaining,
+          pctLeft,
+          is20PctTrigger
         };
       });
 
@@ -3087,6 +3176,8 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           <select value={filterSegment} onChange={e => setFilterSegment(e.target.value)} className="bg-white border border-line rounded-lg px-2 py-1 outline-none text-xs shrink-0">
             <option value="All">All segments</option>
             <option value="HOT">HOT</option>
+            <option value="WARM">WARM</option>
+            <option value="COLD">COLD</option>
             <option value="HEALTHY">HEALTHY</option>
           </select>
 
@@ -3154,6 +3245,27 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           </button>
         </div>
 
+      </div>
+
+      {/* Rules Used Banner */}
+      <div className="p-3.5 bg-white border border-line rounded-xl text-[11px] text-muted-custom space-y-1.5 shadow-sm no-print">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <b className="text-ink font-semibold mr-1">Rules used:</b>
+          <span className="font-extrabold text-red-800 bg-red-100 border border-red-300 px-2 py-0.5 rounded text-[10px] uppercase">HOT</span>
+          <span>= Overdue &gt; 0, or 0 active package, or &le; 2 classes left.</span>
+          <span className="mx-1 text-line">|</span>
+          <span className="font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded text-[10px] uppercase">WARM</span>
+          <span>= 3-6 classes left, or no class in 30-60d.</span>
+          <span className="mx-1 text-line">|</span>
+          <span className="font-extrabold text-blue-800 bg-blue-100 border border-blue-300 px-2 py-0.5 rounded text-[10px] uppercase">COLD</span>
+          <span>= no class in 60d+.</span>
+          <span className="mx-1 text-line">|</span>
+          <span className="font-extrabold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded text-[10px] uppercase">HEALTHY</span>
+          <span>= paid up, 7+ classes left, attending.</span>
+        </div>
+        <div className="text-[10px] text-muted-custom">
+          <b className="text-ink font-semibold">Overdue Value</b> = overdue classes &times; that student&apos;s most recent price-per-class (median AED 100 used where no priced package exists).
+        </div>
       </div>
 
       {/* Custom Alert banner for revenue-summary / unbilled-leak / data-reconciliation / collection-list / membership-tiers */}
@@ -4312,6 +4424,25 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           </div>
         ) : reportId === 'package-expiry' ? (
           <div className="space-y-6">
+            
+            {/* Attention-Grabbing 20% Threshold Renewal Trigger Banner */}
+            <div className="p-4 rounded-xl bg-amber-500/10 border-2 border-amber-500 text-amber-950 font-bold text-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shadow-sm">
+              <div className="flex items-center gap-2">
+                <span className="bg-amber-600 text-white text-[10px] font-black px-2.5 py-1 rounded uppercase tracking-wider shadow-sm flex items-center gap-1">
+                  ⚡ 20% THRESHOLD TRIGGER
+                </span>
+                <span>
+                  <b>{reportData.tableRows.filter((r: any) => r.is20PctTrigger).length} Student Packages</b> hit or crossed the <b>20% remaining threshold</b>! Front office alert active.
+                </span>
+              </div>
+              <button 
+                onClick={() => router.push('/packages')}
+                className="bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-extrabold text-xs px-4 py-2 rounded-lg transition-all shadow-md flex-shrink-0"
+              >
+                Process Renewals Now →
+              </button>
+            </div>
+
             {/* Chart Card */}
             <div className="bg-white border border-line rounded-2xl p-5 shadow-sm space-y-4">
               <div>
@@ -4330,7 +4461,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
                       </tr>
                     </thead>
                     <tbody>
-                      {reportData.labels.map((lbl, i) => (
+                      {reportData.labels.map((lbl: string, i: number) => (
                         <tr key={i} className="border-b border-line hover:bg-canvas/20">
                           <td className="py-2.5 px-1 font-semibold">{lbl}</td>
                           <td className="py-2.5 px-1 text-right font-mono font-bold">
@@ -4355,7 +4486,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
                   <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
                     <span>👑</span> Packages expiring — renew now
                   </h3>
-                  <p className="text-[10px] text-muted-custom">Fewest classes remaining first.</p>
+                  <p className="text-[10px] text-muted-custom">Fewest classes remaining first. Flagged automatically at <b>≤20% package threshold</b>.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={handleExcelDownload} className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">↓ Excel</button>
@@ -4374,11 +4505,12 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
                       <th className="py-2.5 px-2 text-right">PAID</th>
                       <th className="py-2.5 px-2 text-right">USED</th>
                       <th className="py-2.5 px-2 text-right">LEFT</th>
+                      <th className="py-2.5 px-2 text-center">TRIGGER STATUS</th>
                       <th className="py-2.5 px-2 text-center">ACTION</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">
-                    {reportData.tableRows.map((row, idx) => (
+                    {reportData.tableRows.map((row: any, idx: number) => (
                       <tr key={idx} className="hover:bg-canvas/20">
                         <td className="py-3 px-2 font-bold text-ink">{row.studentName}</td>
                         <td className="py-3 px-2">{row.centreName}</td>
@@ -4386,11 +4518,22 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
                         <td className="py-3 px-2 text-muted-custom font-semibold">{row.pkgLabel}</td>
                         <td className="py-3 px-2 text-right text-muted-custom">{row.paid}</td>
                         <td className="py-3 px-2 text-right text-muted-custom">{row.used}</td>
-                        <td className="py-3 px-2 text-right font-bold text-hot-custom">{row.left}</td>
+                        <td className="py-3 px-2 text-right font-bold text-hot-custom">{row.left} ({row.pctLeft}%)</td>
+                        <td className="py-3 px-2 text-center">
+                          {row.is20PctTrigger ? (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-extrabold px-2.5 py-1 rounded bg-amber-500 text-white shadow-sm uppercase tracking-wider">
+                              ⚡ 20% TRIGGER
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center text-[9px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 uppercase">
+                              EXPIRING
+                            </span>
+                          )}
+                        </td>
                         <td className="py-3 px-2 text-center">
                           <button
                             onClick={() => router.push(`/packages?studentId=${row.studentId}`)}
-                            className="bg-white hover:bg-canvas border border-line text-ink font-bold text-[10px] px-2.5 py-1 rounded-lg"
+                            className="bg-forest hover:bg-forest/90 text-white font-bold text-[10px] px-3 py-1 rounded-lg transition-all shadow-sm active:scale-95"
                           >
                             Renew
                           </button>
@@ -4412,6 +4555,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
                       <td className="py-3 px-2 text-right font-bold text-hot-custom">
                         {reportData.tableRows.reduce((sum: number, r: any) => sum + r.left, 0)}
                       </td>
+                      <td className="py-3 px-2 text-center">—</td>
                       <td className="py-3 px-2 text-center">—</td>
                     </tr>
                   </tbody>

@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/db';
 import type { User, Student, Package, Coach, Centre } from '../lib/db';
-import { saveStudentDB, deleteStudentDB, syncDatabaseToClient } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
+import { computeStudentStatus, getStatusBadgeClasses } from '../lib/segmentRules';
 
 interface StudentsProps {
   currentUser: User;
@@ -157,15 +157,14 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
           : 'Early Starters-Beginner 2')
         : 'Not set';
 
-      // Engagement heat mapping
+      // Segment & Heat mapping using domain rules
+      const statusInfo   = computeStudentStatus(s, packages, attendance, invoices);
       const engagement   = daysSince <= 14 ? 'ENGAGED'
         : daysSince <= 30 ? 'SLIPPING'
         : daysSince <= 60 ? 'COLD'
         : 'DORMANT';
 
-      const heat         = classesLeft <= 2 && pkgSize > 0 ? 'HOT'
-        : daysSince > 30 ? 'COLD'
-        : 'HEALTHY';
+      const heat         = statusInfo.segment;
 
       const coach        = coaches.find(c => c.id === s.coach_id);
       const centre       = centres.find(c => c.id === s.centre_id);
@@ -535,8 +534,8 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                       </span>
                     </td>
                     <td className="py-3 px-4">
-                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${row.classesLeft <= 2 && row.pkgSize > 0 ? 'bg-red-100 text-red-700 border-red-200' : 'bg-emerald-100 text-emerald-700 border-emerald-200'}`}>
-                        {row.classesLeft <= 2 && row.pkgSize > 0 ? 'HOT' : 'HEALTHY'}
+                      <span className={`text-[9px] px-2 py-0.5 rounded border uppercase ${getStatusBadgeClasses(row.heat as any)}`}>
+                        {row.heat}
                       </span>
                     </td>
                   </tr>
