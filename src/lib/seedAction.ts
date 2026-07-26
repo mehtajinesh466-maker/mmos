@@ -54,7 +54,10 @@ export async function runSeed() {
     }
   }
 
-  const hashedPassword = await bcrypt.hash('password123', 10)
+  const ownerHash = await bcrypt.hash('mastermoves@$', 10)
+  const frontDeskHash = await bcrypt.hash('mastermoves@front@123', 10)
+  const coachHash = await bcrypt.hash('mastermoves@coach$', 10)
+  const parentHash = await bcrypt.hash('password123', 10)
 
   // 1. Generate Centres
   const c1Id = crypto.randomUUID()
@@ -84,15 +87,15 @@ export async function runSeed() {
 
   await prisma.user.createMany({
     data: [
-      { id: uAmitId, name: 'Amit Goyal', role: 'owner', email: 'owner@mastermoves.com', password: hashedPassword },
-      { id: uSaraId, name: 'Sara Miller', role: 'front_desk', centre_id: c1Id, email: 'sara@mastermoves.com', password: hashedPassword },
-      { id: uJamesId, name: 'James Estrada', role: 'coach', centre_id: c1Id, email: 'james@mastermoves.com', password: hashedPassword },
-      { id: uReggieId, name: 'Reggie Santiago', role: 'coach', centre_id: c1Id, email: 'reggie@mastermoves.com', password: hashedPassword },
-      { id: uJohnId, name: 'John Mendoza', role: 'coach', centre_id: c1Id, email: 'john@mastermoves.com', password: hashedPassword },
-      { id: uMahriId, name: 'Mahri Geldiyeva', role: 'coach', centre_id: c2Id, email: 'mahri@mastermoves.com', password: hashedPassword },
-      { id: uBrylleId, name: 'Brylle Arellano', role: 'coach', centre_id: c2Id, email: 'brylle@mastermoves.com', password: hashedPassword },
-      { id: uBrettId, name: 'Brett Portuguese', role: 'coach', centre_id: c2Id, email: 'brett@mastermoves.com', password: hashedPassword },
-      { id: uParentId, name: 'Robert Sterling', role: 'parent', email: 'parent@mastermoves.com', password: hashedPassword }
+      { id: uAmitId, name: 'Amit Goyal', role: 'owner', email: 'owner@mastermoves.com', password: ownerHash },
+      { id: uSaraId, name: 'Sara Miller', role: 'front_desk', centre_id: c1Id, email: 'sara@mastermoves.com', password: frontDeskHash },
+      { id: uJamesId, name: 'James Estrada', role: 'coach', centre_id: c1Id, email: 'james@mastermoves.com', password: coachHash },
+      { id: uReggieId, name: 'Reggie Santiago', role: 'coach', centre_id: c1Id, email: 'reggie@mastermoves.com', password: coachHash },
+      { id: uJohnId, name: 'John Mendoza', role: 'coach', centre_id: c1Id, email: 'john@mastermoves.com', password: coachHash },
+      { id: uMahriId, name: 'Mahri Geldiyeva', role: 'coach', centre_id: c2Id, email: 'mahri@mastermoves.com', password: coachHash },
+      { id: uBrylleId, name: 'Brylle Arellano', role: 'coach', centre_id: c2Id, email: 'brylle@mastermoves.com', password: coachHash },
+      { id: uBrettId, name: 'Brett Portuguese', role: 'coach', centre_id: c2Id, email: 'brett@mastermoves.com', password: coachHash },
+      { id: uParentId, name: 'Robert Sterling', role: 'parent', email: 'parent@mastermoves.com', password: parentHash }
     ]
   })
 
@@ -183,7 +186,7 @@ export async function runSeed() {
       id: crypto.randomUUID(),
       name: parentName,
       email,
-      password: hashedPassword,
+      password: parentHash,
       role: 'parent',
       centre_id: null
     })

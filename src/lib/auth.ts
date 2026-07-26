@@ -75,7 +75,7 @@ export const authOptions: AuthOptions = {
     if (process.env.NODE_ENV === 'production') {
       throw new Error("NEXTAUTH_SECRET environment variable is missing in production!");
     }
-    return "my-default-dev-secret-key-123";
+    return "my-secret-key-12345";
   })(),
 };
 
