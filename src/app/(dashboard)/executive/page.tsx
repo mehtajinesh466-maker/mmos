@@ -339,16 +339,50 @@ export default function ExecutivePage() {
   
   const activePercentage = totalStudentsCount > 0 ? Math.round((activeStudentsCount / totalStudentsCount) * 100) : 0;
 
-  const activePackages = packages.filter(p => filteredStudents.some(s => s.id === p.student_id) && p.classes_remaining > 0);
-  
-  const getPackagePrice = (pkg: any) => {
-    const tiersList = db.getTiers();
-    const t = tiersList.find(tier => tier.id === pkg.tier_id);
-    return t ? Number(t.price) : 1000;
-  };
+  const maxAttDateStr = useMemo(() => {
+    if (attendance.length === 0) return "2026-07-27";
+    return attendance.reduce((max, att) => {
+      if (!att.date) return max;
+      const dStr = new Date(att.date).toISOString().split('T')[0];
+      return dStr > max ? dStr : max;
+    }, "2026-07-12");
+  }, [attendance]);
+  const anchorDate = new Date(maxAttDateStr);
+  const thirtyDaysAgo = new Date(anchorDate.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-  const totalRunrate = activePackages.reduce((sum, p) => sum + getPackagePrice(p), 0);
+  const studentRateMap = useMemo(() => {
+    const rateMap = new Map<string, number>();
+    students.forEach(s => {
+      const sPkgs = packages.filter(p => p.student_id === s.id);
+      const activePkg = sPkgs.find(p => p.classes_remaining > 0) || sPkgs[0];
+      let rate = 125;
+      if (activePkg) {
+        const tier = db.getTiers().find(t => t.id === activePkg.tier_id);
+        const price = tier ? Number(tier.price) : 1000;
+        const discount = activePkg.discount_pct ? Number(activePkg.discount_pct) : 0;
+        const totalClasses = activePkg.classes_total || 8;
+        rate = (price * (1 - discount / 100)) / totalClasses;
+      }
+      rateMap.set(s.id, rate);
+    });
+    return rateMap;
+  }, [students, packages]);
+
+  const totalRunrate = useMemo(() => {
+    const studentIdsSet = new Set(filteredStudents.map(s => s.id));
+    const classes30D = attendance.filter(a => {
+      if (a.status !== 'present' && a.status !== 'makeup') return false;
+      const aDate = new Date(a.date);
+      return aDate >= thirtyDaysAgo && aDate <= anchorDate && studentIdsSet.has(a.student_id);
+    });
+    return classes30D.reduce((sum, c) => {
+      const rate = studentRateMap.get(c.student_id) || 125;
+      return sum + rate;
+    }, 0);
+  }, [filteredStudents, attendance, studentRateMap, thirtyDaysAgo, anchorDate]);
+
   const runRateK = (totalRunrate / 1000).toFixed(0);
+  const activePackages = packages.filter(p => filteredStudents.some(s => s.id === p.student_id) && p.classes_remaining > 0);
 
   const totalUnbilled = filteredStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
   const unbilledK = (totalUnbilled / 1000).toFixed(0);

@@ -192,6 +192,48 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
     });
   };
 
+  const getPackagePrice = (pkg: any) => {
+    const tiersList = db.getTiers();
+    const t = tiersList.find(tier => tier.id === pkg.tier_id);
+    return t ? Number(t.price) : 1000;
+  };
+
+  const maxAttDateStr = attendance.reduce((max, att) => {
+    if (!att.date) return max;
+    const dStr = new Date(att.date).toISOString().split('T')[0];
+    return dStr > max ? dStr : max;
+  }, "2026-07-12");
+  const anchorDate = new Date(maxAttDateStr);
+  const thirtyDaysAgo = new Date(anchorDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const studentRateMap = new Map<string, number>();
+  students.forEach(s => {
+    const sPkgs = packages.filter(p => p.student_id === s.id);
+    const activePkg = sPkgs.find(p => p.classes_remaining > 0) || sPkgs[0];
+    let rate = 125;
+    if (activePkg) {
+      const tier = db.getTiers().find(t => t.id === activePkg.tier_id);
+      const price = tier ? Number(tier.price) : 1000;
+      const discount = activePkg.discount_pct ? Number(activePkg.discount_pct) : 0;
+      const totalClasses = activePkg.classes_total || 8;
+      rate = (price * (1 - discount / 100)) / totalClasses;
+    }
+    studentRateMap.set(s.id, rate);
+  });
+
+  const getRunRateForStudents = (sts: any[]) => {
+    const studentIdsSet = new Set(sts.map(s => s.id));
+    const classes30D = attendance.filter(a => {
+      if (a.status !== 'present' && a.status !== 'makeup') return false;
+      const aDate = new Date(a.date);
+      return aDate >= thirtyDaysAgo && aDate <= anchorDate && studentIdsSet.has(a.student_id);
+    });
+    return classes30D.reduce((sum, c) => {
+      const rate = studentRateMap.get(c.student_id) || 125;
+      return sum + rate;
+    }, 0);
+  };
+
   const getFilteredDataForSection = (sec: ReportSection) => {
     return students.filter(s => {
       // 1. Global Filter Centre
@@ -243,8 +285,16 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
     }).length;
     const activePct = totalSts > 0 ? Math.round((activeSts / totalSts) * 100) : 0;
 
-    const filteredPkgs = packages.filter(p => filteredSts.some(s => s.id === p.student_id) && p.classes_remaining > 0);
-    const runrate = filteredPkgs.reduce((sum, p) => sum + getPackagePrice(p), 0);
+    const studentIdsSet = new Set(filteredSts.map(s => s.id));
+    const classes30D = attendance.filter(a => {
+      if (a.status !== 'present' && a.status !== 'makeup') return false;
+      const aDate = new Date(a.date);
+      return aDate >= thirtyDaysAgo && aDate <= anchorDate && studentIdsSet.has(a.student_id);
+    });
+    const runrate = classes30D.reduce((sum, c) => {
+      const rate = studentRateMap.get(c.student_id) || 125;
+      return sum + rate;
+    }, 0);
     const unbilledVal = filteredSts.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
     const unbilledCls = filteredSts.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_classes || 0), 0);
 
@@ -780,54 +830,6 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
 
   // Variables calculated from database
   const totalStudents = students.length;
-  
-  const getPackagePrice = (pkg: any) => {
-    const tiersList = db.getTiers();
-    const t = tiersList.find(tier => tier.id === pkg.tier_id);
-    return t ? Number(t.price) : 1000;
-  };
-
-  const maxAttDateStr = useMemo(() => {
-    if (attendance.length === 0) return "2026-07-27";
-    return attendance.reduce((max, att) => {
-      if (!att.date) return max;
-      const dStr = new Date(att.date).toISOString().split('T')[0];
-      return dStr > max ? dStr : max;
-    }, "2026-07-12");
-  }, [attendance]);
-  const anchorDate = new Date(maxAttDateStr);
-  const thirtyDaysAgo = new Date(anchorDate.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-  const studentRateMap = useMemo(() => {
-    const rateMap = new Map<string, number>();
-    students.forEach(s => {
-      const sPkgs = packages.filter(p => p.student_id === s.id);
-      const activePkg = sPkgs.find(p => p.classes_remaining > 0) || sPkgs[0];
-      let rate = 125;
-      if (activePkg) {
-        const tier = db.getTiers().find(t => t.id === activePkg.tier_id);
-        const price = tier ? Number(tier.price) : 1000;
-        const discount = activePkg.discount_pct ? Number(activePkg.discount_pct) : 0;
-        const totalClasses = activePkg.classes_total || 8;
-        rate = (price * (1 - discount / 100)) / totalClasses;
-      }
-      rateMap.set(s.id, rate);
-    });
-    return rateMap;
-  }, [students, packages]);
-
-  const getRunRateForStudents = (sts: any[]) => {
-    const studentIdsSet = new Set(sts.map(s => s.id));
-    const classes30D = attendance.filter(a => {
-      if (a.status !== 'present' && a.status !== 'makeup') return false;
-      const aDate = new Date(a.date);
-      return aDate >= thirtyDaysAgo && aDate <= anchorDate && studentIdsSet.has(a.student_id);
-    });
-    return classes30D.reduce((sum, c) => {
-      const rate = studentRateMap.get(c.student_id) || 125;
-      return sum + rate;
-    }, 0);
-  };
 
   // KPIs depending on scope
   const scopeStudents = isFiltered ? filteredStudents : students;
