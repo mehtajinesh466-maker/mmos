@@ -17,6 +17,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   const [coaches, setCoaches]     = useState<Coach[]>([]);
   const [centres, setCentres]     = useState<Centre[]>([]);
   const [attendance, setAttendance] = useState<any[]>([]);
+  const [invoices, setInvoices]     = useState<any[]>([]);
 
   // Filters
   const [filterCentre, setFilterCentre]   = useState<string>('All centres');
@@ -88,6 +89,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
     setCoaches(db.getCoaches());
     setCentres(db.getCentres());
     setAttendance(db.getAttendance());
+    setInvoices(db.get<any>('invoices'));
   };
 
   useEffect(() => {

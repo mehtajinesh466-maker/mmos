@@ -152,7 +152,7 @@ export const ZohoImport: React.FC = () => {
       const data = await syncDatabaseToClient();
       db.syncFromNeon(data);
       setResolved(true);
-      setImportStatus(`✓ Validated and imported! ${students.length} student profiles and ${packages.length} packages processed.`);
+      setImportStatus(`✓ Validated and imported! ${data.students.length} student profiles and ${data.packages.length} packages processed.`);
     } catch (e: any) {
       setImportStatus('❌ Error: ' + e.message);
     } finally {

@@ -178,7 +178,13 @@ export const db = {
     if (data.students) this.save('students', data.students);
     if (data.packages) this.save('packages', data.packages);
     if (data.scheduleSlots) this.save('schedule_slots', data.scheduleSlots);
-    if (data.attendance) this.save('attendance', data.attendance);
+    if (data.attendance) {
+      // Proactively keep only the last 60 days of attendance locally to save localStorage quota
+      const sixtyDaysAgo = new Date();
+      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+      const filteredAttendance = data.attendance.filter((a: any) => new Date(a.date).getTime() >= sixtyDaysAgo.getTime());
+      this.save('attendance', filteredAttendance);
+    }
     if (data.invoices) this.save('invoices', data.invoices);
     if (data.progressLogs) this.save('progress_logs', data.progressLogs);
     if (data.enquiries) this.save('enquiries', data.enquiries);
@@ -194,7 +200,27 @@ export const db = {
 
   save<T>(table: string, data: T[]): void {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(`mmos_${table}`, JSON.stringify(data));
+    try {
+      localStorage.setItem(`mmos_${table}`, JSON.stringify(data));
+    } catch (e: any) {
+      if (e.name === 'QuotaExceededError' || e.code === 22) {
+        console.warn(`Local storage quota exceeded for table ${table}. Trying to prune old records...`);
+        if (table === 'attendance') {
+          // Fallback to storing only the last 30 days
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          const pruned = (data as any[]).filter(a => new Date(a.date).getTime() >= thirtyDaysAgo.getTime());
+          try {
+            localStorage.setItem('mmos_attendance', JSON.stringify(pruned));
+            console.log(`Successfully stored pruned attendance logs (${pruned.length} records).`);
+            return;
+          } catch (innerErr) {
+            console.error('Failed to store even pruned attendance records:', innerErr);
+          }
+        }
+      }
+      throw e;
+    }
   },
 
   // Auth & Roles Mock state
