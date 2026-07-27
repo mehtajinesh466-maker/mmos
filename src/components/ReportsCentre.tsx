@@ -95,6 +95,14 @@ export const ReportsCentre: React.FC<ReportsCentreProps> = ({ currentUser }) => 
   const allowedFamilies = families.map(f => {
     if (currentUser?.role === 'front_desk') {
       if (f.title === 'Finance' || f.title === 'Strategy') return null;
+      if (f.title === 'Operations') {
+        const filteredOps = f.reports.filter(r => r.id !== 'engagement-report');
+        return {
+          ...f,
+          reports: filteredOps,
+          count: `${filteredOps.length} reports`
+        };
+      }
       if (f.title === 'Coaching — structure only') {
         return {
           ...f,

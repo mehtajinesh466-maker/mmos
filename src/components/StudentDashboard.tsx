@@ -27,6 +27,21 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
+  // Edit Accounts Modal State
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editFideId, setEditFideId] = useState('');
+  const [editFideRating, setEditFideRating] = useState('');
+  const [editChessCom, setEditChessCom] = useState('');
+  const [editLichess, setEditLichess] = useState('');
+
+  // Add Tournament Modal State
+  const [showAddTournamentModal, setShowAddTournamentModal] = useState(false);
+  const [tourneyName, setTourneyName] = useState('');
+  const [tourneyDate, setTourneyDate] = useState(new Date().toISOString().split('T')[0]);
+  const [tourneyPoints, setTourneyPoints] = useState('');
+  const [tourneyRatingChange, setTourneyRatingChange] = useState('');
+
+
   // Chart Refs
   const trendChartRef = useRef<HTMLCanvasElement | null>(null);
   const comparisonChartRef = useRef<HTMLCanvasElement | null>(null);
@@ -91,6 +106,62 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
   }, [queryStudentId]);
 
   const activeStudent = students.find(s => s.id === selectedStudentId);
+
+  useEffect(() => {
+    if (activeStudent) {
+      setEditFideId(activeStudent.fide_id || '');
+      setEditFideRating(activeStudent.fide_rating ? String(activeStudent.fide_rating) : '');
+      setEditChessCom(activeStudent.chess_com_username || '');
+      setEditLichess(activeStudent.lichess_username || '');
+    }
+  }, [activeStudent]);
+  const handleSaveAccounts = async () => {
+    if (!activeStudent) return;
+    try {
+      const updated = {
+        ...activeStudent,
+        fide_id: editFideId || null,
+        fide_rating: editFideRating ? Number(editFideRating) : null,
+        chess_com_username: editChessCom || null,
+        lichess_username: editLichess || null
+      };
+      db.saveStudent(updated as any);
+      loadData();
+      setShowEditModal(false);
+      setStatusMessage('✓ Student chess accounts updated successfully.');
+      setTimeout(() => setStatusMessage(''), 4000);
+    } catch (err: any) {
+      alert('Error updating accounts: ' + err.message);
+    }
+  };
+
+  const handleAddTournamentLog = async () => {
+    if (!activeStudent) return;
+    if (!tourneyName) {
+      alert('Please enter a tournament name');
+      return;
+    }
+    try {
+      const report = {
+        id: `tr-${crypto.randomUUID()}`,
+        student_id: activeStudent.id,
+        name: tourneyName,
+        date: tourneyDate,
+        points: Number(tourneyPoints) || 0,
+        rating_change: Number(tourneyRatingChange) || 0
+      };
+      db.saveTournamentReport(report);
+      loadData();
+      setShowAddTournamentModal(false);
+      setTourneyName('');
+      setTourneyPoints('');
+      setTourneyRatingChange('');
+      setStatusMessage('✓ Tournament record added successfully.');
+      setTimeout(() => setStatusMessage(''), 4000);
+    } catch (err: any) {
+      alert('Error adding tournament record: ' + err.message);
+    }
+  };
 
   const getCoachName = (coachId: string | null) => {
     if (!coachId) return 'Unassigned';
@@ -492,13 +563,45 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
 
             <div className="flex-1 space-y-1">
               <h2 className="text-2xl font-bold text-white font-display leading-tight">{activeStudent.name}</h2>
-              <div className="text-xs text-mint/80">
-                {activeStudent.fide_id || '—'} · {getCentreName(activeStudent.centre_id)} · {getCoachName(activeStudent.coach_id)} · 
-                {activeStudent.level ? (
-                  <span className="text-white ml-1">{activeStudent.level}</span>
-                ) : (
-                  <span className="text-red-400 font-bold ml-1">No level assigned</span>
-                )}
+              <div className="text-xs text-mint/80 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>FIDE ID: {activeStudent.fide_id || '—'}</span>
+                <span>·</span>
+                <span>FIDE Rating: {activeStudent.fide_rating || '—'}</span>
+                <span>·</span>
+                <span>Chess.com: {activeStudent.chess_com_username ? <a href={`https://chess.com/member/${activeStudent.chess_com_username}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-white">{activeStudent.chess_com_username}</a> : '—'}</span>
+                <span>·</span>
+                <span>Lichess: {activeStudent.lichess_username ? <a href={`https://lichess.org/@/${activeStudent.lichess_username}`} target="_blank" rel="noopener noreferrer" className="underline hover:text-white">{activeStudent.lichess_username}</a> : '—'}</span>
+              </div>
+              <div className="text-xs text-mint/80 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>{getCentreName(activeStudent.centre_id)}</span>
+                <span>·</span>
+                <span>Coach: {getCoachName(activeStudent.coach_id)}</span>
+                <span>·</span>
+                <span className="text-white">Level:</span>
+                <select
+                  value={activeStudent.level || 'Beginner'}
+                  onChange={async (e) => {
+                    const newLevel = e.target.value as any;
+                    try {
+                      const updatedStudent = {
+                        ...activeStudent,
+                        level: newLevel
+                      };
+                      db.saveStudent(updatedStudent);
+                      loadData();
+                      setStatusMessage(`✓ Chess level updated to ${newLevel}`);
+                      setTimeout(() => setStatusMessage(''), 3000);
+                    } catch (err: any) {
+                      setStatusMessage(`❌ Error updating level: ${err.message}`);
+                    }
+                  }}
+                  className="bg-[#122f28] border border-white/20 rounded px-1.5 py-0.5 text-xs text-white outline-none cursor-pointer hover:bg-white/10"
+                >
+                  <option value="Beginner" className="text-white bg-[#122f28]">Beginner</option>
+                  <option value="Intermediate" className="text-white bg-[#122f28]">Intermediate</option>
+                  <option value="Advanced" className="text-white bg-[#122f28]">Advanced</option>
+                  <option value="Pro-Track" className="text-white bg-[#122f28]">Pro-Track</option>
+                </select>
               </div>
               <div className="flex gap-2 pt-1">
                 <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border bg-emerald-500/20 border-emerald-500/40 text-mint uppercase">
@@ -536,6 +639,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
               <button onClick={() => window.location.href = `/billing?renewStudentId=${selectedStudentId}`} className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer">
                 Renew package
               </button>
+              {(currentUser.role === 'owner' || currentUser.role === 'coach' || currentUser.role === 'front_desk') && (
+                <button 
+                  onClick={() => setShowEditModal(true)} 
+                  className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
+                >
+                  Edit Accounts
+                </button>
+              )}
             </div>
           </div>
 
@@ -800,6 +911,62 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
               </div>
             </div>
  
+            {/* Tournament Logs Panel */}
+            <div className="bg-surface border border-line rounded-[14px] p-5 shadow-sm space-y-4 col-span-1 lg:col-span-2">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
+                    <span className="text-[#C4A249]">🏆</span> Tournament Logs
+                  </h3>
+                  <p className="text-[10px] text-muted-custom mt-0.5 font-semibold">Student tournament records and performance history.</p>
+                </div>
+                {(currentUser.role === 'coach' || currentUser.role === 'owner' || currentUser.role === 'front_desk') && (
+                  <button
+                    onClick={() => setShowAddTournamentModal(true)}
+                    className="bg-[#173F35] hover:bg-[#122f28] text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm transition-all active:scale-95 cursor-pointer"
+                  >
+                    + Add Tournament Record
+                  </button>
+                )}
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-line text-left">
+                      <th className="py-2 px-3 text-muted-custom uppercase font-bold text-[9px] tracking-wider">Date</th>
+                      <th className="py-2 px-3 text-muted-custom uppercase font-bold text-[9px] tracking-wider">Tournament Name</th>
+                      <th className="py-2 px-3 text-muted-custom uppercase font-bold text-[9px] tracking-wider text-right">Points Scored</th>
+                      <th className="py-2 px-3 text-muted-custom uppercase font-bold text-[9px] tracking-wider text-right">Rating Change</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {db.getTournamentReports().filter(r => r.student_id === activeStudent.id).length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="py-8 text-center text-muted-custom">
+                          No tournament records found for this student.
+                        </td>
+                      </tr>
+                    ) : (
+                      db.getTournamentReports()
+                        .filter(r => r.student_id === activeStudent.id)
+                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                        .map(r => (
+                          <tr key={r.id} className="border-b border-line hover:bg-canvas/30 transition-colors font-medium">
+                            <td className="py-2.5 px-3 font-mono text-muted-custom">{r.date}</td>
+                            <td className="py-2.5 px-3 text-ink">{r.name}</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-ink">{r.points}</td>
+                            <td className={`py-2.5 px-3 text-right font-mono font-bold ${r.rating_change >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                              {r.rating_change >= 0 ? `+${r.rating_change}` : r.rating_change}
+                            </td>
+                          </tr>
+                        ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
           </div>
 
           {/* Live Notification History Log */}
@@ -871,7 +1038,150 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
               </table>
             </div>
           </div>
+          
+          {/* Edit Accounts Modal */}
+          {showEditModal && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-surface border border-line rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b border-line pb-3">
+                  <h3 className="text-lg font-bold font-display text-ink flex items-center gap-2">
+                    <span>⚙</span> Edit Chess Accounts
+                  </h3>
+                  <button onClick={() => setShowEditModal(false)} className="text-muted-custom hover:text-ink font-bold text-lg">✕</button>
+                </div>
+                
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-custom uppercase tracking-wider block mb-1">FIDE ID</label>
+                    <input 
+                      type="text" 
+                      value={editFideId} 
+                      onChange={e => setEditFideId(e.target.value)} 
+                      placeholder="e.g. 12345678" 
+                      className="w-full bg-white border border-line rounded-lg p-2.5 text-xs text-ink outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-custom uppercase tracking-wider block mb-1">FIDE Rating</label>
+                    <input 
+                      type="number" 
+                      value={editFideRating} 
+                      onChange={e => setEditFideRating(e.target.value)} 
+                      placeholder="e.g. 1450" 
+                      className="w-full bg-white border border-line rounded-lg p-2.5 text-xs text-ink outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-custom uppercase tracking-wider block mb-1">Chess.com Username</label>
+                    <input 
+                      type="text" 
+                      value={editChessCom} 
+                      onChange={e => setEditChessCom(e.target.value)} 
+                      placeholder="e.g. magnuscarlsen" 
+                      className="w-full bg-white border border-line rounded-lg p-2.5 text-xs text-ink outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-custom uppercase tracking-wider block mb-1">Lichess Username</label>
+                    <input 
+                      type="text" 
+                      value={editLichess} 
+                      onChange={e => setEditLichess(e.target.value)} 
+                      placeholder="e.g. thibault" 
+                      className="w-full bg-white border border-line rounded-lg p-2.5 text-xs text-ink outline-none"
+                    />
+                  </div>
+                </div>
 
+                <div className="flex gap-2.5 pt-3 border-t border-line justify-end">
+                  <button 
+                    onClick={() => setShowEditModal(false)} 
+                    className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleSaveAccounts} 
+                    className="bg-[#173F35] hover:bg-[#122f28] text-white font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer shadow-sm"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Add Tournament Record Modal */}
+          {showAddTournamentModal && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-surface border border-line rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+                <div className="flex justify-between items-center border-b border-line pb-3">
+                  <h3 className="text-lg font-bold font-display text-ink flex items-center gap-2">
+                    <span>🏆</span> Add Tournament Record
+                  </h3>
+                  <button onClick={() => setShowAddTournamentModal(false)} className="text-muted-custom hover:text-ink font-bold text-lg">✕</button>
+                </div>
+                
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-custom uppercase tracking-wider block mb-1">Tournament Name</label>
+                    <input 
+                      type="text" 
+                      value={tourneyName} 
+                      onChange={e => setTourneyName(e.target.value)} 
+                      placeholder="e.g. Dubai Junior Open 2026" 
+                      className="w-full bg-white border border-line rounded-lg p-2.5 text-xs text-ink outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-custom uppercase tracking-wider block mb-1">Date</label>
+                    <input 
+                      type="date" 
+                      value={tourneyDate} 
+                      onChange={e => setTourneyDate(e.target.value)} 
+                      className="w-full bg-white border border-line rounded-lg p-2.5 text-xs text-ink outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-custom uppercase tracking-wider block mb-1">Points Scored</label>
+                    <input 
+                      type="number" 
+                      step="0.5"
+                      value={tourneyPoints} 
+                      onChange={e => setTourneyPoints(e.target.value)} 
+                      placeholder="e.g. 5.5" 
+                      className="w-full bg-white border border-line rounded-lg p-2.5 text-xs text-ink outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-custom uppercase tracking-wider block mb-1">Rating Change (+ / -)</label>
+                    <input 
+                      type="number" 
+                      value={tourneyRatingChange} 
+                      onChange={e => setTourneyRatingChange(e.target.value)} 
+                      placeholder="e.g. 24 or -12" 
+                      className="w-full bg-white border border-line rounded-lg p-2.5 text-xs text-ink outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 pt-3 border-t border-line justify-end">
+                  <button 
+                    onClick={() => setShowAddTournamentModal(false)} 
+                    className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleAddTournamentLog} 
+                    className="bg-[#173F35] hover:bg-[#122f28] text-white font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer shadow-sm"
+                  >
+                    Add Record
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="p-10 bg-surface border border-line rounded-[14px] text-center text-muted-custom">

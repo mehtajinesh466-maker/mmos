@@ -385,15 +385,17 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
       </div>
 
       {/* KPI Cards Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 py-2">
+      <div className={`grid grid-cols-1 ${currentUser.role === 'front_desk' ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-4 py-2`}>
         {/* LIFETIME COLLECTED */}
-        <div className="bg-surface border border-line rounded-[14px] p-5 shadow-sm relative overflow-hidden">
-          <div className="text-[10px] font-bold text-muted-custom uppercase tracking-wider">Lifetime Collected</div>
-          <h2 className="text-2xl font-bold font-display text-ink mt-1">
-            {formatLargeAmount(totalLifetimePaid)}
-          </h2>
-          <p className="text-[10px] text-muted-custom mt-0.5">{filtered.length} students</p>
-        </div>
+        {currentUser.role !== 'front_desk' && (
+          <div className="bg-surface border border-line rounded-[14px] p-5 shadow-sm relative overflow-hidden">
+            <div className="text-[10px] font-bold text-muted-custom uppercase tracking-wider">Lifetime Collected</div>
+            <h2 className="text-2xl font-bold font-display text-ink mt-1">
+              {formatLargeAmount(totalLifetimePaid)}
+            </h2>
+            <p className="text-[10px] text-muted-custom mt-0.5">{filtered.length} students</p>
+          </div>
+        )}
 
         {/* UNBILLED / OWED */}
         <div className="bg-surface border border-line rounded-[14px] p-5 shadow-sm relative overflow-hidden">

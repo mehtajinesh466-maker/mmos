@@ -305,7 +305,8 @@ export async function syncDatabaseToClient() {
       enquiries,
       enrollments,
       progressLogsRaw,
-      notifications
+      notifications,
+      tournamentReports
     ] = await Promise.all([
       prisma.centre.findMany(),
       prisma.user.findMany(),
@@ -320,7 +321,8 @@ export async function syncDatabaseToClient() {
       prisma.enquiry.findMany(),
       prisma.enrollment.findMany(),
       prisma.progressLog.findMany(),
-      prisma.notification.findMany()
+      prisma.notification.findMany(),
+      prisma.tournamentReport.findMany()
     ]);
 
     const coaches = coachesRaw.map(c => ({
@@ -353,7 +355,8 @@ export async function syncDatabaseToClient() {
       enquiries,
       enrollments,
       progressLogs,
-      notifications
+      notifications,
+      tournamentReports
     }));
   }
 
@@ -372,7 +375,8 @@ export async function syncDatabaseToClient() {
       enquiries,
       enrollments,
       progressLogsRaw,
-      notifications
+      notifications,
+      tournamentReports
     ] = await Promise.all([
       prisma.centre.findMany(),
       prisma.user.findMany(),
@@ -387,7 +391,8 @@ export async function syncDatabaseToClient() {
       prisma.enquiry.findMany(),
       prisma.enrollment.findMany(),
       prisma.progressLog.findMany(),
-      prisma.notification.findMany()
+      prisma.notification.findMany(),
+      prisma.tournamentReport.findMany()
     ]);
 
     const coaches = coachesRaw.map(c => ({
@@ -420,7 +425,8 @@ export async function syncDatabaseToClient() {
       enquiries,
       enrollments,
       progressLogs,
-      notifications
+      notifications,
+      tournamentReports
     }));
   }
 
@@ -455,7 +461,8 @@ export async function syncDatabaseToClient() {
       enquiries,
       enrollments,
       progressLogsRaw,
-      notifications
+      notifications,
+      tournamentReports
     ] = await Promise.all([
       coachRecord.centre_id 
         ? prisma.centre.findMany({ where: { id: coachRecord.centre_id } })
@@ -489,6 +496,9 @@ export async function syncDatabaseToClient() {
         where: { coach_id: coachRecord.id }
       }),
       prisma.notification.findMany({
+        where: { student_id: { in: studentIds } }
+      }),
+      prisma.tournamentReport.findMany({
         where: { student_id: { in: studentIds } }
       })
     ]);
@@ -524,7 +534,8 @@ export async function syncDatabaseToClient() {
       enquiries,
       enrollments,
       progressLogs,
-      notifications
+      notifications,
+      tournamentReports
     }));
   }
 
@@ -557,7 +568,8 @@ export async function syncDatabaseToClient() {
       scheduleSlots,
       attendance,
       invoices,
-      notifications
+      notifications,
+      tournamentReports
     ] = await Promise.all([
       prisma.centre.findMany({
         where: { id: { in: centreIds } }
@@ -584,6 +596,9 @@ export async function syncDatabaseToClient() {
       }),
       prisma.notification.findMany({
         where: { student_id: { in: studentIds } }
+      }),
+      prisma.tournamentReport.findMany({
+        where: { student_id: { in: studentIds } }
       })
     ]);
 
@@ -603,7 +618,8 @@ export async function syncDatabaseToClient() {
       scheduleSlots,
       attendance,
       invoices,
-      notifications
+      notifications,
+      tournamentReports
     }));
   }
 
@@ -825,7 +841,7 @@ export async function logAttendance(studentId: string, status: string | null, co
 
 export async function saveStudentDB(studentData: any) {
   const session = await verifySession();
-  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk' && session.user.role !== 'coach') {
     throw new Error("Unauthorized");
   }
   if (session.user.role === 'front_desk' && session.user.centre_id) {
@@ -846,6 +862,14 @@ export async function saveStudentDB(studentData: any) {
         level: studentData.level,
         status: studentData.status,
         fide_id: studentData.fide_id,
+        chess_com_username: studentData.chess_com_username || null,
+        lichess_username: studentData.lichess_username || null,
+        fide_rating: studentData.fide_rating ? Number(studentData.fide_rating) : null,
+        dob: studentData.dob ? new Date(studentData.dob) : null,
+        gender: studentData.gender || null,
+        school: studentData.school || null,
+        coach_id: studentData.coach_id || null,
+        centre_id: studentData.centre_id,
         pace_status: studentData.pace_status,
         pace_reason: studentData.pace_reason,
         flags: studentData.flags,
@@ -860,15 +884,38 @@ export async function saveStudentDB(studentData: any) {
         level: studentData.level,
         status: studentData.status,
         fide_id: studentData.fide_id,
+        chess_com_username: studentData.chess_com_username || null,
+        lichess_username: studentData.lichess_username || null,
+        fide_rating: studentData.fide_rating ? Number(studentData.fide_rating) : null,
+        dob: studentData.dob ? new Date(studentData.dob) : null,
+        gender: studentData.gender || null,
+        school: studentData.school || null,
         pace_status: studentData.pace_status,
         pace_reason: studentData.pace_reason,
         flags: studentData.flags,
         centre_id: studentData.centre_id,
-        coach_id: studentData.coach_id,
+        coach_id: studentData.coach_id || null,
         family_id: studentData.family_id
       }
     });
   }
+}
+
+export async function saveTournamentReportDB(reportData: any) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  return await prisma.tournamentReport.create({
+    data: {
+      id: reportData.id,
+      student_id: reportData.student_id,
+      name: reportData.name,
+      date: reportData.date ? new Date(reportData.date) : new Date(),
+      points: reportData.points,
+      rating_change: reportData.rating_change ? Number(reportData.rating_change) : 0
+    }
+  });
 }
 
 export async function saveProgressLogDB(logData: any) {

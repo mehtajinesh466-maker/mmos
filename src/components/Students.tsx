@@ -24,6 +24,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   const [filterCoach, setFilterCoach]     = useState<string>('All coaches');
   const [filterSegment, setFilterSegment] = useState<string>('All segments');
   const [filterEngagement, setFilterEngagement] = useState<string>('All engagement');
+  const [filterStatus, setFilterStatus]   = useState<string>('All');
   const [search, setSearch]               = useState<string>('');
 
   // Detail panel / Edit
@@ -36,6 +37,14 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   const [editLevel, setEditLevel] = useState('');
   const [editStatus, setEditStatus] = useState('');
   const [editFideId, setEditFideId] = useState('');
+  const [editDob, setEditDob] = useState('');
+  const [editGender, setEditGender] = useState('');
+  const [editSchool, setEditSchool] = useState('');
+  const [editChessCom, setEditChessCom] = useState('');
+  const [editLichess, setEditLichess] = useState('');
+  const [editFideRating, setEditFideRating] = useState('');
+  const [editCoachId, setEditCoachId] = useState('');
+  const [editCentreId, setEditCentreId] = useState('');
 
   useEffect(() => {
     if (selected) {
@@ -43,6 +52,14 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
       setEditLevel(selected.level || 'Beginner');
       setEditStatus(selected.status);
       setEditFideId(selected.fide_id || '');
+      setEditDob(selected.dob ? new Date(selected.dob).toISOString().split('T')[0] : '');
+      setEditGender(selected.gender || 'Male');
+      setEditSchool(selected.school || '');
+      setEditChessCom(selected.chess_com_username || '');
+      setEditLichess(selected.lichess_username || '');
+      setEditFideRating(selected.fide_rating ? String(selected.fide_rating) : '');
+      setEditCoachId(selected.coach_id || '');
+      setEditCentreId(selected.centre_id || '');
       setIsEditing(false);
     }
   }, [selected]);
@@ -55,7 +72,15 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
         name: editName,
         level: editLevel,
         status: editStatus,
-        fide_id: editFideId
+        fide_id: editFideId || null,
+        dob: editDob ? new Date(editDob).toISOString() : null,
+        gender: editGender,
+        school: editSchool,
+        chess_com_username: editChessCom || null,
+        lichess_username: editLichess || null,
+        fide_rating: editFideRating ? Number(editFideRating) : null,
+        coach_id: editCoachId || null,
+        centre_id: editCentreId
       });
       const fresh = await syncDatabaseToClient();
       db.syncFromNeon(fresh);
@@ -98,17 +123,6 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
     return () => window.removeEventListener('db-synced', refresh);
   }, []);
 
-  // Sync activeCentre prop → filter
-  useEffect(() => {
-    if (activeCentre && activeCentre !== 'All') {
-      const match = db.getCentres().find(c => c.id === activeCentre);
-      if (match) {
-        setFilterCentre(match.name);
-      }
-    } else {
-      setFilterCentre('All centres');
-    }
-  }, [activeCentre]);
 
   // Determine coach record for isolation
   const coachRecord = useMemo(() => {
@@ -195,8 +209,12 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   }, [students, packages, coaches, centres, attendance]);
 
   // Filter + sort
+  // Filter + sort
   const filtered = useMemo(() => {
-    let rows = enriched.filter(r => r.status !== 'inactive');
+    let rows = enriched;
+    if (filterStatus !== 'All') {
+      rows = rows.filter(r => r.status?.toLowerCase() === filterStatus.toLowerCase());
+    }
     
     // Apply coach role isolation
     if (currentUser.role === 'coach' && coachRecord) {
@@ -226,7 +244,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
       if (av > bv) return sortAsc ? 1 : -1;
       return 0;
     });
-  }, [enriched, filterCentre, filterCoach, filterSegment, filterEngagement, search, sortCol, sortAsc, currentUser, coachRecord]);
+  }, [enriched, filterCentre, filterCoach, filterSegment, filterEngagement, filterStatus, search, sortCol, sortAsc, currentUser, coachRecord]);
 
   // Coach-specific metrics
   const coachStats = useMemo(() => {
@@ -452,6 +470,17 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
           <option value="DORMANT">DORMANT</option>
         </select>
 
+        <select
+          value={filterStatus}
+          onChange={e => setFilterStatus(e.target.value)}
+          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
+        >
+          <option value="active">Active Only</option>
+          <option value="inactive">Inactive Only</option>
+          <option value="left">Left Only</option>
+          <option value="All">All Statuses</option>
+        </select>
+
         <input
           type="text"
           placeholder="Search..."
@@ -576,6 +605,40 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                   </div>
 
                   <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Date of Birth</label>
+                    <input 
+                      type="date" 
+                      value={editDob}
+                      onChange={e => setEditDob(e.target.value)}
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Gender</label>
+                    <select
+                      value={editGender}
+                      onChange={e => setEditGender(e.target.value)}
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    >
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">School</label>
+                    <input 
+                      type="text" 
+                      value={editSchool}
+                      onChange={e => setEditSchool(e.target.value)}
+                      placeholder="e.g. Dubai British School"
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-bold text-ink">Level</label>
                     <select
                       value={editLevel}
@@ -604,27 +667,132 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-ink">FIDE ID / Custom ID</label>
+                    <label className="text-xs font-bold text-ink">Centre</label>
+                    <select
+                      value={editCentreId}
+                      onChange={e => setEditCentreId(e.target.value)}
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    >
+                      {centres.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Assigned Coach</label>
+                    <select
+                      value={editCoachId}
+                      onChange={e => setEditCoachId(e.target.value)}
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    >
+                      <option value="">Unassigned</option>
+                      {coaches.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">FIDE ID</label>
                     <input 
                       type="text" 
                       value={editFideId}
                       onChange={e => setEditFideId(e.target.value)}
+                      placeholder="e.g. 12345678"
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">FIDE Rating</label>
+                    <input 
+                      type="number" 
+                      value={editFideRating}
+                      onChange={e => setEditFideRating(e.target.value)}
+                      placeholder="e.g. 1400"
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Chess.com Username</label>
+                    <input 
+                      type="text" 
+                      value={editChessCom}
+                      onChange={e => setEditChessCom(e.target.value)}
+                      placeholder="e.g. username"
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Lichess Username</label>
+                    <input 
+                      type="text" 
+                      value={editLichess}
+                      onChange={e => setEditLichess(e.target.value)}
+                      placeholder="e.g. username"
                       className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
                     />
                   </div>
                 </>
               ) : (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4 text-xs">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3.5 text-xs border-b border-line pb-4">
                     <div>
-                      <span className="text-muted-custom block uppercase tracking-wider text-[10px]">Level</span>
-                      <b className="text-ink text-sm">{selected.level || '—'}</b>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Level</span>
+                      <b className="text-ink">{selected.level || '—'}</b>
                     </div>
                     <div>
-                      <span className="text-muted-custom block uppercase tracking-wider text-[10px]">Status</span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${selected.status === 'active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Status</span>
+                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${selected.status === 'active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
                         {selected.status}
                       </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Centre</span>
+                      <b className="text-ink">{selected.centreName || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Coach</span>
+                      <b className="text-ink">{selected.coachName || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Date of Birth</span>
+                      <b className="text-ink">{selected.dob ? new Date(selected.dob).toISOString().split('T')[0] : '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Gender</span>
+                      <b className="text-ink">{selected.gender || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">School</span>
+                      <b className="text-ink">{selected.school || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">FIDE ID</span>
+                      <b className="text-ink">{selected.fide_id || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">FIDE Rating</span>
+                      <b className="text-ink">{selected.fide_rating || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Chess.com</span>
+                      <b className="text-ink">
+                        {selected.chess_com_username ? (
+                          <a href={`https://chess.com/member/${selected.chess_com_username}`} target="_blank" rel="noopener noreferrer" className="text-forest hover:underline">{selected.chess_com_username}</a>
+                        ) : '—'}
+                      </b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Lichess</span>
+                      <b className="text-ink">
+                        {selected.lichess_username ? (
+                          <a href={`https://lichess.org/@/${selected.lichess_username}`} target="_blank" rel="noopener noreferrer" className="text-forest hover:underline">{selected.lichess_username}</a>
+                        ) : '—'}
+                      </b>
                     </div>
                   </div>
 

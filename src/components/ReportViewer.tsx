@@ -4376,7 +4376,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
                       <th className="py-2.5 px-2 text-right">30D</th>
                       <th className="py-2.5 px-2 text-right">90D</th>
                       <th className="py-2.5 px-2 text-center">STATE</th>
-                      <th className="py-2.5 px-2 text-right">PAID TO DATE</th>
+                      {currentUser?.role !== 'front_desk' && <th className="py-2.5 px-2 text-right">PAID TO DATE</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">
@@ -4398,7 +4398,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
                             {row.state}
                           </span>
                         </td>
-                        <td className="py-3 px-2 text-right font-semibold text-ink">AED {row.paid.toLocaleString()}</td>
+                        {currentUser?.role !== 'front_desk' && <td className="py-3 px-2 text-right font-semibold text-ink">AED {row.paid.toLocaleString()}</td>}
                       </tr>
                     ))}
                     {/* Total Row */}
@@ -4415,7 +4415,9 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
                         {reportData.atRiskRows.reduce((sum: number, r: any) => sum + r.classes90, 0)}
                       </td>
                       <td className="py-3 px-2 text-center">—</td>
-                      <td className="py-3 px-2 text-right">AED {reportData.annualisedVal.toLocaleString()}</td>
+                      {currentUser?.role !== 'front_desk' ? (
+                        <td className="py-3 px-2 text-right">AED {reportData.annualisedVal.toLocaleString()}</td>
+                      ) : null}
                     </tr>
                   </tbody>
                 </table>

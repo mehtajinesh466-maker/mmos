@@ -30,7 +30,8 @@ export default function ReportDetailPage() {
         'centre-perf',
         'growth-trajectory',
         'new-centre-model',
-        'board-investor-pack'
+        'board-investor-pack',
+        'engagement-report'
       ];
       if (restrictedReports.includes(reportId)) {
         router.push("/reports-centre");

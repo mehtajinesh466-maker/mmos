@@ -64,38 +64,43 @@ model Family {
 }
 
 model Student {
-  id            String         @id @default(uuid()) @db.Uuid
-  family_id     String?        @db.Uuid
-  centre_id     String         @db.Uuid
-  coach_id      String?        @db.Uuid
-  name          String
-  dob           DateTime?      @db.Date
-  gender        String?
-  school        String?
-  level         String?
-  status        String         @default("active")
-  fide_id       String?
-  photo_url     String?
-  join_date     DateTime?      @default(now()) @db.Date
-  last_attended DateTime?      @db.Date
-  pace_status   String?
-  pace_reason   String?
-  flags         Json?          @default("{}")
-  attendance    Attendance[]
-  enrollments   Enrollment[]
-  fideRatings   FideRating[]
-  invoices      Invoice[]
-  notifications Notification[]
-  packages      Package[]
-  progressLogs  ProgressLog[]
-  reports       Report[]
-  skills        StudentSkill[]
-  centre        Centre         @relation(fields: [centre_id], references: [id])
-  coach         Coach?         @relation(fields: [coach_id], references: [id])
-  family        Family?        @relation(fields: [family_id], references: [id])
+  id                 String             @id @default(uuid()) @db.Uuid
+  family_id          String?            @db.Uuid
+  centre_id          String             @db.Uuid
+  coach_id           String?            @db.Uuid
+  name               String
+  dob                DateTime?          @db.Date
+  gender             String?
+  school             String?
+  level              String?
+  status             String             @default("active")
+  fide_id            String?
+  photo_url          String?
+  join_date          DateTime?          @default(now()) @db.Date
+  last_attended      DateTime?          @db.Date
+  pace_status        String?
+  pace_reason        String?
+  flags              Json?              @default("{}")
+  chess_com_username String?
+  lichess_username   String?
+  fide_rating        Int?
+  attendance         Attendance[]
+  enrollments        Enrollment[]
+  fideRatings        FideRating[]
+  invoices           Invoice[]
+  notifications      Notification[]
+  packages           Package[]
+  progressLogs       ProgressLog[]
+  reports            Report[]
+  skills             StudentSkill[]
+  tournamentReports  TournamentReport[]
+  centre             Centre             @relation(fields: [centre_id], references: [id])
+  coach              Coach?             @relation(fields: [coach_id], references: [id])
+  family             Family?            @relation(fields: [family_id], references: [id])
 
   @@map("students")
 }
+
 
 model Tier {
   id         String    @id @default(uuid()) @db.Uuid
@@ -278,3 +283,16 @@ model Notification {
 
   @@map("notifications")
 }
+
+model TournamentReport {
+  id            String   @id @default(uuid()) @db.Uuid
+  student_id    String   @db.Uuid
+  name          String
+  date          DateTime @db.Date
+  points        Decimal  @db.Decimal(5, 2)
+  rating_change Int
+  student       Student  @relation(fields: [student_id], references: [id], onDelete: Cascade)
+
+  @@map("tournament_reports")
+}
+

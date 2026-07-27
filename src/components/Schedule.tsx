@@ -728,7 +728,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
             <tbody>
               {fullWeekData.list.map((row, idx) => (
                 <tr key={idx} className="border-b border-line hover:bg-canvas/30 transition-colors font-medium text-ink">
-                  <td className="py-2.5 px-3">
+                  <td className="py-2.5 px-3 cursor-pointer hover:underline text-[#173F35]" onClick={() => { setActiveDay(normalizeDay(row.day)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
                     <span className="block font-bold">{row.day}</span>
                     <span className="text-[10px] text-muted-custom font-normal">{getDayLabel(row.day).date}</span>
                   </td>

@@ -1,7 +1,7 @@
 // Master Moves OS (MMOS) — Local Storage Database Engine
 // Simulates PostgreSQL, Supabase, DB Triggers, and Offline Queueing
 
-import { saveStudentDB, saveProgressLogDB, syncOfflineQueueDB } from '../app/actions';
+import { saveStudentDB, saveProgressLogDB, syncOfflineQueueDB, saveTournamentReportDB } from '../app/actions';
 
 export interface Centre {
   id: string;
@@ -37,6 +37,9 @@ export interface Student {
   level: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro-Track';
   status: 'active' | 'inactive' | 'frozen' | 'left';
   fide_id?: string;
+  chess_com_username?: string;
+  lichess_username?: string;
+  fide_rating?: number;
   photo_url?: string;
   join_date: string;
   last_attended: string | null;
@@ -118,6 +121,15 @@ export interface ProgressLog {
   note?: string;
 }
 
+export interface TournamentReport {
+  id: string;
+  student_id: string;
+  name: string;
+  date: string;
+  points: number;
+  rating_change: number;
+}
+
 export interface AuditLog {
   id: string;
   actor: string;
@@ -162,6 +174,7 @@ function initStorage() {
     localStorage.setItem('mmos_invoices', JSON.stringify([]));
     localStorage.setItem('mmos_offline_queue', JSON.stringify([]));
     localStorage.setItem('mmos_notifications', JSON.stringify([]));
+    localStorage.setItem('mmos_tournament_reports', JSON.stringify([]));
     localStorage.setItem('mmos_initialized', 'true');
   }
 }
@@ -190,6 +203,7 @@ export const db = {
     if (data.enquiries) this.save('enquiries', data.enquiries);
     if (data.enrollments) this.save('enrollments', data.enrollments);
     if (data.notifications) this.save('notifications', data.notifications);
+    if (data.tournamentReports) this.save('tournament_reports', data.tournamentReports);
     window.dispatchEvent(new Event('db-synced'));
   },
   // Helper loaders & savers
@@ -324,6 +338,25 @@ export const db = {
 
   getNotifications(): any[] {
     return this.get<any>('notifications');
+  },
+
+  // Tournament Reports
+  getTournamentReports(): TournamentReport[] {
+    return this.get<TournamentReport>('tournament_reports');
+  },
+
+  saveTournamentReport(report: TournamentReport): void {
+    const reports = this.getTournamentReports();
+    reports.push(report);
+    this.save('tournament_reports', reports);
+    
+    // Fire and forget to server
+    if (this.isOnline()) {
+      saveTournamentReportDB(report).catch(e => console.error('Failed to sync tournament report:', e));
+    }
+    
+    this.logAudit('insert_tournament_report', 'tournament_reports', null, report);
+    window.dispatchEvent(new Event('db-synced'));
   },
 
   saveEnquiry(enq: Enquiry): void {
