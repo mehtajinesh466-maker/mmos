@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { Chart, registerables } from 'chart.js';
 import { db } from '../lib/db';
 import type { Student, Package, Attendance, Coach } from '../lib/db';
@@ -16,6 +17,8 @@ interface ReportViewerProps {
 
 export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
   const router = useRouter();
+  const { data: session } = useSession();
+  const currentUser = session?.user as any;
   
   // Dynamic slice & dice filters
   const [filterCentre, setFilterCentre] = useState('All');
@@ -112,16 +115,24 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         engagement_status: engagement
       };
     }).filter(s => {
+      if (currentUser?.role === 'coach') {
+        const coach = coaches.find(c => c.user_id === currentUser.id);
+        const coachId = coach ? coach.id : '';
+        if (s.coach_id !== coachId) return false;
+      }
       const bayCentreId = centres.find(c => c.name === 'Bay Avenue')?.id || 'c-1';
       const jltCentreId = centres.find(c => c.name === 'JLT')?.id || 'c-2';
-      if (filterCentre !== 'All' && s.centre_id !== (filterCentre === 'JLT' ? jltCentreId : bayCentreId)) return false;
+      if (filterCentre !== 'All') {
+        const targetId = filterCentre === 'JLT' ? jltCentreId : (filterCentre === 'Bay Avenue' ? bayCentreId : '');
+        if (s.centre_id !== targetId) return false;
+      }
       if (filterSegment !== 'All' && s.segment !== filterSegment) return false;
       if (filterEngagement !== 'All' && s.engagement_status !== filterEngagement) return false;
       if (filterLevel !== 'All' && s.level !== filterLevel) return false;
       if (filterCoach !== 'All' && s.coach_id !== filterCoach) return false;
       return true;
     });
-  }, [students, invoices, filterCentre, filterSegment, filterEngagement, filterLevel, filterCoach, centres]);
+  }, [students, invoices, filterCentre, filterSegment, filterEngagement, filterLevel, filterCoach, centres, currentUser, coaches]);
 
   // Compute stats and groupings based on reportId
   const reportData = useMemo(() => {
@@ -1118,7 +1129,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         const diffMonths = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 30.44));
         const active = isStillAttending(s.id) ? 1 : 0;
 
-        const centreName = s.centre_id === 'c-2' ? 'JLT' : 'Bay Avenue';
+        const centreName = centres.find(c => c.id === s.centre_id)?.name || 'Bay Avenue';
         const targetBuckets = centreName === 'JLT' ? jltBuckets : bayAvenueBuckets;
 
         const b = targetBuckets.find(bucket => diffMonths >= bucket.min && diffMonths <= bucket.max);
@@ -1210,7 +1221,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
 
       const tableRows = expiringPackages.map(p => {
         const student = students.find(s => s.id === p.student_id);
-        const centreName = student ? (student.centre_id === 'c-2' ? 'JLT' : 'Bay Avenue') : 'Bay Avenue';
+        const centreName = student ? (centres.find(c => c.id === student.centre_id)?.name || 'Bay Avenue') : 'Bay Avenue';
         
         if (centreName === 'JLT') {
           expiringJlt++;
@@ -1258,7 +1269,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         let groupKey = 'Other';
         if (student) {
           if (diceBy === 'By Centre') {
-            groupKey = student.centre_id === 'c-2' ? 'JLT' : 'Bay Avenue';
+            groupKey = centres.find(c => c.id === student.centre_id)?.name || 'Bay Avenue';
           } else if (diceBy === 'By Coach') {
             const coach = coaches.find(c => c.id === student.coach_id);
             groupKey = coach ? coach.name : 'Unassigned';
@@ -1336,7 +1347,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           const sinceDate = oldestUnpaidAtt ? oldestUnpaidAtt.date : s.join_date || '2025-11-24';
 
           const coach = coaches.find(c => c.id === s.coach_id);
-          const centreName = s.centre_id === 'c-2' ? 'JLT' : 'Bay Avenue';
+          const centreName = centres.find(c => c.id === s.centre_id)?.name || 'Bay Avenue';
 
           studentUnpaidData.push({
             studentId: s.id,
@@ -2667,7 +2678,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         return {
           id: s.id,
           name: s.name,
-          centre: s.centre_id === 'c-2' ? 'JLT' : 'Bay Avenue',
+          centre: centres.find(c => c.id === s.centre_id)?.name || 'Bay Avenue',
           level: s.level,
           coach: coach ? coach.name : 'Unassigned',
           segment: s.segment || 'HEALTHY',
@@ -2676,7 +2687,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         };
       })
     };
-  }, [filteredStudents, reportId, diceBy, coaches, packages, invoices, attendance, filterCentre, filterCoach, filterSegment, filterEngagement, filterLevel, students]);
+  }, [filteredStudents, reportId, diceBy, coaches, packages, invoices, attendance, filterCentre, filterCoach, filterSegment, filterEngagement, filterLevel, students, centres]);
 
   // Draw Chart
   const drawChart = () => {
@@ -3373,146 +3384,146 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         </div>
       )}
 
-
-
       {/* KPI Cards */}
-      {reportId === 'membership-economics' || reportId === 'cohort-retention' ? (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{reportId === 'cohort-retention' ? 'still attending' : 'what they pay today'}</div>
-          </div>
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{reportId === 'cohort-retention' ? 'still attending' : `${reportData.totalStudentsVal} paying students`}</div>
-          </div>
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi3.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi3.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{reportId === 'cohort-retention' ? 'still attending' : 'if all moved to tier card'}</div>
-          </div>
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi4.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi4.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{reportId === 'cohort-retention' ? 'the loyal core' : `+${Math.round((reportData.annualisedVal / reportData.sumRunRate) * 100) || 62}%`}</div>
-          </div>
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi5.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi5.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{reportId === 'cohort-retention' ? 'before 50% have gone' : `${reportData.belowMiniPct}% of active base`}</div>
-          </div>
-        </div>
-      ) : reportId === 'collection-list' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
-          </div>
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
-          </div>
-        </div>
-      ) : reportId === 'slow-risk' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
-          </div>
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
-          </div>
-        </div>
-      ) : reportId === 'package-expiry' ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">≤3 classes left</div>
-          </div>
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">≤3 classes left</div>
-          </div>
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi3.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi3.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">work this list weekly</div>
-          </div>
-        </div>
-      ) : reportId === 'unpaid-attendance' ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-[#b49040] uppercase tracking-wider">{reportData.kpi1.label}</div>
-            <h2 className="text-2xl font-bold font-display text-hot-custom mt-1.5">{reportData.kpi1.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">no active paid package</div>
-          </div>
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">never billed</div>
-          </div>
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi3.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi3.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">invoice today</div>
-          </div>
-        </div>
-      ) : (reportId === 'board-investor-pack' || reportId === 'new-centre-model' || reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') ? (
-        (reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {(currentUser?.role !== 'front_desk' && currentUser?.role !== 'coach') && (
+        reportId === 'membership-economics' || reportId === 'cohort-retention' ? (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1?.label || 'COACHES'}</div>
-              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1?.val || '0'}</h2>
-              <div className="text-[9px] text-muted-custom mt-1">{reportData.kpi1?.sub || ''}</div>
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{reportId === 'cohort-retention' ? 'still attending' : 'what they pay today'}</div>
             </div>
             <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2?.label || 'STUDENT-CLASSES / 30D'}</div>
-              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2?.val || '0'}</h2>
-              <div className="text-[9px] text-muted-custom mt-1">{reportData.kpi2?.sub || ''}</div>
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{reportId === 'cohort-retention' ? 'still attending' : `${reportData.totalStudentsVal} paying students`}</div>
             </div>
             <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi3?.label || 'AVG UTILISATION'}</div>
-              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi3?.val || '0%'}</h2>
-              <div className="text-[9px] text-muted-custom mt-1">{reportData.kpi3?.sub || ''}</div>
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi3.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi3.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{reportId === 'cohort-retention' ? 'still attending' : 'if all moved to tier card'}</div>
             </div>
             <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-              <div className="text-[9px] font-bold text-[#C4A249] uppercase tracking-wider">{reportData.kpi4?.label || 'ENGAGEMENT BAND'}</div>
-              <h2 className="text-2xl font-bold font-display text-[#C4A249] mt-1.5">{reportData.kpi4?.val || '0–0%'}</h2>
-              <div className="text-[9px] text-muted-custom mt-1">{reportData.kpi4?.sub || ''}</div>
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi4.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi4.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{reportId === 'cohort-retention' ? 'the loyal core' : `+${Math.round((reportData.annualisedVal / reportData.sumRunRate) * 100) || 62}%`}</div>
+            </div>
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi5.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi5.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{reportId === 'cohort-retention' ? 'before 50% have gone' : `${reportData.belowMiniPct}% of active base`}</div>
             </div>
           </div>
-        ) : null
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
+        ) : reportId === 'collection-list' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
+            </div>
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
+            </div>
           </div>
+        ) : reportId === 'slow-risk' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
+            </div>
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
+            </div>
+          </div>
+        ) : reportId === 'package-expiry' ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">≤3 classes left</div>
+            </div>
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">≤3 classes left</div>
+            </div>
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi3.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi3.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">work this list weekly</div>
+            </div>
+          </div>
+        ) : reportId === 'unpaid-attendance' ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-[#b49040] uppercase tracking-wider">{reportData.kpi1.label}</div>
+              <h2 className="text-2xl font-bold font-display text-hot-custom mt-1.5">{reportData.kpi1.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">no active paid package</div>
+            </div>
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">never billed</div>
+            </div>
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi3.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi3.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">invoice today</div>
+            </div>
+          </div>
+        ) : (reportId === 'board-investor-pack' || reportId === 'new-centre-model' || reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') ? (
+          (reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+                <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1?.label || 'COACHES'}</div>
+                <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1?.val || '0'}</h2>
+                <div className="text-[9px] text-muted-custom mt-1">{reportData.kpi1?.sub || ''}</div>
+              </div>
+              <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+                <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2?.label || 'STUDENT-CLASSES / 30D'}</div>
+                <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2?.val || '0'}</h2>
+                <div className="text-[9px] text-muted-custom mt-1">{reportData.kpi2?.sub || ''}</div>
+              </div>
+              <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+                <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi3?.label || 'AVG UTILISATION'}</div>
+                <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi3?.val || '0%'}</h2>
+                <div className="text-[9px] text-muted-custom mt-1">{reportData.kpi3?.sub || ''}</div>
+              </div>
+              <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+                <div className="text-[9px] font-bold text-[#C4A249] uppercase tracking-wider">{reportData.kpi4?.label || 'ENGAGEMENT BAND'}</div>
+                <h2 className="text-2xl font-bold font-display text-[#C4A249] mt-1.5">{reportData.kpi4?.val || '0–0%'}</h2>
+                <div className="text-[9px] text-muted-custom mt-1">{reportData.kpi4?.sub || ''}</div>
+              </div>
+            </div>
+          ) : null
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi1.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi1.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
+            </div>
 
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
-          </div>
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi2.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi2.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
+            </div>
 
-          <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
-            <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi3.label}</div>
-            <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi3.val}</h2>
-            <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
-          </div>
+            <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
+              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">{reportData.kpi3.label}</div>
+              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">{reportData.kpi3.val}</h2>
+              <div className="text-[9px] text-muted-custom mt-1">{filterCentre === 'All' ? 'All data' : filterCentre}</div>
+            </div>
 
-        </div>
+          </div>
+        )
       )}
 
       {/* Custom layout for all reports */}
@@ -5377,51 +5388,15 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         )
       ) : (
         /* Original reports layout */
-        <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6">
-          
-          {/* Left Visualization Panel */}
-          <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4">
-            <h3 className="text-sm font-bold text-ink">Visualization</h3>
-            <p className="text-[10px] text-muted-custom">Diced {diceBy.toLowerCase()}</p>
-            
-            {chartType === 'table' ? (
-              <div className="overflow-x-auto pt-2">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-line text-left text-muted-custom font-bold text-[9px] uppercase tracking-wider">
-                      <th className="py-2 px-1">Dimension Group</th>
-                      <th className="py-2 px-1 text-right">Value Metric</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reportData.labels.map((lbl, i) => (
-                      <tr key={i} className="border-b border-line hover:bg-canvas/20">
-                        <td className="py-2.5 px-1 font-semibold">{lbl}</td>
-                        <td className="py-2.5 px-1 text-right font-mono font-bold">
-                          {reportId.includes('revenue') || reportId.includes('ltv') || reportId.includes('unbilled') 
-                            ? `AED ${reportData.datasetData[i].toLocaleString()}`
-                            : reportData.datasetData[i]}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="h-64 relative">
-                <canvas ref={chartRef}></canvas>
-              </div>
-            )}
-          </div>
-
-          {/* Right Detail Roster Panel */}
-          <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4">
+        (currentUser?.role === 'front_desk' || currentUser?.role === 'coach') ? (
+          /* Student level only layout */
+          <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4 w-full">
             <div>
               <h3 className="text-sm font-bold text-ink">Students Breakdown</h3>
               <p className="text-[10px] text-muted-custom">Filtered list: {reportData.rawList.length} students</p>
             </div>
 
-            <div className="overflow-y-auto max-h-72 divide-y divide-line pr-1">
+            <div className="overflow-y-auto max-h-[500px] divide-y divide-line pr-1">
               {reportData.rawList.length === 0 ? (
                 <div className="text-center py-6 text-xs text-muted-custom">
                   No students match the active filter criteria.
@@ -5454,8 +5429,88 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
               )}
             </div>
           </div>
+        ) : (
+          /* Original full layout */
+          <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6">
+            
+            {/* Left Visualization Panel */}
+            <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4">
+              <h3 className="text-sm font-bold text-ink">Visualization</h3>
+              <p className="text-[10px] text-muted-custom">Diced {diceBy.toLowerCase()}</p>
+              
+              {chartType === 'table' ? (
+                <div className="overflow-x-auto pt-2">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-line text-left text-muted-custom font-bold text-[9px] uppercase tracking-wider">
+                        <th className="py-2 px-1">Dimension Group</th>
+                        <th className="py-2 px-1 text-right">Value Metric</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportData.labels.map((lbl, i) => (
+                        <tr key={i} className="border-b border-line hover:bg-canvas/20">
+                          <td className="py-2.5 px-1 font-semibold">{lbl}</td>
+                          <td className="py-2.5 px-1 text-right font-mono font-bold">
+                            {reportId.includes('revenue') || reportId.includes('ltv') || reportId.includes('unbilled') 
+                              ? `AED ${reportData.datasetData[i].toLocaleString()}`
+                              : reportData.datasetData[i]}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="h-64 relative">
+                  <canvas ref={chartRef}></canvas>
+                </div>
+              )}
+            </div>
 
-        </div>
+            {/* Right Detail Roster Panel */}
+            <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-ink">Students Breakdown</h3>
+                <p className="text-[10px] text-muted-custom">Filtered list: {reportData.rawList.length} students</p>
+              </div>
+
+              <div className="overflow-y-auto max-h-72 divide-y divide-line pr-1">
+                {reportData.rawList.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-muted-custom">
+                    No students match the active filter criteria.
+                  </div>
+                ) : (
+                  reportData.rawList.map(student => (
+                    <div 
+                      key={student.id} 
+                      onClick={() => router.push(`/student-dashboard?studentId=${student.id}`)}
+                      className="py-2.5 flex items-center justify-between hover:bg-canvas/20 cursor-pointer rounded px-1 transition-colors"
+                    >
+                      <div>
+                        <h5 className="font-bold text-xs text-ink">{student.name}</h5>
+                        <p className="text-[9px] text-muted-custom mt-0.5">{student.centre} · {student.level} · Coach: {student.coach}</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-mono text-[10px] font-bold block text-ink">
+                          {reportId.includes('revenue') || reportId.includes('ltv') 
+                            ? `AED ${student.totalPaid.toLocaleString()}`
+                            : `${student.classesRemaining} classes`}
+                        </span>
+                        <span className={`text-[8px] font-extrabold tracking-wider px-1.5 py-0.5 rounded-full ${
+                          student.segment === 'HOT' ? 'bg-red-50 text-hot-custom border border-red-200' : 'bg-emerald-50 text-forest border border-emerald-200'
+                        }`}>
+                          {student.segment}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+          </div>
+        )
       )}
 
     </div>

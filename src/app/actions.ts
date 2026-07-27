@@ -358,18 +358,12 @@ export async function syncDatabaseToClient() {
   }
 
   if (role === 'front_desk') {
-    const centreFilter = userCentreId ? { id: userCentreId } : { id: 'none' };
-    const relationCentreFilter = userCentreId ? { centre_id: userCentreId } : { centre_id: 'none' };
-
-    const students = await prisma.student.findMany({ where: relationCentreFilter });
-    const studentIds = students.map(s => s.id);
-    const familyIds = students.map(s => s.family_id).filter(Boolean) as string[];
-
     const [
       centres,
       users,
       coachesRaw,
       families,
+      students,
       tiers,
       packages,
       scheduleSlots,
@@ -380,45 +374,20 @@ export async function syncDatabaseToClient() {
       progressLogsRaw,
       notifications
     ] = await Promise.all([
-      prisma.centre.findMany({ where: centreFilter }),
-      prisma.user.findMany({
-        where: {
-          OR: [
-            { centre_id: userCentreId },
-            { role: 'coach', coaches: { some: { centre_id: userCentreId } } }
-          ]
-        }
-      }),
-      prisma.coach.findMany({
-        where: relationCentreFilter,
-        include: { user: true }
-      }),
-      prisma.family.findMany({
-        where: { id: { in: familyIds } }
-      }),
-      prisma.tier.findMany({ where: { active: true } }),
-      prisma.package.findMany({
-        where: { student_id: { in: studentIds } }
-      }),
-      prisma.scheduleSlot.findMany({
-        where: relationCentreFilter
-      }),
-      prisma.attendance.findMany({
-        where: { student_id: { in: studentIds } }
-      }),
-      prisma.invoice.findMany({
-        where: { student_id: { in: studentIds } }
-      }),
-      prisma.enquiry.findMany({
-        where: userCentreId ? { centre_id: userCentreId } : {}
-      }),
+      prisma.centre.findMany(),
+      prisma.user.findMany(),
+      prisma.coach.findMany({ include: { user: true } }),
+      prisma.family.findMany(),
+      prisma.student.findMany(),
+      prisma.tier.findMany(),
+      prisma.package.findMany(),
+      prisma.scheduleSlot.findMany(),
+      prisma.attendance.findMany(),
+      prisma.invoice.findMany(),
+      prisma.enquiry.findMany(),
       prisma.enrollment.findMany(),
-      prisma.progressLog.findMany({
-        where: { student_id: { in: studentIds } }
-      }),
-      prisma.notification.findMany({
-        where: { student_id: { in: studentIds } }
-      })
+      prisma.progressLog.findMany(),
+      prisma.notification.findMany()
     ]);
 
     const coaches = coachesRaw.map(c => ({
