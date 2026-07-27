@@ -22,5 +22,5 @@ export default function AnalyticsPage() {
   const currentUser = session.user as any;
   const activeCentre = currentUser.centre_id || "All";
 
-  return <Analytics activeCentre={activeCentre} />;
+  return <Analytics activeCentre={activeCentre} currentUser={currentUser} />;
 }

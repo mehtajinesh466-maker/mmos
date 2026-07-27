@@ -19,5 +19,5 @@ export default function ReportsCentrePage() {
 
   if (status === "loading" || !session) return null;
 
-  return <ReportsCentre />;
+  return <ReportsCentre currentUser={session.user} />;
 }

@@ -3,7 +3,11 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-export const ReportsCentre: React.FC = () => {
+interface ReportsCentreProps {
+  currentUser?: any;
+}
+
+export const ReportsCentre: React.FC<ReportsCentreProps> = ({ currentUser }) => {
   const router = useRouter();
   const [selectedCentre, setSelectedCentre] = useState<string>('All');
 
@@ -88,6 +92,20 @@ export const ReportsCentre: React.FC = () => {
     }
   };
 
+  const allowedFamilies = families.map(f => {
+    if (currentUser?.role === 'front_desk') {
+      if (f.title === 'Finance' || f.title === 'Strategy') return null;
+      if (f.title === 'Coaching — structure only') {
+        return {
+          ...f,
+          reports: f.reports.filter(r => r.id !== 'revenue-contribution'),
+          count: `${f.reports.filter(r => r.id !== 'revenue-contribution').length} reports`
+        };
+      }
+    }
+    return f;
+  }).filter(Boolean) as typeof families;
+
   return (
     <div className="p-6 max-w-7xl mx-auto w-full space-y-6 text-ink">
       
@@ -115,7 +133,7 @@ export const ReportsCentre: React.FC = () => {
 
       {/* Families list */}
       <div className="space-y-6">
-        {families.map((family, idx) => (
+        {allowedFamilies.map((family, idx) => (
           <div key={idx} className="bg-white border border-line rounded-2xl p-5 shadow-sm space-y-4">
             
             <div className="flex items-center gap-2">

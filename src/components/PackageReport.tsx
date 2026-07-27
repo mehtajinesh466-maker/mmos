@@ -365,8 +365,8 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
               </div>
             </div>
 
-            {/* Metric Blocks (5 columns grid) */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {/* Metric Blocks (5 columns grid, 4 for coaches) */}
+            <div className={`grid grid-cols-2 ${currentUser.role === 'coach' ? 'md:grid-cols-4' : 'md:grid-cols-5'} gap-3`}>
               <div className="bg-canvas/40 border border-line rounded-xl p-4 text-center">
                 <div className="text-[16px] font-bold font-display text-ink">{reportMetrics.classesPaid}</div>
                 <div className="text-[9px] font-bold text-muted-custom uppercase mt-0.5">Classes Paid</div>
@@ -383,12 +383,14 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
                 <div className="text-[16px] font-bold font-display text-ink">{reportMetrics.utilisation}%</div>
                 <div className="text-[9px] font-bold text-muted-custom uppercase mt-0.5">Utilisation</div>
               </div>
-              <div className="bg-canvas/40 border border-line rounded-xl p-4 text-center">
-                <div className="text-[16px] font-bold font-display text-ink">
-                  {reportMetrics.owedVal > 0 ? `AED ${reportMetrics.owedVal}` : '—'}
+              {currentUser.role !== 'coach' && (
+                <div className="bg-canvas/40 border border-line rounded-xl p-4 text-center">
+                  <div className="text-[16px] font-bold font-display text-ink">
+                    {reportMetrics.owedVal > 0 ? `AED ${reportMetrics.owedVal}` : '—'}
+                  </div>
+                  <div className="text-[9px] font-bold text-muted-custom uppercase mt-0.5">Unbilled</div>
                 </div>
-                <div className="text-[9px] font-bold text-muted-custom uppercase mt-0.5">Unbilled</div>
-              </div>
+              )}
             </div>
 
             {/* Status Alert Notice */}
@@ -505,10 +507,12 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
                     <span className="text-muted-custom">Classes 30d / 90d</span>
                     <span className="font-mono font-bold text-ink">{reportMetrics.cls30d} / {reportMetrics.cls90d}</span>
                   </div>
-                  <div className="flex justify-between py-2.5">
-                    <span className="text-muted-custom">Total paid</span>
-                    <span className="font-mono font-bold text-ink">AED {reportMetrics.lifetimePaid.toLocaleString()}</span>
-                  </div>
+                  {currentUser.role !== 'coach' && (
+                    <div className="flex justify-between py-2.5">
+                      <span className="text-muted-custom">Total paid</span>
+                      <span className="font-mono font-bold text-ink">AED {reportMetrics.lifetimePaid.toLocaleString()}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between py-2.5">
                     <span className="text-muted-custom">Enrolled</span>
                     <span className="font-mono text-ink">{activeStudent.join_date ? new Date(activeStudent.join_date).toISOString().split('T')[0] : '2025-01-10'}</span>
@@ -520,10 +524,12 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
                     <span className="text-muted-custom">Days since last class</span>
                     <span className="font-mono font-bold text-ink">{reportMetrics.daysSince}</span>
                   </div>
-                  <div className="flex justify-between py-2.5">
-                    <span className="text-muted-custom">Rate per class</span>
-                    <span className="font-mono font-bold text-ink">AED {reportMetrics.avgRate}</span>
-                  </div>
+                  {currentUser.role !== 'coach' && (
+                    <div className="flex justify-between py-2.5">
+                      <span className="text-muted-custom">Rate per class</span>
+                      <span className="font-mono font-bold text-ink">AED {reportMetrics.avgRate}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between py-2.5">
                     <span className="text-muted-custom">Level</span>
                     <span className={`font-semibold ${activeStudent.level ? 'text-ink' : 'text-red-500'}`}>

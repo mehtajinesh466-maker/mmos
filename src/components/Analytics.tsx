@@ -9,9 +9,10 @@ Chart.register(...registerables);
 
 interface AnalyticsProps {
   activeCentre: string;
+  currentUser?: any;
 }
 
-export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
+export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'builder'>('dashboard');
 
   const [students, setStudents] = useState<any[]>([]);
@@ -916,20 +917,22 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
         </div>
 
         <div className="flex gap-2">
-          {activeTab === 'dashboard' ? (
-            <button 
-              onClick={() => setActiveTab('builder')}
-              className="bg-[#C4A249] hover:bg-[#C4A249]/90 text-ink font-semibold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
-            >
-              + Build a custom report
-            </button>
-          ) : (
-            <button 
-              onClick={() => setActiveTab('dashboard')}
-              className="bg-forest hover:bg-forest/90 text-white font-semibold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
-            >
-              Back to Dashboard
-            </button>
+          {currentUser?.role === 'owner' && (
+            activeTab === 'dashboard' ? (
+              <button 
+                onClick={() => setActiveTab('builder')}
+                className="bg-[#C4A249] hover:bg-[#C4A249]/90 text-ink font-semibold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
+              >
+                + Build a custom report
+              </button>
+            ) : (
+              <button 
+                onClick={() => setActiveTab('dashboard')}
+                className="bg-forest hover:bg-forest/90 text-white font-semibold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
+              >
+                Back to Dashboard
+              </button>
+            )
           )}
         </div>
       </div>
@@ -1044,7 +1047,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
           )}
 
           {/* Top KPIs row (Dark Green blocks with white text) */}
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+          <div className={`grid grid-cols-2 ${currentUser?.role === 'front_desk' ? 'lg:grid-cols-3' : 'lg:grid-cols-6'} gap-4`}>
             {[
               { 
                 label: isFiltered ? 'STUDENTS IN SCOPE' : 'TOTAL STUDENTS', 
@@ -1056,26 +1059,30 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                 value: `${activeStudentsCount}`, 
                 desc: `attended in last 30 days · ${activePercent}%` 
               },
-              { 
-                label: 'RUN-RATE', 
-                value: `AED ${runRateK}K`, 
-                desc: isFiltered ? `per month · AED ${(totalRunrate * 12 / 1000).toFixed(0)}K annualised` : `per month · AED ${(totalRunrate * 12 / 1000000).toFixed(2)}M annualised`
-              },
-              { 
-                label: 'UNBILLED', 
-                value: `AED ${unbilledK}K`, 
-                desc: `${unbilledClasses} classes · ledger-verified` 
-              },
+              ...(currentUser?.role === 'front_desk' ? [] : [
+                { 
+                  label: 'RUN-RATE', 
+                  value: `AED ${runRateK}K`, 
+                  desc: isFiltered ? `per month · AED ${(totalRunrate * 12 / 1000).toFixed(0)}K annualised` : `per month · AED ${(totalRunrate * 12 / 1000000).toFixed(2)}M annualised`
+                },
+                { 
+                  label: 'UNBILLED', 
+                  value: `AED ${unbilledK}K`, 
+                  desc: `${unbilledClasses} classes · ledger-verified` 
+                }
+              ]),
               { 
                 label: 'ENROLMENTS', 
                 value: `${newEnrolmentsThisMonth}`, 
                 desc: isFiltered ? 'in this scope' : `MTD · ${newEnrolmentsPrevMonth} prev month` 
               },
-              { 
-                label: 'LIFETIME COLLECTED', 
-                value: isFiltered ? `AED ${totalCollectedK}K` : `AED ${totalCollectedM}M`, 
-                desc: isFiltered ? 'in this scope' : 'zero external capital' 
-              }
+              ...(currentUser?.role === 'front_desk' ? [] : [
+                { 
+                  label: 'LIFETIME COLLECTED', 
+                  value: isFiltered ? `AED ${totalCollectedK}K` : `AED ${totalCollectedM}M`, 
+                  desc: isFiltered ? 'in this scope' : 'zero external capital' 
+                }
+              ])
             ].map((kpi, idx) => (
               <div key={idx} className="bg-[#173F35] text-white border border-[#122F28] rounded-[14px] p-5 shadow-sm space-y-1 relative overflow-hidden">
                 <div className="text-[9px] font-bold text-[#9DDDCB] tracking-wider uppercase">{kpi.label}</div>
@@ -1099,9 +1106,13 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                 <div><div className="font-bold text-lg text-ink">{activeRateBay}%</div><div className="text-[8px] text-muted-custom uppercase">Active Rate</div></div>
                 <div><div className="font-bold text-lg text-ink">{bayClasses30d}</div><div className="text-[8px] text-muted-custom uppercase">Classes/30d</div></div>
               </div>
-              <div className="grid grid-cols-4 gap-4 text-center">
-                <div><div className="font-bold text-sm text-[#286957]">AED ${(bayRunrate / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase">Run-rate /mo</div></div>
-                <div><div className="font-bold text-sm text-hot-custom">AED ${(bayUnbilled / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase">Unbilled</div></div>
+              <div className={`grid ${currentUser?.role === 'front_desk' ? 'grid-cols-2' : 'grid-cols-4'} gap-4 text-center`}>
+                {currentUser?.role !== 'front_desk' && (
+                  <>
+                    <div><div className="font-bold text-sm text-[#286957]">AED ${(bayRunrate / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase">Run-rate /mo</div></div>
+                    <div><div className="font-bold text-sm text-hot-custom">AED ${(bayUnbilled / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase">Unbilled</div></div>
+                  </>
+                )}
                 <div><div className="font-bold text-sm text-ink">{newBayThisMonth}</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">New MTD</div></div>
                 <div><div className="font-bold text-sm text-ink">{bayCoaches}</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">Coaches</div></div>
               </div>
@@ -1119,9 +1130,13 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                 <div><div className="font-bold text-lg text-ink">{activeRateJlt}%</div><div className="text-[8px] text-muted-custom uppercase">Active Rate</div></div>
                 <div><div className="font-bold text-lg text-ink">{jltClasses30d}</div><div className="text-[8px] text-muted-custom uppercase font-mono">Classes/30d</div></div>
               </div>
-              <div className="grid grid-cols-4 gap-4 text-center">
-                <div><div className="font-bold text-sm text-[#286957]">AED ${(jltRunrate / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">Run-rate /mo</div></div>
-                <div><div className="font-bold text-sm text-hot-custom">AED ${(jltUnbilled / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">Unbilled</div></div>
+              <div className={`grid ${currentUser?.role === 'front_desk' ? 'grid-cols-2' : 'grid-cols-4'} gap-4 text-center`}>
+                {currentUser?.role !== 'front_desk' && (
+                  <>
+                    <div><div className="font-bold text-sm text-[#286957]">AED ${(jltRunrate / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">Run-rate /mo</div></div>
+                    <div><div className="font-bold text-sm text-hot-custom">AED ${(jltUnbilled / 1000).toFixed(0)}K</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono">Unbilled</div></div>
+                  </>
+                )}
                 <div><div className="font-bold text-sm text-ink">{newJltThisMonth}</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono font-mono">New MTD</div></div>
                 <div><div className="font-bold text-sm text-ink">{jltCoaches}</div><div className="text-[8px] text-muted-custom uppercase font-semibold font-mono font-mono">Coaches</div></div>
               </div>
@@ -1137,9 +1152,13 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                 <div className="text-[9px] font-bold text-[#C4A249] tracking-wider uppercase mt-1">ZAHRA BREEZE · OPENS 2027</div>
               </div>
               
-              <div className="grid grid-cols-4 gap-4 text-center border-b border-line pb-2 text-xs">
-                <div><div className="font-bold text-ink">~32K</div><div className="text-[8px] text-muted-custom uppercase font-mono">Target /mo</div></div>
-                <div><div className="font-bold text-ink">0</div><div className="text-[8px] text-muted-custom uppercase font-mono">Unbilled</div></div>
+              <div className={`grid ${currentUser?.role === 'front_desk' ? 'grid-cols-2' : 'grid-cols-4'} gap-4 text-center border-b border-line pb-2 text-xs`}>
+                {currentUser?.role !== 'front_desk' && (
+                  <>
+                    <div><div className="font-bold text-ink">~32K</div><div className="text-[8px] text-muted-custom uppercase font-mono">Target /mo</div></div>
+                    <div><div className="font-bold text-ink">0</div><div className="text-[8px] text-muted-custom uppercase font-mono">Unbilled</div></div>
+                  </>
+                )}
                 <div><div className="font-bold text-ink">—</div><div className="text-[8px] text-muted-custom uppercase font-mono">New</div></div>
                 <div><div className="font-bold text-ink">2-3</div><div className="text-[8px] text-muted-custom uppercase font-mono">Coaches</div></div>
               </div>
@@ -1269,8 +1288,10 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre }) => {
                       { m: 'Active (30d)', bay: activeBay.toString(), jlt: activeJlt.toString(), tot: (activeBay + activeJlt).toString() },
                       { m: 'Active rate', bay: `${activeRateBay}%`, jlt: `${activeRateJlt}%`, tot: `${students.length > 0 ? Math.round(((activeBay + activeJlt) / students.length) * 100) : 0}%` },
                       { m: 'Classes / 30d', bay: bayClasses30d.toString(), jlt: jltClasses30d.toString(), tot: (bayClasses30d + jltClasses30d).toString() },
-                      { m: 'Run-rate / month', bay: `AED ${bayRunrate.toLocaleString()}`, jlt: `AED ${jltRunrate.toLocaleString()}`, tot: `AED ${(bayRunrate + jltRunrate).toLocaleString()}` },
-                      { m: 'Unbilled', bay: `AED ${bayUnbilled.toLocaleString()}`, jlt: `AED ${jltUnbilled.toLocaleString()}`, tot: `AED ${(bayUnbilled + jltUnbilled).toLocaleString()}` },
+                      ...(currentUser?.role === 'front_desk' ? [] : [
+                        { m: 'Run-rate / month', bay: `AED ${bayRunrate.toLocaleString()}`, jlt: `AED ${jltRunrate.toLocaleString()}`, tot: `AED ${(bayRunrate + jltRunrate).toLocaleString()}` },
+                        { m: 'Unbilled', bay: `AED ${bayUnbilled.toLocaleString()}`, jlt: `AED ${jltUnbilled.toLocaleString()}`, tot: `AED ${(bayUnbilled + jltUnbilled).toLocaleString()}` }
+                      ]),
                       { m: 'Enrolments (Jul MTD)', bay: newBayThisMonth.toString(), jlt: newJltThisMonth.toString(), tot: (newBayThisMonth + newJltThisMonth).toString() },
                     ].map((row, idx) => (
                       <tr key={idx} className="border-b border-line hover:bg-canvas/30 text-ink">

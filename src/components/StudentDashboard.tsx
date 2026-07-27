@@ -555,8 +555,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
             </div>
           )}
 
-          {/* KPI Cards (5 grid columns) */}
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          {/* KPI Cards (5 grid columns, 3 for coaches) */}
+          <div className={`grid grid-cols-1 ${currentUser.role === 'coach' ? 'md:grid-cols-3' : 'md:grid-cols-5'} gap-4`}>
             
             {/* CLASSES LEFT */}
             <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm">
@@ -585,25 +585,29 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
               <p className="text-[10px] text-muted-custom mt-1">last: {activeStudent.last_attended ? new Date(activeStudent.last_attended).toISOString().split('T')[0] : '2026-06-25'}</p>
             </div>
 
-            {/* LIFETIME PAID */}
-            <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm">
-              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">Lifetime Paid</div>
-              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">
-                AED {(studentMetrics.lifetimePaid / 1000).toFixed(0)}K
-              </h2>
-              <p className="text-[10px] text-muted-custom mt-1">at AED {studentMetrics.avgRate}/class</p>
-            </div>
+            {currentUser.role !== 'coach' && (
+              <>
+                {/* LIFETIME PAID */}
+                <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm">
+                  <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">Lifetime Paid</div>
+                  <h2 className="text-2xl font-bold font-display text-ink mt-1.5">
+                    AED {(studentMetrics.lifetimePaid / 1000).toFixed(0)}K
+                  </h2>
+                  <p className="text-[10px] text-muted-custom mt-1">at AED {studentMetrics.avgRate}/class</p>
+                </div>
 
-            {/* OWED (LEDGER) */}
-            <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm">
-              <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">Owed (Ledger)</div>
-              <h2 className="text-2xl font-bold font-display text-ink mt-1.5">
-                {studentMetrics.owedVal > 0 ? `AED ${studentMetrics.owedVal.toLocaleString()}` : '—'}
-              </h2>
-              <p className="text-[10px] text-muted-custom mt-1">
-                {studentMetrics.owedVal > 0 ? 'outstanding unbilled' : 'nothing outstanding'}
-              </p>
-            </div>
+                {/* OWED (LEDGER) */}
+                <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm">
+                  <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">Owed (Ledger)</div>
+                  <h2 className="text-2xl font-bold font-display text-ink mt-1.5">
+                    {studentMetrics.owedVal > 0 ? `AED ${studentMetrics.owedVal.toLocaleString()}` : '—'}
+                  </h2>
+                  <p className="text-[10px] text-muted-custom mt-1">
+                    {studentMetrics.owedVal > 0 ? 'outstanding unbilled' : 'nothing outstanding'}
+                  </p>
+                </div>
+              </>
+            )}
 
           </div>
 
@@ -772,8 +776,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
                   </div>
                 )}
 
-                {/* 3. Overdue value check */}
-                {studentMetrics.owedVal > 0 && (
+                {/* 3. Overdue value check (hidden for coach) */}
+                {currentUser.role !== 'coach' && studentMetrics.owedVal > 0 && (
                   <div className="flex gap-3 bg-red-50 border border-red-200 rounded-xl p-3.5 text-xs text-[#6a4a41] leading-relaxed">
                     <span className="w-5 h-5 rounded-full bg-red-200 text-hot-custom flex items-center justify-center font-bold text-[10px]">●</span>
                     <div>
@@ -784,7 +788,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
                 )}
 
                 {/* Healthy case */}
-                {activeStudent.level && studentMetrics.classesLeft > 3 && studentMetrics.owedVal === 0 && (
+                {activeStudent.level && studentMetrics.classesLeft > 3 && (currentUser.role === 'coach' || studentMetrics.owedVal === 0) && (
                   <div className="flex gap-3 bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 text-xs text-[#33544b] leading-relaxed">
                     <span className="w-5 h-5 rounded-full bg-emerald-200 text-emerald-800 flex items-center justify-center font-bold text-[10px]">✓</span>
                     <div>
