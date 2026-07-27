@@ -787,6 +787,48 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
     return t ? Number(t.price) : 1000;
   };
 
+  const maxAttDateStr = useMemo(() => {
+    if (attendance.length === 0) return "2026-07-27";
+    return attendance.reduce((max, att) => {
+      if (!att.date) return max;
+      const dStr = new Date(att.date).toISOString().split('T')[0];
+      return dStr > max ? dStr : max;
+    }, "2026-07-12");
+  }, [attendance]);
+  const anchorDate = new Date(maxAttDateStr);
+  const thirtyDaysAgo = new Date(anchorDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const studentRateMap = useMemo(() => {
+    const rateMap = new Map<string, number>();
+    students.forEach(s => {
+      const sPkgs = packages.filter(p => p.student_id === s.id);
+      const activePkg = sPkgs.find(p => p.classes_remaining > 0) || sPkgs[0];
+      let rate = 125;
+      if (activePkg) {
+        const tier = db.getTiers().find(t => t.id === activePkg.tier_id);
+        const price = tier ? Number(tier.price) : 1000;
+        const discount = activePkg.discount_pct ? Number(activePkg.discount_pct) : 0;
+        const totalClasses = activePkg.classes_total || 8;
+        rate = (price * (1 - discount / 100)) / totalClasses;
+      }
+      rateMap.set(s.id, rate);
+    });
+    return rateMap;
+  }, [students, packages]);
+
+  const getRunRateForStudents = (sts: any[]) => {
+    const studentIdsSet = new Set(sts.map(s => s.id));
+    const classes30D = attendance.filter(a => {
+      if (a.status !== 'present' && a.status !== 'makeup') return false;
+      const aDate = new Date(a.date);
+      return aDate >= thirtyDaysAgo && aDate <= anchorDate && studentIdsSet.has(a.student_id);
+    });
+    return classes30D.reduce((sum, c) => {
+      const rate = studentRateMap.get(c.student_id) || 125;
+      return sum + rate;
+    }, 0);
+  };
+
   // KPIs depending on scope
   const scopeStudents = isFiltered ? filteredStudents : students;
   const scopeTotalStudents = scopeStudents.length;
@@ -799,8 +841,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
 
   const activePercent = scopeTotalStudents > 0 ? Math.round((activeStudentsCount / scopeTotalStudents) * 100) : 0;
 
-  const activePackages = packages.filter(p => p.classes_remaining > 0 && scopeStudents.some(s => s.id === p.student_id));
-  const totalRunrate = activePackages.reduce((sum, p) => sum + getPackagePrice(p), 0);
+  const totalRunrate = getRunRateForStudents(scopeStudents);
   const runRateK = (totalRunrate / 1000).toFixed(0);
 
   const totalUnbilled = scopeStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
@@ -856,7 +897,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
   }).length;
   const activeRateBay = bayStudents.length > 0 ? Math.round((activeBay / bayStudents.length) * 100) : 0;
   const bayClasses30d = attendance.filter(a => a.status === 'present' && bayStudents.some(s => s.id === a.student_id) && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
-  const bayRunrate = packages.filter(p => p.classes_remaining > 0 && bayStudents.some(s => s.id === p.student_id)).reduce((sum, p) => sum + getPackagePrice(p), 0);
+  const bayRunrate = getRunRateForStudents(bayStudents);
   const bayUnbilled = bayStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
   const newBayThisMonth = bayStudents.filter(s => s.join_date && new Date(s.join_date).toISOString().slice(0, 7) === currentMonthStr).length;
   const bayCoaches = new Set(bayStudents.filter(s => s.coach_id).map(s => s.coach_id)).size;
@@ -870,7 +911,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
   }).length;
   const activeRateJlt = jltStudents.length > 0 ? Math.round((activeJlt / jltStudents.length) * 100) : 0;
   const jltClasses30d = attendance.filter(a => a.status === 'present' && jltStudents.some(s => s.id === a.student_id) && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
-  const jltRunrate = packages.filter(p => p.classes_remaining > 0 && jltStudents.some(s => s.id === p.student_id)).reduce((sum, p) => sum + getPackagePrice(p), 0);
+  const jltRunrate = getRunRateForStudents(jltStudents);
   const jltUnbilled = jltStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
   const newJltThisMonth = jltStudents.filter(s => s.join_date && new Date(s.join_date).toISOString().slice(0, 7) === currentMonthStr).length;
   const jltCoaches = new Set(jltStudents.filter(s => s.coach_id).map(s => s.coach_id)).size;
