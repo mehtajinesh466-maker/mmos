@@ -5,6 +5,7 @@ import { db } from '../lib/db';
 import type { User, Student, Package, Coach, Centre } from '../lib/db';
 import { updateCoachDB, deleteCoachDB, syncDatabaseToClient } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
+import { getPackageRate } from '../lib/segmentRules';
 interface CoachRegisterProps {
   currentUser: User;
   activeCentre: string;
@@ -32,11 +33,12 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
   const [selectedCoach, setSelectedCoach] = useState<any | null>(null);
   const [editName, setEditName] = useState('');
   const [editCentreId, setEditCentreId] = useState('');
+  const [editCentreIds, setEditCentreIds] = useState<string[]>([]);
 
   const handleSaveCoach = async () => {
     if (!selectedCoach) return;
     try {
-      await updateCoachDB(selectedCoach.id, editName, editCentreId);
+      await updateCoachDB(selectedCoach.id, editName, editCentreId, editCentreIds);
       const fresh = await syncDatabaseToClient();
       db.syncFromNeon(fresh);
       refresh();
@@ -114,13 +116,15 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
       const overdueValue = (s.flags as any)?.unpaid_value || 0;
 
       // Rate per class
+      const invoices = db.get<any>('invoices');
+      const tiers = db.get<any>('tiers');
       let rate = 100;
       if (overdueClasses > 0 && overdueValue > 0) {
         rate = Math.round(overdueValue / overdueClasses);
       } else {
         const studentPkgs = packages.filter(p => p.student_id === s.id);
         const activePkg = studentPkgs.find(p => p.classes_remaining > 0) || studentPkgs[0] || null;
-        rate = activePkg?.classes_total ? Math.round(1200 / activePkg.classes_total) : 100;
+        rate = activePkg ? getPackageRate(activePkg, invoices, tiers) : 125;
       }
 
       // Engagement status
@@ -181,6 +185,7 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
         id: c.id,
         coachName: c.name,
         centreName: customCentre,
+        centre_ids: (c as any).centre_ids || [],
         studentsCount,
         engagedCount,
         engagementPct,
@@ -411,6 +416,7 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
                           setSelectedCoach(row);
                           setEditName(row.coachName);
                           setEditCentreId(centres.find(c => c.name === row.centreName)?.id || '');
+                          setEditCentreIds(row.centre_ids || []);
                         }
                       }}
                       className="border-b border-line hover:bg-canvas/40 transition-colors font-medium cursor-pointer"
@@ -526,6 +532,32 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
                 >
                   {centres.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-ink">Assigned Centres</label>
+                <div className="space-y-1.5 border border-line rounded-lg p-3 bg-canvas/30 max-h-40 overflow-y-auto">
+                  {centres.map(c => {
+                    const isChecked = editCentreIds.includes(c.id);
+                    return (
+                      <label key={c.id} className="flex items-center gap-2 text-xs text-ink cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={e => {
+                            if (e.target.checked) {
+                              setEditCentreIds(prev => [...prev, c.id]);
+                            } else {
+                              setEditCentreIds(prev => prev.filter(id => id !== c.id));
+                            }
+                          }}
+                          className="rounded border-line text-forest"
+                        />
+                        {c.name}
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="pt-8">

@@ -25,6 +25,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
   
   // Local markings state to dynamically update counters
   const [markings, setMarkings] = useState<{ [key: string]: 'present' | 'absent' | 'makeup' | null }>({});
+  const [billedHours, setBilledHours] = useState<Record<string, number>>({});
   const [classTopic, setClassTopic] = useState<string>('Opening principles');
   const [isOnline, setIsOnline] = useState<boolean>(db.isOnline());
   const [saveStatus, setSaveStatus] = useState<string>('');
@@ -58,17 +59,20 @@ export const Attendance: React.FC<AttendanceProps> = ({
     return () => window.removeEventListener('db-synced', loadData);
   }, [selectedCoachId]);
 
-  // Load markings from database attendance records for the selected date
+  // Load markings and billed hours from database attendance records for the selected date
   useEffect(() => {
     const initialMarkings: { [key: string]: 'present' | 'absent' | 'makeup' | null } = {};
+    const initialBilledHours: Record<string, number> = {};
     attendance.forEach(a => {
-      // a.date can be a ISO string like 2026-07-23T00:00:00.000Z or date only 2026-07-23
       const recordDate = typeof a.date === 'string' ? a.date.split('T')[0] : '';
       if (recordDate === selectedDate && a.slot_id && a.student_id) {
-        initialMarkings[`${a.slot_id}-${a.student_id}`] = a.status as 'present' | 'absent' | 'makeup';
+        const key = `${a.slot_id}-${a.student_id}`;
+        initialMarkings[key] = a.status as 'present' | 'absent' | 'makeup';
+        initialBilledHours[key] = (a as any).duration ?? 2;
       }
     });
     setMarkings(initialMarkings);
+    setBilledHours(initialBilledHours);
   }, [selectedDate, attendance]);
 
   useEffect(() => {
@@ -202,6 +206,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
         const status = markings[key];
         if (!status) continue;
 
+        const duration = billedHours[key] ?? 2;
         const record: AttendanceType = {
           id: `att-${slot.id}-${studentId}-${selectedDate}`,
           student_id: studentId,
@@ -211,12 +216,13 @@ export const Attendance: React.FC<AttendanceProps> = ({
           status: status,
           topic: classTopic,
           note: '',
+          duration: duration,
           created_at: new Date().toISOString(),
         };
 
         if (isOnline) {
           db.processAttendanceRecord(record);
-          await logAttendance(record.student_id, record.status, record.coach_id, record.slot_id || undefined);
+          await logAttendance(record.student_id, record.status, record.coach_id, record.slot_id || undefined, duration);
           savedCount++;
         } else {
           db.addToOfflineQueue(record);
@@ -405,28 +411,40 @@ export const Attendance: React.FC<AttendanceProps> = ({
                                 </div>
                               </div>
 
-                              <div className="flex gap-1.5">
-                                {(['present', 'absent', 'makeup'] as const).map(st => {
-                                  const isMarked = currentStatus === st;
-                                  const colors = {
-                                    present: 'bg-emerald-700 text-white border-emerald-700',
-                                    absent: 'bg-red-700 text-white border-red-700',
-                                    makeup: 'bg-amber-600 text-white border-amber-600'
-                                  };
-                                  return (
-                                    <button
-                                      key={st}
-                                      onClick={() => handleMarkStatus(slot.id, student.id, st)}
-                                      className={`px-3 py-1 text-[10px] font-semibold rounded-lg border transition-all cursor-pointer ${
-                                        isMarked 
-                                          ? colors[st] 
-                                          : 'bg-white border-line text-ink hover:bg-canvas'
-                                      }`}
-                                    >
-                                      {st.charAt(0).toUpperCase() + st.slice(1)}
-                                    </button>
-                                  );
-                                })}
+                              <div className="flex items-center gap-2.5">
+                                <div className="flex gap-1.5">
+                                  {(['present', 'absent', 'makeup'] as const).map(st => {
+                                    const isMarked = currentStatus === st;
+                                    const colors = {
+                                      present: 'bg-emerald-700 text-white border-emerald-700',
+                                      absent: 'bg-red-700 text-white border-red-700',
+                                      makeup: 'bg-amber-600 text-white border-amber-600'
+                                    };
+                                    return (
+                                      <button
+                                        key={st}
+                                        onClick={() => handleMarkStatus(slot.id, student.id, st)}
+                                        className={`px-3 py-1 text-[10px] font-semibold rounded-lg border transition-all cursor-pointer ${
+                                          isMarked 
+                                            ? colors[st] 
+                                            : 'bg-white border-line text-ink hover:bg-canvas'
+                                        }`}
+                                      >
+                                        {st.charAt(0).toUpperCase() + st.slice(1)}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                {(currentUser.role === 'owner' || currentUser.role === 'front_desk') && (currentStatus === 'present' || currentStatus === 'makeup') && (
+                                  <select
+                                    value={billedHours[key] ?? 2}
+                                    onChange={e => setBilledHours(prev => ({ ...prev, [key]: Number(e.target.value) }))}
+                                    className="bg-white border border-line rounded px-1.5 py-0.5 text-[9px] text-ink outline-none cursor-pointer focus:border-forest"
+                                  >
+                                    <option value={1}>1 Class (Camp)</option>
+                                    <option value={2}>2 Classes (Regular)</option>
+                                  </select>
+                                )}
                               </div>
 
                             </div>

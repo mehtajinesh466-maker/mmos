@@ -64,7 +64,7 @@ export async function updateUserCredentialsDB(userId: string, data: { name?: str
 // Centres & Coaches
 // -------------------------------------------------------------
 
-export async function addCoachDB(name: string, centreId: string) {
+export async function addCoachDB(name: string, centreId: string, centreIds: string[] = []) {
   const session = await verifySession();
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
@@ -88,6 +88,7 @@ export async function addCoachDB(name: string, centreId: string) {
     data: {
       user_id: user.id,
       centre_id: centreId || null,
+      centre_ids: centreIds,
       active: true,
     }
   });
@@ -95,7 +96,7 @@ export async function addCoachDB(name: string, centreId: string) {
   return { ...coach, email, generatedPassword: rawPassword };
 }
 
-export async function updateCoachDB(coachId: string, name: string, centreId: string) {
+export async function updateCoachDB(coachId: string, name: string, centreId: string, centreIds: string[] = []) {
   const session = await verifySession();
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
@@ -106,7 +107,10 @@ export async function updateCoachDB(coachId: string, name: string, centreId: str
   }
   return await prisma.coach.update({
     where: { id: coachId },
-    data: { centre_id: centreId || null }
+    data: { 
+      centre_id: centreId || null,
+      centre_ids: centreIds
+    }
   });
 }
 
@@ -464,9 +468,7 @@ export async function syncDatabaseToClient() {
       notifications,
       tournamentReports
     ] = await Promise.all([
-      coachRecord.centre_id 
-        ? prisma.centre.findMany({ where: { id: coachRecord.centre_id } })
-        : Promise.resolve([]),
+      prisma.centre.findMany({ where: { status: 'active' } }),
       prisma.user.findMany({
         where: { id: session.user.id }
       }),
@@ -684,7 +686,6 @@ export async function updateEnquiryStageDB(id: string, stage: string) {
     data: { stage: stage.toLowerCase().replace(' ', '_') }
   });
 }
-
 async function updateStudentFlags(studentId: string, pkgId?: string, updatedRemaining?: number) {
   const allPkgs = await prisma.package.findMany({
     where: { student_id: studentId, frozen: false }
@@ -694,6 +695,38 @@ async function updateStudentFlags(studentId: string, pkgId?: string, updatedRema
     return sum + rem;
   }, 0);
 
+  // Sum up duration for present/makeup attendance
+  const attendedSum = await prisma.attendance.aggregate({
+    _sum: { duration: true },
+    where: {
+      student_id: studentId,
+      status: { in: ['present', 'makeup'] }
+    }
+  });
+  const totalAttended = attendedSum._sum.duration || 0;
+
+  // Sum total classes purchased
+  const totalPurchased = allPkgs.reduce((sum, p) => sum + p.classes_total, 0);
+  const unpaidClasses = Math.max(0, totalAttended - totalPurchased);
+
+  // Compute student rate
+  let studentRate = 125;
+  if (allPkgs.length > 0) {
+    const sorted = [...allPkgs].sort((a, b) => new Date(b.start_date || 0).getTime() - new Date(a.start_date || 0).getTime());
+    const latestPkg = sorted[0];
+    const invoice = await prisma.invoice.findFirst({ where: { package_id: latestPkg.id } });
+    if (invoice && invoice.amount) {
+      studentRate = Math.round(Number(invoice.amount) / latestPkg.classes_total);
+    } else if (latestPkg.tier_id) {
+      const tier = await prisma.tier.findUnique({ where: { id: latestPkg.tier_id } });
+      if (tier && tier.price) {
+        const discount = latestPkg.discount_pct ? Number(latestPkg.discount_pct) : 0;
+        studentRate = Math.round(Number(tier.price) * (1 - discount / 100) / latestPkg.classes_total);
+      }
+    }
+  }
+  const unpaidValue = unpaidClasses * studentRate;
+
   const student = await prisma.student.findUnique({ where: { id: studentId } });
   if (student) {
     const flags = typeof student.flags === 'object' && student.flags ? { ...(student.flags as any) } : {};
@@ -702,6 +735,15 @@ async function updateStudentFlags(studentId: string, pkgId?: string, updatedRema
     } else {
       delete flags.low_package;
     }
+
+    if (unpaidClasses > 0) {
+      flags.unpaid_classes = unpaidClasses;
+      flags.unpaid_value = unpaidValue;
+    } else {
+      delete flags.unpaid_classes;
+      delete flags.unpaid_value;
+    }
+
     await prisma.student.update({
       where: { id: studentId },
       data: { flags }
@@ -709,7 +751,7 @@ async function updateStudentFlags(studentId: string, pkgId?: string, updatedRema
   }
 }
 
-export async function logAttendance(studentId: string, status: string | null, coachId: string, slotId?: string) {
+export async function logAttendance(studentId: string, status: string | null, coachId: string, slotId?: string, duration: number = 2) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
@@ -750,7 +792,7 @@ export async function logAttendance(studentId: string, status: string | null, co
         if (pkgToRestore) {
           const updatedPkg = await prisma.package.update({
             where: { id: pkgToRestore.id },
-            data: { classes_remaining: pkgToRestore.classes_remaining + 1 }
+            data: { classes_remaining: pkgToRestore.classes_remaining + existing.duration }
           });
           await updateStudentFlags(studentId, pkgToRestore.id, updatedPkg.classes_remaining);
         }
@@ -765,9 +807,12 @@ export async function logAttendance(studentId: string, status: string | null, co
     }
 
     const oldStatus = existing.status;
+    const oldDuration = existing.duration;
+    
+    // Update attendance record status and duration
     const updated = await prisma.attendance.update({
       where: { id: existing.id },
-      data: { status }
+      data: { status, duration }
     });
 
     if (oldStatus === 'present' && status !== 'present') {
@@ -780,7 +825,7 @@ export async function logAttendance(studentId: string, status: string | null, co
       if (pkgToRestore) {
         const updatedPkg = await prisma.package.update({
           where: { id: pkgToRestore.id },
-          data: { classes_remaining: pkgToRestore.classes_remaining + 1 }
+          data: { classes_remaining: pkgToRestore.classes_remaining + oldDuration }
         });
         await updateStudentFlags(studentId, pkgToRestore.id, updatedPkg.classes_remaining);
       }
@@ -797,7 +842,21 @@ export async function logAttendance(studentId: string, status: string | null, co
       if (pkg) {
         const updatedPkg = await prisma.package.update({
           where: { id: pkg.id },
-          data: { classes_remaining: pkg.classes_remaining - 1 }
+          data: { classes_remaining: pkg.classes_remaining - duration }
+        });
+        await updateStudentFlags(studentId, pkg.id, updatedPkg.classes_remaining);
+      }
+    } else if (oldStatus === 'present' && status === 'present' && oldDuration !== duration) {
+      // Adjust class deduction difference
+      const pkg = await prisma.package.findFirst({
+        where: { student_id: studentId, frozen: false },
+        orderBy: { start_date: 'asc' }
+      });
+      if (pkg) {
+        const diff = duration - oldDuration; // e.g. from 2 to 1 (diff = -1) or 1 to 2 (diff = 1)
+        const updatedPkg = await prisma.package.update({
+          where: { id: pkg.id },
+          data: { classes_remaining: pkg.classes_remaining - diff }
         });
         await updateStudentFlags(studentId, pkg.id, updatedPkg.classes_remaining);
       }
@@ -814,7 +873,8 @@ export async function logAttendance(studentId: string, status: string | null, co
       status: status,
       coach_id: coachId,
       slot_id: slotId || null,
-      date: new Date()
+      date: new Date(),
+      duration: duration
     }
   });
 
@@ -830,7 +890,7 @@ export async function logAttendance(studentId: string, status: string | null, co
     if (pkg) {
       const updatedPkg = await prisma.package.update({
         where: { id: pkg.id },
-        data: { classes_remaining: pkg.classes_remaining - 1 }
+        data: { classes_remaining: pkg.classes_remaining - duration }
       });
       await updateStudentFlags(studentId, pkg.id, updatedPkg.classes_remaining);
     }
@@ -838,7 +898,6 @@ export async function logAttendance(studentId: string, status: string | null, co
 
   return newRecord;
 }
-
 export async function saveStudentDB(studentData: any) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'front_desk' && session.user.role !== 'coach') {
@@ -873,7 +932,15 @@ export async function saveStudentDB(studentData: any) {
         pace_status: studentData.pace_status,
         pace_reason: studentData.pace_reason,
         flags: studentData.flags,
-        last_attended: studentData.last_attended ? new Date(studentData.last_attended) : null
+        last_attended: studentData.last_attended ? new Date(studentData.last_attended) : null,
+        fide_country: studentData.fide_country || null,
+        parent_name: studentData.parent_name || null,
+        alternate_centre: studentData.alternate_centre || null,
+        resident_status: studentData.resident_status || null,
+        address: studentData.address || null,
+        category: studentData.category || null,
+        notes: studentData.notes || null,
+        referral_source: studentData.referral_source || null
       }
     });
   } else {
@@ -895,7 +962,15 @@ export async function saveStudentDB(studentData: any) {
         flags: studentData.flags,
         centre_id: studentData.centre_id,
         coach_id: studentData.coach_id || null,
-        family_id: studentData.family_id
+        family_id: studentData.family_id,
+        fide_country: studentData.fide_country || null,
+        parent_name: studentData.parent_name || null,
+        alternate_centre: studentData.alternate_centre || null,
+        resident_status: studentData.resident_status || null,
+        address: studentData.address || null,
+        category: studentData.category || null,
+        notes: studentData.notes || null,
+        referral_source: studentData.referral_source || null
       }
     });
   }
@@ -931,9 +1006,7 @@ export async function saveProgressLogDB(logData: any) {
     if (!coachRecord || coachRecord.id !== logData.coach_id) {
       throw new Error("Unauthorized");
     }
-    if (student.centre_id !== coachRecord.centre_id) {
-      throw new Error("Unauthorized");
-    }
+    // Allow coach to save progress logs for any student they teach
   }
   await prisma.progressLog.create({
     data: {

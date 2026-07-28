@@ -20,6 +20,7 @@ export interface Coach {
   id: string;
   user_id: string;
   centre_id: string;
+  centre_ids?: string[];
   title?: string;
   active: boolean;
   name: string; // denormalized for easy rendering
@@ -40,6 +41,14 @@ export interface Student {
   chess_com_username?: string;
   lichess_username?: string;
   fide_rating?: number;
+  fide_country?: string | null;
+  parent_name?: string | null;
+  alternate_centre?: string | null;
+  resident_status?: string | null;
+  address?: string | null;
+  category?: string | null;
+  notes?: string | null;
+  referral_source?: string | null;
   photo_url?: string;
   join_date: string;
   last_attended: string | null;
@@ -100,6 +109,7 @@ export interface Attendance {
   status: 'present' | 'absent' | 'makeup';
   topic?: string;
   note?: string;
+  duration: number;
   created_at: string;
   synced?: boolean; // PWA queue marker
 }

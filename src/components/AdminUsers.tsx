@@ -38,6 +38,7 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
   // Add coach form
   const [newCoachName, setNewCoachName] = useState('');
   const [newCoachCentre, setNewCoachCentre] = useState('');
+  const [newCoachCentres, setNewCoachCentres] = useState<string[]>([]);
 
   // Bulk reassign
   const [fromCoachId, setFromCoachId] = useState('');
@@ -116,10 +117,11 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
     if (!newCoachName.trim()) return;
     setIsSaving(true);
     try {
-      const res = await addCoachDB(newCoachName.trim(), newCoachCentre);
+      const res = await addCoachDB(newCoachName.trim(), newCoachCentre, newCoachCentres);
       const fresh = await syncDatabaseToClient();
       db.syncFromNeon(fresh);
       setNewCoachName('');
+      setNewCoachCentres([]);
       toast(`✓ Coach added! Login Email: ${res.email} | Password: ${res.generatedPassword}`, 10000);
     } catch (err: any) {
       toast('❌ ' + err.message);
@@ -296,6 +298,31 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
                   >
                     {centres.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-bold text-muted-custom uppercase tracking-wider">Assigned Centres</label>
+                  <div className="space-y-1.5 border border-line rounded-lg p-3 bg-canvas/30 max-h-40 overflow-y-auto">
+                    {centres.map(c => {
+                      const isChecked = newCoachCentres.includes(c.id);
+                      return (
+                        <label key={c.id} className="flex items-center gap-2 text-xs text-ink cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={e => {
+                              if (e.target.checked) {
+                                setNewCoachCentres(prev => [...prev, c.id]);
+                              } else {
+                                setNewCoachCentres(prev => prev.filter(id => id !== c.id));
+                              }
+                            }}
+                            className="rounded border-line text-forest"
+                          />
+                          {c.name}
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
                 <button
                   type="submit"

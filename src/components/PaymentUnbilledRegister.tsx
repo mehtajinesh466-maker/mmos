@@ -5,7 +5,7 @@ import { db } from '../lib/db';
 import type { User, Student, Package, Coach, Centre } from '../lib/db';
 import { updateInvoiceDB, deleteInvoiceDB, syncDatabaseToClient } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
-import { computeStudentStatus, getStatusBadgeClasses } from '../lib/segmentRules';
+import { computeStudentStatus, getStatusBadgeClasses, getPackageRate } from '../lib/segmentRules';
 interface PaymentUnbilledRegisterProps {
   currentUser: User;
   activeCentre: string;
@@ -114,13 +114,14 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
       const overdueValue = (s.flags as any)?.unpaid_value || 0;
 
       // Rate per class: if overdueValue and overdueClasses exist, compute. Else fallback.
+      const tiers = db.get<any>('tiers');
       let rate = 100;
       if (overdueClasses > 0 && overdueValue > 0) {
         rate = Math.round(overdueValue / overdueClasses);
       } else {
         const studentPkgs = packages.filter(p => p.student_id === s.id);
         const activePkg = studentPkgs.find(p => p.classes_remaining > 0) || studentPkgs[0] || null;
-        rate = activePkg?.classes_total ? Math.round(1200 / activePkg.classes_total) : 100;
+        rate = activePkg ? getPackageRate(activePkg, invoices, tiers) : 125;
       }
 
       // Total Paid: paid invoices sum + fallback based on completed package classes
@@ -131,7 +132,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
       const studentPkgs = packages.filter(p => p.student_id === s.id);
       if (totalPaid === 0 && studentPkgs.length > 0) {
         studentPkgs.forEach(pkg => {
-          const pkgRate = pkg.classes_total ? Math.round(1200 / pkg.classes_total) : 100;
+          const pkgRate = getPackageRate(pkg, invoices, tiers);
           const completed = pkg.classes_total - pkg.classes_remaining;
           totalPaid += completed * pkgRate;
         });
@@ -165,7 +166,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
       return {
         id: s.id,
         studentName: s.name,
-        displayId: s.fide_id ? s.fide_id : '—',
+        displayId,
         centreName,
         coachName,
         rate,

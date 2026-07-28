@@ -20,6 +20,21 @@ export interface StudentStatusResult {
   overdueValue: number;
 }
 
+export function getPackageRate(pkg: any, invoices: any[] = [], tiers: any[] = []): number {
+  if (!pkg || pkg.classes_total <= 0) return 125;
+  const invoice = invoices.find(inv => inv.package_id === pkg.id);
+  if (invoice && invoice.amount) {
+    return Math.round(Number(invoice.amount) / pkg.classes_total);
+  }
+  const tier = tiers.find(t => t.id === pkg.tier_id);
+  if (tier && tier.price) {
+    const discount = pkg.discount_pct ? Number(pkg.discount_pct) : 0;
+    const netPrice = Number(tier.price) * (1 - discount / 100);
+    return Math.round(netPrice / pkg.classes_total);
+  }
+  return 125;
+}
+
 export function computeStudentStatus(
   student: any,
   packages: any[] = [],
@@ -48,38 +63,36 @@ export function computeStudentStatus(
     }
   }
 
-  // Calculate most recent price-per-class
+  // Calculate most recent price-per-class using our helper
   let pricePerClass = 100; // default median
   if (studentPkgs.length > 0) {
     const sortedPkgs = [...studentPkgs].sort((a, b) => new Date(b.start_date || 0).getTime() - new Date(a.start_date || 0).getTime());
-    for (const pkg of sortedPkgs) {
-      if (pkg.classes_total > 0) {
-        let price = 1000;
-        if (pkg.tier_id) {
-          const tiers = typeof window !== 'undefined' ? (JSON.parse(localStorage.getItem('mmos_tiers') || '[]')) : [];
-          const tier = tiers.find((t: any) => t.id === pkg.tier_id);
-          if (tier && tier.price) price = Number(tier.price);
-        }
-        const discount = pkg.discount_pct ? Number(pkg.discount_pct) : 0;
-        const netPrice = price * (1 - discount / 100);
-        pricePerClass = Math.round(netPrice / pkg.classes_total);
-        break;
-      }
+    const latestPkg = sortedPkgs[0];
+    
+    // Read tiers from localStorage if client-side
+    let tiers: any[] = [];
+    if (typeof window !== 'undefined') {
+      try {
+        tiers = JSON.parse(localStorage.getItem('mmos_tiers') || '[]');
+      } catch (_) {}
     }
+    pricePerClass = getPackageRate(latestPkg, invoices, tiers);
   }
 
   // Overdue Value calculation
   const overdueValue = (student.flags as any)?.unpaid_value ?? (overdueClasses * pricePerClass);
 
   // Status tagging rules:
-  // HOT     = Overdue > 0, OR 0 active package, OR <= 2 classes left
+  // HOT     = Overdue > 0, OR 0 active package, OR <= 2 classes left (requires active status and attended <= 90 days ago)
   // WARM    = 3-6 classes left, OR no class in 30-60d
   // COLD    = no class in 60d+
   // HEALTHY = paid up, 7+ classes left, attending (< 30d)
 
   let segment: 'HOT' | 'WARM' | 'COLD' | 'HEALTHY' = 'HEALTHY';
 
-  if (overdueClasses > 0 || activePkgs.length === 0 || classesLeft <= 2) {
+  if (student.status !== 'active' || student.status === 'left' || daysSinceLastClass > 90) {
+    segment = 'COLD';
+  } else if (overdueClasses > 0 || activePkgs.length === 0 || classesLeft <= 2) {
     segment = 'HOT';
   } else if (daysSinceLastClass >= 60) {
     segment = 'COLD';

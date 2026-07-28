@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Chart, registerables } from 'chart.js';
 import { db } from '../lib/db';
+import { getPackageRate } from '../lib/segmentRules';
 
 Chart.register(...registerables);
 
@@ -608,10 +609,12 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
         backgroundColors = '#286957';
       } else if (diceBy === 'By Rate band') {
         const counts = { '< 100 AED': 0, '100 - 150 AED': 0, '> 150 AED': 0 };
+        const invoices = db.get<any>('invoices');
+        const tiers = db.get<any>('tiers');
         filteredStudents.forEach(s => {
           const pkgs = packages.filter(p => p.student_id === s.id && !p.frozen);
           const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
-          const rate = activePkg?.classes_total ? Math.round(1200 / (activePkg.classes_total || 12)) : 100;
+          const rate = activePkg ? getPackageRate(activePkg, invoices, tiers) : 125;
           if (rate < 100) counts['< 100 AED']++;
           else if (rate <= 150) counts['100 - 150 AED']++;
           else counts['> 150 AED']++;

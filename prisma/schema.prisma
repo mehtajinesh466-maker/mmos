@@ -40,6 +40,7 @@ model Coach {
   user_id      String?        @db.Uuid
   centre_id    String?        @db.Uuid
   title        String?
+  centre_ids   Json?          @default("[]")
   active       Boolean        @default(true)
   attendance   Attendance[]
   centre       Centre?        @relation(fields: [centre_id], references: [id])
@@ -84,6 +85,14 @@ model Student {
   chess_com_username String?
   lichess_username   String?
   fide_rating        Int?
+  fide_country       String?
+  parent_name        String?
+  alternate_centre   String?
+  resident_status    String?
+  address            String?
+  category           String?
+  notes              String?
+  referral_source    String?
   attendance         Attendance[]
   enrollments        Enrollment[]
   fideRatings        FideRating[]
@@ -167,6 +176,7 @@ model Attendance {
   status     String
   topic      String?
   note       String?
+  duration   Int           @default(2)
   created_at DateTime?     @default(now()) @db.Timestamptz(6)
   coach      Coach         @relation(fields: [coach_id], references: [id])
   slot       ScheduleSlot? @relation(fields: [slot_id], references: [id])

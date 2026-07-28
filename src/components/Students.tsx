@@ -4,7 +4,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/db';
 import type { User, Student, Package, Coach, Centre } from '../lib/db';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
-import { computeStudentStatus, getStatusBadgeClasses } from '../lib/segmentRules';
+import { computeStudentStatus, getStatusBadgeClasses, getPackageRate } from '../lib/segmentRules';
+import { saveStudentDB, deleteStudentDB, syncDatabaseToClient } from '../app/actions';
 
 interface StudentsProps {
   currentUser: User;
@@ -45,6 +46,16 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   const [editFideRating, setEditFideRating] = useState('');
   const [editCoachId, setEditCoachId] = useState('');
   const [editCentreId, setEditCentreId] = useState('');
+  
+  // Extra fields
+  const [editFideCountry, setEditFideCountry] = useState('');
+  const [editParentName, setEditParentName] = useState('');
+  const [editAlternateCentre, setEditAlternateCentre] = useState('');
+  const [editResidentStatus, setEditResidentStatus] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editReferralSource, setEditReferralSource] = useState('');
 
   useEffect(() => {
     if (selected) {
@@ -60,6 +71,15 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
       setEditFideRating(selected.fide_rating ? String(selected.fide_rating) : '');
       setEditCoachId(selected.coach_id || '');
       setEditCentreId(selected.centre_id || '');
+      
+      setEditFideCountry(selected.fide_country || '');
+      setEditParentName(selected.parent_name || '');
+      setEditAlternateCentre(selected.alternate_centre || '');
+      setEditResidentStatus(selected.resident_status || '');
+      setEditAddress(selected.address || '');
+      setEditCategory(selected.category || '');
+      setEditNotes(selected.notes || '');
+      setEditReferralSource(selected.referral_source || '');
       setIsEditing(false);
     }
   }, [selected]);
@@ -80,7 +100,15 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
         lichess_username: editLichess || null,
         fide_rating: editFideRating ? Number(editFideRating) : null,
         coach_id: editCoachId || null,
-        centre_id: editCentreId
+        centre_id: editCentreId,
+        fide_country: editFideCountry || null,
+        parent_name: editParentName || null,
+        alternate_centre: editAlternateCentre || null,
+        resident_status: editResidentStatus || null,
+        address: editAddress || null,
+        category: editCategory || null,
+        notes: editNotes || null,
+        referral_source: editReferralSource || null
       });
       const fresh = await syncDatabaseToClient();
       db.syncFromNeon(fresh);
@@ -157,12 +185,14 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
       let cls90d = 0;
       studentAtts.forEach(a => {
         const diffDays = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-        if (diffDays >= 0 && diffDays <= 30) cls30d++;
-        if (diffDays >= 0 && diffDays <= 90) cls90d++;
+        const dur = a.duration ?? 2;
+        if (diffDays >= 0 && diffDays <= 30) cls30d += dur;
+        if (diffDays >= 0 && diffDays <= 90) cls90d += dur;
       });
 
       // Rate per class
-      const rate         = activePkg?.classes_total ? Math.round(1200 / (activePkg.classes_total || 12)) : 100;
+      const tiers        = db.get<Tier>('tiers');
+      const rate         = activePkg ? getPackageRate(activePkg, invoices, tiers) : 125;
       const paidToDate   = completed * rate;
 
       // Segment
@@ -736,6 +766,93 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                       className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
                     />
                   </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Parent Name</label>
+                    <input 
+                      type="text" 
+                      value={editParentName}
+                      onChange={e => setEditParentName(e.target.value)}
+                      placeholder="Parent's Name"
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">FIDE Country</label>
+                    <input 
+                      type="text" 
+                      value={editFideCountry}
+                      onChange={e => setEditFideCountry(e.target.value)}
+                      placeholder="e.g. UAE"
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Alternate Centre</label>
+                    <input 
+                      type="text" 
+                      value={editAlternateCentre}
+                      onChange={e => setEditAlternateCentre(e.target.value)}
+                      placeholder="Alternate Centre"
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Resident Status</label>
+                    <input 
+                      type="text" 
+                      value={editResidentStatus}
+                      onChange={e => setEditResidentStatus(e.target.value)}
+                      placeholder="e.g. Yes/No"
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Student Category</label>
+                    <input 
+                      type="text" 
+                      value={editCategory}
+                      onChange={e => setEditCategory(e.target.value)}
+                      placeholder="e.g. Early starts"
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-ink">Referral Source</label>
+                    <input 
+                      type="text" 
+                      value={editReferralSource}
+                      onChange={e => setEditReferralSource(e.target.value)}
+                      placeholder="e.g. Recommendation"
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 col-span-2">
+                    <label className="text-xs font-bold text-ink">Address</label>
+                    <input 
+                      type="text" 
+                      value={editAddress}
+                      onChange={e => setEditAddress(e.target.value)}
+                      placeholder="Home Address"
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 col-span-2">
+                    <label className="text-xs font-bold text-ink">Notes</label>
+                    <textarea 
+                      value={editNotes}
+                      onChange={e => setEditNotes(e.target.value)}
+                      placeholder="Additional Notes..."
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest min-h-[60px]"
+                    />
+                  </div>
                 </>
               ) : (
                 <div className="space-y-4">
@@ -777,6 +894,38 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                     <div>
                       <span className="text-muted-custom block uppercase tracking-wider text-[9px]">FIDE Rating</span>
                       <b className="text-ink">{selected.fide_rating || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Parent Name</span>
+                      <b className="text-ink">{selected.parent_name || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">FIDE Country</span>
+                      <b className="text-ink">{selected.fide_country || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Alternate Centre</span>
+                      <b className="text-ink">{selected.alternate_centre || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Resident Status</span>
+                      <b className="text-ink">{selected.resident_status || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Student Category</span>
+                      <b className="text-ink">{selected.category || '—'}</b>
+                    </div>
+                    <div>
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Referral Source</span>
+                      <b className="text-ink">{selected.referral_source || '—'}</b>
+                    </div>
+                    <div className="col-span-2 border-t border-line/50 pt-2 mt-1">
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Address</span>
+                      <b className="text-ink">{selected.address || '—'}</b>
+                    </div>
+                    <div className="col-span-2 border-t border-line/50 pt-2 mt-1">
+                      <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Notes</span>
+                      <p className="text-ink whitespace-pre-wrap">{selected.notes || '—'}</p>
                     </div>
                     <div>
                       <span className="text-muted-custom block uppercase tracking-wider text-[9px]">Chess.com</span>
