@@ -4,6 +4,7 @@ import prisma from '../lib/prisma';
 import bcrypt from 'bcrypt';
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../lib/auth";
+import { unstable_noStore as noStore } from 'next/cache';
 
 async function verifySession() {
   const session = await getServerSession(authOptions);
@@ -259,6 +260,7 @@ export async function logProgress(studentId: string, coachId: string, focusArea:
 
 
 export async function syncDatabaseToClient() {
+  noStore();
   const session = await verifySession();
   const role = session.user.role;
   const userCentreId = session.user.centre_id;
