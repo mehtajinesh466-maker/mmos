@@ -70,17 +70,19 @@ export async function runSeed() {
   const packageFile = path.join(publicDir, 'All Student Packages-8.xlsx')
   const attendanceFile = path.join(publicDir, 'All Attendance Records-5.xlsx')
 
-  const hasFiles = fs.existsSync(studentFile) && fs.existsSync(packageFile) && fs.existsSync(attendanceFile)
+  const hasFiles = fs.existsSync(studentFile) && fs.existsSync(attendanceFile)
 
   if (hasFiles) {
     console.log('Found Excel files. Starting high-performance Zoho Import...')
     
     // Read files safely using buffer to avoid sharing/lock issues on Windows
-    const studentWorkbook = XLSX.read(fs.readFileSync(studentFile), { type: 'buffer' })
-    const studentData: any[] = XLSX.utils.sheet_to_json(studentWorkbook.Sheets[studentWorkbook.SheetNames[0]])
+    const studentRosterWorkbook = XLSX.read(fs.readFileSync(studentFile), { type: 'buffer' })
+    const studentRosterData: any[] = XLSX.utils.sheet_to_json(studentRosterWorkbook.Sheets[studentRosterWorkbook.SheetNames[0]])
 
-    const packageWorkbook = XLSX.read(fs.readFileSync(packageFile), { type: 'buffer' })
-    const packageData: any[] = XLSX.utils.sheet_to_json(packageWorkbook.Sheets[packageWorkbook.SheetNames[0]])
+    const overdueFile = path.join(publicDir, 'The best overdue list_Master_Moves_Overdue_Report_Jul2026_1.xlsx')
+    const overdueWorkbook = XLSX.read(fs.readFileSync(overdueFile), { type: 'buffer' })
+    const ledgerData: any[] = XLSX.utils.sheet_to_json(overdueWorkbook.Sheets['Full Ledger'], { range: 3 })
+    const timelineData: any[] = XLSX.utils.sheet_to_json(overdueWorkbook.Sheets['Package Timeline'], { range: 3 })
 
     const attendanceWorkbook = XLSX.read(fs.readFileSync(attendanceFile), { type: 'buffer' })
     const attendanceData: any[] = XLSX.utils.sheet_to_json(attendanceWorkbook.Sheets[attendanceWorkbook.SheetNames[0]])
@@ -100,9 +102,9 @@ export async function runSeed() {
       ]
     })
 
-    const getCentreId = (name: string) => {
+    const getCentreId = (name: any) => {
       if (!name) return centreIds['Bay Avenue']
-      const clean = name.trim().toLowerCase()
+      const clean = String(name).trim().toLowerCase()
       if (clean.includes('jlt')) return centreIds['JLT']
       if (clean.includes('bay') || clean.includes('mall')) return centreIds['Bay Avenue']
       return centreIds['Bay Avenue']
@@ -118,11 +120,11 @@ export async function runSeed() {
       ]
     })
 
-    // Extract unique coaches
+    // Extract unique coaches from Full Ledger and Attendance
     const uniqueCoachNames = new Set<string>()
-    studentData.forEach(r => {
-      if (r['Coaches Details']) {
-        const name = String(r['Coaches Details']).trim()
+    ledgerData.forEach(r => {
+      if (r['Coach']) {
+        const name = String(r['Coach']).trim()
         if (name && name !== 'Unassigned') uniqueCoachNames.add(name)
       }
     })
@@ -238,18 +240,35 @@ export async function runSeed() {
       return name.trim().toLowerCase().replace(/\s+/g, ' ')
     }
 
-    // Process Families & Students
+    // Map Roster Students for extra fields lookup
+    const rosterMap = new Map<string, any>()
+    studentRosterData.forEach(row => {
+      const name = String(row['Name'] || '').trim()
+      if (name) {
+        rosterMap.set(cleanName(name), row)
+      }
+    })
+
+    // Process Families & Students from Full Ledger
     const familiesToCreate: any[] = []
     const studentsToCreate: any[] = []
     const familiesMap = new Map<string, string>()
     const studentMap = new Map<string, string>()
     const studentNameMap = new Map<string, string>()
 
-    studentData.forEach((row, idx) => {
-      const name = String(row['Name'] || '').trim()
+    ledgerData.forEach((row, idx) => {
+      const name = String(row['Student Name'] || '').trim()
       if (!name) return
+      
+      // Skip headers and footers
+      if (!row['Centre'] || String(row['Centre']).trim().toLowerCase() === 'undefined') return
+      if (name.includes('students') || name.includes('Total') || name === 'Students on this list') return
 
-      const phone = row['Mobile/Whatsapp'] ? String(row['Mobile/Whatsapp']).trim() : ''
+      const clean = cleanName(name)
+      const rosterInfo = rosterMap.get(clean)
+
+      const rawPhone = row['Mobile / WhatsApp'] || rosterInfo?.['Mobile/Whatsapp'] || ''
+      const phone = String(rawPhone).trim()
       let famId = crypto.randomUUID()
       if (phone && familiesMap.has(phone)) {
         famId = familiesMap.get(phone)!
@@ -257,25 +276,36 @@ export async function runSeed() {
         if (phone) familiesMap.set(phone, famId)
         familiesToCreate.push({
           id: famId,
-          primary_name: row['Parent name'] ? String(row['Parent name']).trim() : `Parent of ${name}`,
+          primary_name: rosterInfo?.['Parent name'] ? String(rosterInfo['Parent name']).trim() : `Parent of ${name}`,
           phone: phone || null,
-          email: row['Email'] || null,
+          email: rosterInfo?.['Email'] || null,
           consent_ops: true,
           consent_mktg: false
         })
       }
 
       const sId = crypto.randomUUID()
-      const refId = row['Student Id'] ? String(row['Student Id']).trim() : `MM-${1000 + idx}`
-      studentMap.set(refId.toLowerCase(), sId)
-      studentNameMap.set(cleanName(name), sId)
+      const refId = rosterInfo?.['Student Id'] || `MM-${1000 + idx}`
+      studentMap.set(String(refId).toLowerCase(), sId)
+      studentNameMap.set(clean, sId)
 
-      const centreId = getCentreId(row['Assigned Primary center'] || row['Assigned center'])
-      const coachId = findCoach(row['Coaches Details'])
-      const dob = parseExcelDate(row['Date of birth'])
-      const joinDate = parseExcelDate(row['Date Enrolled']) || new Date()
-      const level = row['Current Student levels'] || row['Joining Student level'] || 'Beginner'
-      const status = String(row['Status'] || 'Active').trim().toLowerCase() === 'active' ? 'active' : 'inactive'
+      const centreId = getCentreId(String(row['Centre']))
+      const coachId = findCoach(String(row['Coach']))
+      const dob = parseExcelDate(rosterInfo?.['Date of birth'])
+      const joinDate = parseExcelDate(rosterInfo?.['Date Enrolled']) || new Date()
+      const level = row['Level'] || rosterInfo?.['Current Student levels'] || rosterInfo?.['Joining Student level'] || 'Beginner'
+      
+      const activity = String(row['Activity'] || '').trim()
+      const status = activity === 'Active' ? 'active' : 'inactive'
+
+      const overdueClasses = Number(row['Overdue Classes']) || 0
+      const unbilledValue = Number(row['Unbilled Value (AED)']) || 0
+      
+      const flags: any = {}
+      if (overdueClasses > 0) {
+        flags.unpaid_classes = overdueClasses
+        flags.unpaid_value = unbilledValue
+      }
 
       studentsToCreate.push({
         id: sId,
@@ -284,56 +314,68 @@ export async function runSeed() {
         coach_id: coachId,
         name,
         dob,
-        gender: row['Gender'] || null,
-        school: row['School'] || null,
+        gender: rosterInfo?.['Gender'] || null,
+        school: rosterInfo?.['School'] || null,
         level,
         status,
-        fide_id: row['FIDE ID'] || null,
+        fide_id: rosterInfo?.['FIDE ID'] || null,
         join_date: joinDate,
         last_attended: null,
         pace_status: 'On track',
-        flags: {},
-        fide_country: row['COUNTRY AS PER FIDE '] || null,
-        parent_name: row['Parent name'] || null,
-        alternate_centre: row['Alternate Center'] || null,
-        resident_status: row['ET /JLT Resident'] || null,
-        address: row['Address'] || null,
-        category: row['Student category'] || null,
-        notes: row['NOTES'] || null,
-        referral_source: row['HOW DID YOU HEAR ABOUT US '] || null
+        flags: flags,
+        fide_country: rosterInfo?.['COUNTRY AS PER FIDE '] || null,
+        parent_name: rosterInfo?.['Parent name'] || null,
+        alternate_centre: rosterInfo?.['Alternate Center'] || null,
+        resident_status: rosterInfo?.['ET /JLT Resident'] || null,
+        address: rosterInfo?.['Address'] || null,
+        category: rosterInfo?.['Student category'] || null,
+        notes: rosterInfo?.['NOTES'] || 'Imported from Overdue Ledger',
+        referral_source: rosterInfo?.['HOW DID YOU HEAR ABOUT US '] || null
       })
     })
 
-
-
     const findStudentId = (ref: string, name: string): string | null => {
-      if (ref && studentMap.has(ref.trim().toLowerCase())) {
-        return studentMap.get(ref.trim().toLowerCase())!
-      }
       const clean = cleanName(name)
       if (clean && studentNameMap.has(clean)) {
         return studentNameMap.get(clean)!
       }
+      if (ref && studentMap.has(ref.trim().toLowerCase())) {
+        const sId = studentMap.get(ref.trim().toLowerCase())!
+        if (clean) {
+          studentNameMap.set(clean, sId)
+        }
+        return sId
+      }
       return null
     }
 
-    // Process Packages & Invoices
+    // Process Packages from Package Timeline sheet
     const packagesToCreate: any[] = []
     const invoicesToCreate: any[] = []
-    const studentPackageCounts = new Map<string, number>()
-    const studentRecentRates = new Map<string, number>()
 
-    packageData.forEach(row => {
-      const studentName = String(row['Student'] || '').trim()
+    timelineData.forEach((row, idx) => {
+      const studentName = String(row['Student Name'] || row['Package-by-package history'] || '').trim()
       if (!studentName) return
-      const ref = row['Student Id'] ? String(row['Student Id']).trim() : ''
-      let studentId = findStudentId(ref, studentName)
 
-      // Dynamically create student and family if missing from student information sheet
+      const lowerName = studentName.toLowerCase()
+      if (
+        lowerName.includes('total') || 
+        lowerName.includes('students') || 
+        lowerName.includes('allocated') || 
+        lowerName.includes('classes used') ||
+        lowerName.includes('exactly one of them') ||
+        lowerName.includes('activity marks whether') ||
+        lowerName.includes('sessions columns show') ||
+        studentName === 'Students on this list'
+      ) {
+        return
+      }
+
+      let studentId = findStudentId('', studentName)
       if (!studentId) {
+        // Fallback or dynamic creation if somehow missing
         studentId = crypto.randomUUID()
         const clean = cleanName(studentName)
-        studentMap.set(ref.toLowerCase() || studentName.toLowerCase(), studentId)
         studentNameMap.set(clean, studentId)
 
         const famId = crypto.randomUUID()
@@ -349,8 +391,8 @@ export async function runSeed() {
         studentsToCreate.push({
           id: studentId,
           family_id: famId,
-          centre_id: centreIds['Bay Avenue'],
-          coach_id: coachMap.get('james estrada')?.coachId || Array.from(coachMap.values())[0]?.coachId,
+          centre_id: getCentreId(row['Centre']),
+          coach_id: findCoach(''),
           name: studentName,
           dob: null,
           gender: null,
@@ -360,32 +402,18 @@ export async function runSeed() {
           join_date: new Date(),
           last_attended: null,
           flags: {},
-          fide_country: null,
-          parent_name: null,
-          alternate_centre: null,
-          resident_status: null,
-          address: null,
-          category: null,
-          notes: 'Created dynamically from package logs',
-          referral_source: null
+          notes: 'Created dynamically from timeline logs'
         })
       }
 
       const pkgId = crypto.randomUUID()
-      const rawClasses = row['No of classes']
-      const totalClasses = (rawClasses !== undefined && rawClasses !== null && rawClasses !== '') ? Number(rawClasses) : 0
-      const price = Number(row['Price']) || 0
-      const dateOfPayment = parseExcelDate(row['Date of payment']) || new Date()
+      const totalClasses = Number(row['Classes']) || 0
+      const price = Number(row['Price (AED)']) || 0
+      const packageBalance = Number(row['Package Balance']) || 0
+      const dateOfPayment = parseExcelDate(row['Date of Payment']) || new Date()
 
-      studentPackageCounts.set(studentId, (studentPackageCounts.get(studentId) || 0) + totalClasses)
-      
-      const rawKind = String(row['New/Renewal'] || 'new').toLowerCase()
+      const rawKind = String(row['Type'] || 'new').toLowerCase()
       const kind = rawKind.includes('tournament') ? 'tournament' : (rawKind.includes('renewal') ? 'renewal' : 'new')
-
-      if (kind !== 'tournament') {
-        const rate = totalClasses > 0 ? (price / totalClasses) : 125
-        studentRecentRates.set(studentId, rate)
-      }
 
       packagesToCreate.push({
         id: pkgId,
@@ -393,7 +421,7 @@ export async function runSeed() {
         tier_id: getTierId(totalClasses),
         kind: kind,
         classes_total: totalClasses,
-        classes_remaining: totalClasses,
+        classes_remaining: packageBalance,
         discount_pct: 0,
         frozen: false,
         start_date: dateOfPayment,
@@ -407,14 +435,13 @@ export async function runSeed() {
         amount: price,
         vat: price * 0.05,
         status: 'paid',
-        method: row['Mode of payment'] || 'Cash',
+        method: 'Online',
         created_at: dateOfPayment
       })
     })
 
-    // Process Attendance
+    // Process Attendance from All Attendance Records
     const attendanceToCreate: any[] = []
-    const studentAttendanceCounts = new Map<string, number>()
     const studentLastAttended = new Map<string, Date>()
 
     attendanceData.forEach(row => {
@@ -422,7 +449,6 @@ export async function runSeed() {
       if (!studentName) return
       let studentId = findStudentId('', studentName)
 
-      // Dynamically create student and family if missing
       if (!studentId) {
         studentId = crypto.randomUUID()
         const clean = cleanName(studentName)
@@ -448,96 +474,56 @@ export async function runSeed() {
           gender: null,
           school: null,
           level: 'Beginner',
-          status: 'active',
+          status: 'inactive',
           join_date: new Date(),
           last_attended: null,
-          flags: {},
-          fide_country: null,
-          parent_name: null,
-          alternate_centre: null,
-          resident_status: null,
-          address: null,
-          category: null,
-          notes: 'Created dynamically from attendance logs',
-          referral_source: null
+          flags: {}
         })
       }
 
-      const coachId = findCoach(row['Coaches Details'])
-      const date = parseExcelDate(row['Date']) || new Date()
-      const status = String(row['Attendance'] || 'present').trim().toLowerCase()
-      const duration = Number(row['Class duration']) || 2
-
-      if (status === 'present' || status === 'makeup') {
-        studentAttendanceCounts.set(studentId, (studentAttendanceCounts.get(studentId) || 0) + duration)
+      const date = parseExcelDate(row['Date'])
+      if (date) {
         const currentLast = studentLastAttended.get(studentId)
-        if (!currentLast || date.getTime() > currentLast.getTime()) {
+        if (!currentLast || date > currentLast) {
           studentLastAttended.set(studentId, date)
         }
       }
 
+      const status = String(row['Attendance'] || 'present').trim().toLowerCase()
+      const rawDuration = row['Class duration']
+      const duration = (rawDuration !== undefined && rawDuration !== null && rawDuration !== '') ? Number(rawDuration) : 2
+
       attendanceToCreate.push({
         id: crypto.randomUUID(),
         student_id: studentId,
-        coach_id: coachId,
-        date,
-        status: status === 'present' || status === 'makeup' || status === 'absent' ? status : 'present',
-        topic: null,
-        note: 'Imported from Zoho Creator',
-        duration: duration
+        coach_id: findCoach(row['Coaches Details']),
+        date: date || new Date(),
+        status: status === 'makeup' ? 'makeup' : (status === 'absent' ? 'absent' : 'present'),
+        duration: duration,
+        topic: row['Topic name'] ? String(row['Topic name']).trim() : null,
+        note: 'Imported from Zoho Creator'
       })
     })
 
-    // Chronological package remaining classes calculation (FIFO)
-    const studentPackagesMap = new Map<string, any[]>()
-    packagesToCreate.forEach(pkg => {
-      // Exclude tournament packages from regular balance deduction
-      if (pkg.kind === 'tournament') {
-        pkg.classes_remaining = 0
-        return
-      }
-      if (!studentPackagesMap.has(pkg.student_id)) {
-        studentPackagesMap.set(pkg.student_id, [])
-      }
-      studentPackagesMap.get(pkg.student_id)!.push(pkg)
-    })
-
-    studentPackagesMap.forEach((pkgs, studentId) => {
-      pkgs.sort((a, b) => a.start_date.getTime() - b.start_date.getTime())
-      let attended = studentAttendanceCounts.get(studentId) || 0
-      pkgs.forEach(pkg => {
-        const used = Math.min(pkg.classes_total, attended)
-        pkg.classes_remaining = pkg.classes_total - used
-        attended -= used
-      })
-    })
-
-    // Update student details with calculated last_attended, low package, and unbilled metrics in memory
+    // Update student details with calculated last_attended and low package flags in memory
     for (const student of studentsToCreate) {
       if (studentLastAttended.has(student.id)) {
         student.last_attended = studentLastAttended.get(student.id)
       }
-      const pkgs = studentPackagesMap.get(student.id) || []
+      
+      const pkgs = packagesToCreate.filter(p => p.student_id === student.id)
       const totalRemaining = pkgs.reduce((sum, p) => sum + p.classes_remaining, 0)
       const totalClasses = pkgs.reduce((sum, p) => sum + p.classes_total, 0)
       
-      const attendedCount = studentAttendanceCounts.get(student.id) || 0
-      const unpaidClasses = Math.max(0, attendedCount - totalClasses)
-      const studentRate = studentRecentRates.get(student.id) || 125
-      const unpaidValue = unpaidClasses * studentRate
-      
-      const flags: any = {}
       if (totalClasses > 0 && (totalRemaining / totalClasses <= 0.20 || totalRemaining <= 2)) {
-        flags.low_package = true
+        student.flags = {
+          ...student.flags,
+          low_package: true
+        }
       }
-      if (unpaidClasses > 0) {
-        flags.unpaid_classes = unpaidClasses
-        flags.unpaid_value = unpaidValue
-      }
-      student.flags = flags
     }
 
-    // Now insert families and students with the correct computed properties
+    // Now insert families and students
     await prisma.family.createMany({ data: familiesToCreate })
     await prisma.student.createMany({ data: studentsToCreate })
 

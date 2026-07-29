@@ -7,7 +7,7 @@ import { Chart, registerables } from 'chart.js';
 import { db } from '../lib/db';
 import type { Student, Package, Attendance, Coach } from '../lib/db';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
-import { computeStudentStatus } from '../lib/segmentRules';
+import { computeStudentStatus, getPackageRate } from '../lib/segmentRules';
 
 Chart.register(...registerables);
 
@@ -1527,7 +1527,9 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         const totalPaidClasses = sPkgs.reduce((tot, p) => tot + p.classes_total, 0);
         const totalUsedClasses = attendance.filter(a => a.student_id === s.id && (a.status === 'present' || a.status === 'makeup')).length;
         const unpaidClasses = totalUsedClasses > totalPaidClasses ? totalUsedClasses - totalPaidClasses : 0;
-        return sum + Math.round(unpaidClasses * 100); // Bay Avenue median rate is 100
+        const latestPkg = sPkgs.find(p => p.classes_remaining > 0) || sPkgs[0] || null;
+        const rate = latestPkg ? getPackageRate(latestPkg, invoices, db.getTiers()) : 100;
+        return sum + Math.round(unpaidClasses * rate);
       }, 0);
 
       const unbilledJlt = activeJltStudents.reduce((sum, s) => {
@@ -1535,7 +1537,9 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         const totalPaidClasses = sPkgs.reduce((tot, p) => tot + p.classes_total, 0);
         const totalUsedClasses = attendance.filter(a => a.student_id === s.id && (a.status === 'present' || a.status === 'makeup')).length;
         const unpaidClasses = totalUsedClasses > totalPaidClasses ? totalUsedClasses - totalPaidClasses : 0;
-        return sum + Math.round(unpaidClasses * 90); // JLT median rate is 90
+        const latestPkg = sPkgs.find(p => p.classes_remaining > 0) || sPkgs[0] || null;
+        const rate = latestPkg ? getPackageRate(latestPkg, invoices, db.getTiers()) : 90;
+        return sum + Math.round(unpaidClasses * rate);
       }, 0);
 
       // Lifetime collected (total paid invoices or sum of student.total_paid)
@@ -2322,13 +2326,16 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
 
         // Unbilled: classes attended - classes paid across all packages
         const unbilledUnderCoach = Array.from(allStudentIdsTaught).reduce((sum, sid) => {
+          const student = students.find(st => st.id === sid);
           const sPkgs = packages.filter(p => p.student_id === sid);
           const totalPaid = sPkgs.reduce((t, p) => t + p.classes_total, 0);
           const totalUsed = attendance.filter(a =>
             a.student_id === sid && (a.status === 'present' || a.status === 'makeup')
           ).length;
           const unpaid = Math.max(0, totalUsed - totalPaid);
-          return sum + unpaid * (centreName === 'JLT' ? 90 : 100);
+          const latestPkg = sPkgs.find(p => p.classes_remaining > 0) || sPkgs[0] || null;
+          const rate = latestPkg ? getPackageRate(latestPkg, invoices, db.getTiers()) : (student?.centre_id === 'c-2' || student?.centre_id === 'JLT' || centreName === 'JLT' ? 90 : 100);
+          return sum + unpaid * rate;
         }, 0);
 
         return {
@@ -2519,12 +2526,16 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         revenuePerMonth = Math.round(revenuePerMonth);
 
         const unbilledUnderCoach = Array.from(allStudentIds).reduce((sum, sid) => {
+          const student = students.find(st => st.id === sid);
           const sPkgs = packages.filter(p => p.student_id === sid);
           const totalPaid = sPkgs.reduce((t, p) => t + p.classes_total, 0);
           const totalUsed = attendance.filter(a =>
             a.student_id === sid && (a.status === 'present' || a.status === 'makeup')
           ).length;
-          return sum + Math.max(0, totalUsed - totalPaid) * (centreName === 'JLT' ? 90 : 100);
+          const latestPkg = sPkgs.find(p => p.classes_remaining > 0) || sPkgs[0] || null;
+          const rate = latestPkg ? getPackageRate(latestPkg, invoices, db.getTiers()) : (student?.centre_id === 'c-2' || student?.centre_id === 'JLT' || centreName === 'JLT' ? 90 : 100);
+          const unpaid = Math.max(0, totalUsed - totalPaid);
+          return sum + unpaid * rate;
         }, 0);
 
         return { coachId, coachName, centreName, studentCount, engagedCount, engagementPct, classes30D, classes90D, utilisationPct, spareCapacity, revenuePerMonth, unbilledUnderCoach };

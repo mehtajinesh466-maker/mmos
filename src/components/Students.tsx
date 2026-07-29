@@ -27,6 +27,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   const [filterSegment, setFilterSegment] = useState<string>('All segments');
   const [filterEngagement, setFilterEngagement] = useState<string>('All engagement');
   const [filterStatus, setFilterStatus]   = useState<string>('All');
+  const [filterHeat, setFilterHeat]       = useState<string>('All urgency');
   const [search, setSearch]               = useState<string>('');
 
   // Detail panel / Edit
@@ -289,6 +290,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
     if (filterCoach  !== 'All coaches')  rows = rows.filter(r => r.coachName === filterCoach);
     if (filterSegment !== 'All segments') rows = rows.filter(r => r.segment === filterSegment);
     if (filterEngagement !== 'All engagement') rows = rows.filter(r => r.engagement === filterEngagement);
+    if (filterHeat !== 'All urgency') rows = rows.filter(r => r.heat === filterHeat);
     if (search) rows = rows.filter(r => r.name.toLowerCase().includes(search.toLowerCase()) || r.displayId.toLowerCase().includes(search.toLowerCase()));
 
     // Sorting by recent attendance (daysSince asc) by default for coach, or by column
@@ -539,10 +541,22 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
           onChange={e => setFilterStatus(e.target.value)}
           className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
         >
+          <option value="All">All Statuses</option>
           <option value="active">Active Only</option>
           <option value="inactive">Inactive Only</option>
           <option value="left">Left Only</option>
-          <option value="All">All Statuses</option>
+        </select>
+
+        <select
+          value={filterHeat}
+          onChange={e => setFilterHeat(e.target.value)}
+          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
+        >
+          <option>All urgency</option>
+          <option value="HOT">HOT</option>
+          <option value="WARM">WARM</option>
+          <option value="COLD">COLD</option>
+          <option value="HEALTHY">HEALTHY</option>
         </select>
 
         <input

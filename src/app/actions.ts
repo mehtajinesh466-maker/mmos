@@ -797,9 +797,11 @@ export async function logAttendance(studentId: string, status: string | null, co
           await updateStudentFlags(studentId, pkgToRestore.id, updatedPkg.classes_remaining);
         }
       }
-      return await prisma.attendance.delete({
+      const deletedRecord = await prisma.attendance.delete({
         where: { id: existing.id }
       });
+      await updateStudentFlags(studentId);
+      return deletedRecord;
     }
 
     if (existing.status === status) {
@@ -862,6 +864,7 @@ export async function logAttendance(studentId: string, status: string | null, co
       }
     }
 
+    await updateStudentFlags(studentId);
     return updated;
   }
 
@@ -896,6 +899,7 @@ export async function logAttendance(studentId: string, status: string | null, co
     }
   }
 
+  await updateStudentFlags(studentId);
   return newRecord;
 }
 export async function closeStudentPackagesAndClasses(studentId: string) {

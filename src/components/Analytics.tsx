@@ -838,11 +838,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
   const scopeStudents = isFiltered ? filteredStudents : students;
   const scopeTotalStudents = scopeStudents.length;
 
-  const activeStudentsCount = scopeStudents.filter(s => {
-    if (!s.last_attended) return false;
-    const diff = Math.floor((new Date().getTime() - new Date(s.last_attended).getTime()) / 86400000);
-    return diff >= 0 && diff <= 30 && s.status === 'active';
-  }).length;
+  const activeStudentsCount = scopeStudents.filter(s => s.status === 'active').length;
 
   const activePercent = scopeTotalStudents > 0 ? Math.round((activeStudentsCount / scopeTotalStudents) * 100) : 0;
 
@@ -895,11 +891,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
 
   // Bay Avenue metrics
   const bayStudents = students.filter(s => s.centre_id === bayCentreId);
-  const activeBay = bayStudents.filter(s => {
-    if (!s.last_attended) return false;
-    const diff = Math.floor((new Date().getTime() - new Date(s.last_attended).getTime()) / 86400000);
-    return diff >= 0 && diff <= 30 && s.status === 'active';
-  }).length;
+  const activeBay = bayStudents.filter(s => s.status === 'active').length;
   const activeRateBay = bayStudents.length > 0 ? Math.round((activeBay / bayStudents.length) * 100) : 0;
   const bayClasses30d = attendance.filter(a => a.status === 'present' && bayStudents.some(s => s.id === a.student_id) && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
   const bayRunrate = getRunRateForStudents(bayStudents);
@@ -909,11 +901,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
 
   // JLT metrics
   const jltStudents = students.filter(s => s.centre_id === jltCentreId);
-  const activeJlt = jltStudents.filter(s => {
-    if (!s.last_attended) return false;
-    const diff = Math.floor((new Date().getTime() - new Date(s.last_attended).getTime()) / 86400000);
-    return diff >= 0 && diff <= 30 && s.status === 'active';
-  }).length;
+  const activeJlt = jltStudents.filter(s => s.status === 'active').length;
   const activeRateJlt = jltStudents.length > 0 ? Math.round((activeJlt / jltStudents.length) * 100) : 0;
   const jltClasses30d = attendance.filter(a => a.status === 'present' && jltStudents.some(s => s.id === a.student_id) && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
   const jltRunrate = getRunRateForStudents(jltStudents);
@@ -1103,7 +1091,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
               { 
                 label: 'ACTIVE STUDENTS', 
                 value: `${activeStudentsCount}`, 
-                desc: `attended in last 30 days · ${activePercent}%` 
+                desc: `attended in last 120 days · ${activePercent}%` 
               },
               ...(currentUser?.role === 'front_desk' ? [] : [
                 { 
@@ -1148,7 +1136,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
               </div>
               <div className="grid grid-cols-4 gap-4 text-center border-b border-line pb-4">
                 <div><div className="font-bold text-lg text-ink">{bayStudents.length}</div><div className="text-[8px] text-muted-custom uppercase">Students</div></div>
-                <div><div className="font-bold text-lg text-ink">{activeBay}</div><div className="text-[8px] text-[#286957] uppercase font-semibold">Active (30d)</div></div>
+                <div><div className="font-bold text-lg text-ink">{activeBay}</div><div className="text-[8px] text-[#286957] uppercase font-semibold">Active (120d)</div></div>
                 <div><div className="font-bold text-lg text-ink">{activeRateBay}%</div><div className="text-[8px] text-muted-custom uppercase">Active Rate</div></div>
                 <div><div className="font-bold text-lg text-ink">{bayClasses30d}</div><div className="text-[8px] text-muted-custom uppercase">Classes/30d</div></div>
               </div>
@@ -1172,7 +1160,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
               </div>
               <div className="grid grid-cols-4 gap-4 text-center border-b border-line pb-4">
                 <div><div className="font-bold text-lg text-ink">{jltStudents.length}</div><div className="text-[8px] text-muted-custom uppercase">Students</div></div>
-                <div><div className="font-bold text-lg text-ink">{activeJlt}</div><div className="text-[8px] text-[#286957] uppercase font-semibold font-mono">Active (30d)</div></div>
+                <div><div className="font-bold text-lg text-ink">{activeJlt}</div><div className="text-[8px] text-[#286957] uppercase font-semibold font-mono">Active (120d)</div></div>
                 <div><div className="font-bold text-lg text-ink">{activeRateJlt}%</div><div className="text-[8px] text-muted-custom uppercase">Active Rate</div></div>
                 <div><div className="font-bold text-lg text-ink">{jltClasses30d}</div><div className="text-[8px] text-muted-custom uppercase font-mono">Classes/30d</div></div>
               </div>
