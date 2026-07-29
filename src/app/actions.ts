@@ -265,37 +265,6 @@ export async function syncDatabaseToClient() {
   const role = session.user.role;
   const userCentreId = session.user.centre_id;
 
-  // Auto-backfill parent user accounts for any existing student family lacking one (optimized)
-  if (role === 'owner' || role === 'front_desk') {
-    const families = await prisma.family.findMany({ where: { email: { not: null } } });
-    const parentUsers = await prisma.user.findMany({
-      where: { role: 'parent' },
-      select: { email: true }
-    });
-    const existingParentEmails = new Set(parentUsers.map(u => u.email.toLowerCase().trim()));
-
-    const missingFamilies = families.filter(fam => {
-      if (!fam.email || !fam.email.trim()) return false;
-      return !existingParentEmails.has(fam.email.toLowerCase().trim());
-    });
-
-    if (missingFamilies.length > 0) {
-      const defaultHash = await bcrypt.hash('Parent@12345', 10);
-      for (const fam of missingFamilies) {
-        const cleanEmail = fam.email!.toLowerCase().trim();
-        await prisma.user.create({
-          data: {
-            name: fam.primary_name || 'Parent',
-            email: cleanEmail,
-            password: defaultHash,
-            role: 'parent',
-            centre_id: null
-          }
-        }).catch(() => {});
-      }
-    }
-  }
-
   if (role === 'owner') {
     const [
       centres,
@@ -322,7 +291,13 @@ export async function syncDatabaseToClient() {
       prisma.tier.findMany(),
       prisma.package.findMany(),
       prisma.scheduleSlot.findMany(),
-      prisma.attendance.findMany(),
+      prisma.attendance.findMany({
+        where: {
+          date: {
+            gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+          }
+        }
+      }),
       prisma.invoice.findMany(),
       prisma.enquiry.findMany(),
       prisma.enrollment.findMany(),
@@ -392,7 +367,13 @@ export async function syncDatabaseToClient() {
       prisma.tier.findMany(),
       prisma.package.findMany(),
       prisma.scheduleSlot.findMany(),
-      prisma.attendance.findMany(),
+      prisma.attendance.findMany({
+        where: {
+          date: {
+            gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+          }
+        }
+      }),
       prisma.invoice.findMany(),
       prisma.enquiry.findMany(),
       prisma.enrollment.findMany(),
