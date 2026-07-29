@@ -898,6 +898,54 @@ export async function logAttendance(studentId: string, status: string | null, co
 
   return newRecord;
 }
+export async function closeStudentPackagesAndClasses(studentId: string) {
+  // Update all packages to classes_remaining = 0
+  await prisma.package.updateMany({
+    where: { student_id: studentId, classes_remaining: { gt: 0 } },
+    data: { classes_remaining: 0 }
+  });
+
+  // Delete all Enrollments (schedule slots)
+  await prisma.enrollment.deleteMany({
+    where: { student_id: studentId }
+  });
+
+  // Retrieve current student flags to update them
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { flags: true }
+  });
+
+  if (student) {
+    const existingFlags = student.flags ? (student.flags as any) : {};
+    const newFlags = {
+      ...existingFlags,
+      unpaid_classes: 0,
+      unpaid_value: 0
+    };
+    await prisma.student.update({
+      where: { id: studentId },
+      data: {
+        flags: newFlags
+      }
+    });
+  }
+}
+
+export async function approveStudentInactive(studentId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized: Only owners can approve inactivation");
+  }
+
+  await prisma.student.update({
+    where: { id: studentId },
+    data: { status: 'inactive' }
+  });
+
+  await closeStudentPackagesAndClasses(studentId);
+}
+
 export async function saveStudentDB(studentData: any) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'front_desk' && session.user.role !== 'coach') {
@@ -908,18 +956,38 @@ export async function saveStudentDB(studentData: any) {
       throw new Error("Unauthorized");
     }
   }
-  // Check if student exists
+
   const existing = await prisma.student.findUnique({
     where: { id: studentData.id }
   });
 
+  let targetStatus = studentData.status;
+
   if (existing) {
+    // Reactivation check: if existing is inactive/pending_inactive and new status is active
+    const wasInactiveOrPending = existing.status === 'inactive' || existing.status === 'pending_inactive';
+    if (wasInactiveOrPending && targetStatus === 'active') {
+      if (session.user.role !== 'owner') {
+        throw new Error("Only the owner can reactivate a student");
+      }
+    }
+
+    // Inactivation check: if new status is inactive and student wasn't already inactive
+    if (targetStatus === 'inactive' && existing.status !== 'inactive') {
+      if (session.user.role !== 'owner') {
+        targetStatus = 'pending_inactive';
+      } else {
+        // If owner is marking inactive immediately, close packages & classes
+        await closeStudentPackagesAndClasses(studentData.id);
+      }
+    }
+
     await prisma.student.update({
       where: { id: studentData.id },
       data: {
         name: studentData.name,
         level: studentData.level,
-        status: studentData.status,
+        status: targetStatus,
         fide_id: studentData.fide_id,
         chess_com_username: studentData.chess_com_username || null,
         lichess_username: studentData.lichess_username || null,
@@ -944,12 +1012,19 @@ export async function saveStudentDB(studentData: any) {
       }
     });
   } else {
-    await prisma.student.create({
+    // New student
+    if (targetStatus === 'inactive') {
+      if (session.user.role !== 'owner') {
+        targetStatus = 'pending_inactive';
+      }
+    }
+
+    const createdStudent = await prisma.student.create({
       data: {
         id: studentData.id,
         name: studentData.name,
         level: studentData.level,
-        status: studentData.status,
+        status: targetStatus,
         fide_id: studentData.fide_id,
         chess_com_username: studentData.chess_com_username || null,
         lichess_username: studentData.lichess_username || null,
@@ -973,8 +1048,13 @@ export async function saveStudentDB(studentData: any) {
         referral_source: studentData.referral_source || null
       }
     });
+
+    if (targetStatus === 'inactive' && session.user.role === 'owner') {
+      await closeStudentPackagesAndClasses(createdStudent.id);
+    }
   }
 }
+
 
 export async function saveTournamentReportDB(reportData: any) {
   const session = await verifySession();
@@ -1049,7 +1129,21 @@ export async function registerStudent(data: any) {
 
   let familyId = data.family_id;
 
-  // 1. Create family if not exists or no ID provided
+  if (!familyId) {
+    if (data.email) {
+      const match = await prisma.family.findFirst({
+        where: { email: { equals: data.email.toLowerCase().trim(), mode: 'insensitive' } }
+      });
+      if (match) familyId = match.id;
+    }
+    if (!familyId && data.phone) {
+      const match = await prisma.family.findFirst({
+        where: { phone: data.phone.trim() }
+      });
+      if (match) familyId = match.id;
+    }
+  }
+
   if (!familyId) {
     const family = await prisma.family.create({
       data: {
@@ -1094,6 +1188,7 @@ export async function registerStudent(data: any) {
       gender: data.gender,
       school: data.school,
       level: data.level,
+      category: data.category || null,
       status: 'active',
       fide_id: data.fide_id,
       join_date: new Date(),
@@ -1106,31 +1201,26 @@ export async function registerStudent(data: any) {
   if (data.tier_id) {
     const tier = await prisma.tier.findUnique({ where: { id: data.tier_id } });
     if (tier) {
-      // Check for sibling discount
-      const siblingsCount = await prisma.student.count({
-        where: { family_id: familyId, status: 'active' }
-      });
+      const discount = 0; // Sibling discount disabled per feedback
       
-      const discount = siblingsCount > 1 ? 10 : 0; // 10% sibling discount
-      
-      // Parse total classes from inclusions or default to 8
-      let classesTotal = 8;
-      if (tier.inclusions && Array.isArray(tier.inclusions)) {
-         const match = tier.inclusions[0]?.match(/(\d+)\s*classes/i);
-         if (match) classesTotal = parseInt(match[1], 10);
-      }
+      const classesTotal = Number(data.package_size) || 12;
+      const bonusClasses = Number(data.bonus_classes) || 0;
+      const grandTotal = classesTotal + bonusClasses;
 
-      await prisma.package.create({
-        data: {
-          student_id: student.id,
-          tier_id: tier.id,
-          kind: 'new',
-          classes_total: classesTotal,
-          classes_remaining: classesTotal,
-          discount_pct: discount,
-          start_date: new Date(),
-        }
-      });
+      const packageId = require('crypto').randomUUID();
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "packages" ("id", "student_id", "tier_id", "kind", "classes_total", "classes_remaining", "discount_pct", "start_date", "bonus_classes") 
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9)`,
+        packageId,
+        student.id,
+        tier.id,
+        'new',
+        grandTotal,
+        grandTotal,
+        discount,
+        new Date(),
+        bonusClasses
+      );
     }
   }
 
@@ -1260,10 +1350,22 @@ export async function deleteStudentDB(id: string) {
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
   }
-  return await prisma.student.update({
-    where: { id },
-    data: { status: 'inactive' }
-  });
+
+  await prisma.$transaction([
+    prisma.attendance.deleteMany({ where: { student_id: id } }),
+    prisma.enrollment.deleteMany({ where: { student_id: id } }),
+    prisma.fideRating.deleteMany({ where: { student_id: id } }),
+    prisma.invoice.deleteMany({ where: { student_id: id } }),
+    prisma.notification.deleteMany({ where: { student_id: id } }),
+    prisma.package.deleteMany({ where: { student_id: id } }),
+    prisma.progressLog.deleteMany({ where: { student_id: id } }),
+    prisma.report.deleteMany({ where: { student_id: id } }),
+    prisma.studentSkill.deleteMany({ where: { student_id: id } }),
+    prisma.tournamentReport.deleteMany({ where: { student_id: id } }),
+    prisma.student.delete({ where: { id } })
+  ]);
+
+  return { success: true };
 }
 
 export async function deletePackageDB(id: string) {
@@ -1687,5 +1789,17 @@ export async function notifyEnrolledStudents(slotId: string) {
   }
 
   return { success: true, count };
+}
+
+export async function linkSiblingFamily(studentId: string, familyId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+
+  await prisma.student.update({
+    where: { id: studentId },
+    data: { family_id: familyId }
+  });
 }
 

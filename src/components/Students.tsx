@@ -5,7 +5,8 @@ import { db } from '../lib/db';
 import type { User, Student, Package, Coach, Centre } from '../lib/db';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
 import { computeStudentStatus, getStatusBadgeClasses, getPackageRate } from '../lib/segmentRules';
-import { saveStudentDB, deleteStudentDB, syncDatabaseToClient } from '../app/actions';
+import { saveStudentDB, deleteStudentDB, syncDatabaseToClient, linkSiblingFamily } from '../app/actions';
+import { useSearchParams } from 'next/navigation';
 
 interface StudentsProps {
   currentUser: User;
@@ -32,6 +33,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   const [selected, setSelected] = useState<Student | null>(null);
   const [sortCol, setSortCol]   = useState<string>('name');
   const [sortAsc, setSortAsc]   = useState<boolean>(true);
+  const [selectedSiblingId, setSelectedSiblingId] = useState<string>('');
 
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
@@ -136,6 +138,26 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
     }
   };
 
+  const handleLinkSibling = async () => {
+    if (!selected || !selectedSiblingId) return;
+    try {
+      await linkSiblingFamily(selectedSiblingId, selected.family_id);
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      refresh();
+      
+      // Update selected student record with fresh details to refresh sibling list immediately
+      const freshStudents = db.getStudents();
+      const updated = freshStudents.find(s => s.id === selected.id);
+      if (updated) setSelected(updated);
+
+      setSelectedSiblingId('');
+      alert('✓ Sibling linked successfully under the same family.');
+    } catch (e: any) {
+      alert('Error linking sibling: ' + e.message);
+    }
+  };
+
   const refresh = () => {
     setStudents(db.getStudents());
     setPackages(db.getPackages());
@@ -145,11 +167,23 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
     setInvoices(db.get<any>('invoices'));
   };
 
+  const searchParams = useSearchParams();
+  const idParam = searchParams.get('id');
+
   useEffect(() => {
     refresh();
     window.addEventListener('db-synced', refresh);
     return () => window.removeEventListener('db-synced', refresh);
   }, []);
+
+  useEffect(() => {
+    if (idParam && students.length > 0) {
+      const match = students.find(s => s.id === idParam);
+      if (match) {
+        setSelected(match);
+      }
+    }
+  }, [idParam, students]);
 
 
   // Determine coach record for isolation
@@ -669,16 +703,18 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-ink">Level</label>
+                    <label className="text-xs font-bold text-ink">Performance Level</label>
                     <select
                       value={editLevel}
                       onChange={e => setEditLevel(e.target.value)}
                       className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
                     >
-                      <option>Beginner</option>
-                      <option>Intermediate</option>
-                      <option>Advanced</option>
-                      <option>Pro-Track</option>
+                      <option value="Beginner 1">Beginner 1</option>
+                      <option value="Beginner 2">Beginner 2</option>
+                      <option value="Intermediate 1">Intermediate 1</option>
+                      <option value="Intermediate 2">Intermediate 2</option>
+                      <option value="Advanced">Advanced</option>
+                      <option value="FIDE">FIDE</option>
                     </select>
                   </div>
 
@@ -689,8 +725,18 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                       onChange={e => setEditStatus(e.target.value)}
                       className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
                     >
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
+                      <option 
+                        value="active" 
+                        disabled={(selected?.status === 'inactive' || selected?.status === 'pending_inactive') && currentUser?.role !== 'owner'}
+                      >
+                        Active {(selected?.status === 'inactive' || selected?.status === 'pending_inactive') && currentUser?.role !== 'owner' ? ' (Owner only)' : ''}
+                      </option>
+                      <option value="inactive">
+                        Inactive {currentUser?.role !== 'owner' ? ' (requires Owner Approval)' : ''}
+                      </option>
+                      {selected?.status === 'pending_inactive' && (
+                        <option value="pending_inactive">Pending Inactive</option>
+                      )}
                       <option value="frozen">Frozen</option>
                       <option value="left">Left</option>
                     </select>
@@ -812,14 +858,17 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-ink">Student Category</label>
-                    <input 
-                      type="text" 
+                    <label className="text-xs font-bold text-ink">Age Level (Category)</label>
+                    <select 
                       value={editCategory}
                       onChange={e => setEditCategory(e.target.value)}
-                      placeholder="e.g. Early starts"
                       className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none focus:border-forest"
-                    />
+                    >
+                      <option value="">Select Category...</option>
+                      <option value="Early Starts">Early Starts</option>
+                      <option value="Intermediate">Intermediate</option>
+                      <option value="Advanced">Advanced</option>
+                    </select>
                   </div>
 
                   <div className="flex flex-col gap-1.5">
@@ -981,6 +1030,52 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                         ) : (
                           <span className="text-muted-custom text-[11px]">Not uploaded</span>
                         )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Family & Siblings Panel */}
+                  <div className="pt-4 border-t border-line space-y-3">
+                    <span className="text-muted-custom block uppercase tracking-wider text-[10px] font-bold">Family & Siblings</span>
+                    
+                    {students.filter(s => s.family_id === selected.family_id && s.id !== selected.id).length > 0 ? (
+                      <div className="space-y-1">
+                        <div className="text-[11px] text-muted-custom">Linked family members:</div>
+                        {students.filter(s => s.family_id === selected.family_id && s.id !== selected.id).map(sib => (
+                          <div key={sib.id} className="flex justify-between items-center bg-[#F4F9F6] border border-line rounded-lg px-2.5 py-1.5 text-xs">
+                            <span className="font-semibold text-ink">{sib.name}</span>
+                            <a href={`/students?id=${sib.id}`} className="text-forest hover:underline font-bold text-[10px]">View Profile ↗</a>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-muted-custom italic">No siblings linked under this family record.</div>
+                    )}
+
+                    <div className="bg-canvas/30 p-2.5 rounded-lg border border-line space-y-2 mt-2">
+                      <div className="text-[11px] font-bold text-ink">Link another student as sibling:</div>
+                      <div className="flex gap-2">
+                        <select
+                          value={selectedSiblingId}
+                          onChange={e => setSelectedSiblingId(e.target.value)}
+                          className="flex-1 bg-white border border-line rounded-lg px-2 py-1.5 text-[11px] text-ink outline-none"
+                        >
+                          <option value="">Select student to link...</option>
+                          {students
+                            .filter(s => s.id !== selected.id && s.family_id !== selected.family_id)
+                            .sort((a, b) => a.name.localeCompare(b.name))
+                            .map(s => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))
+                          }
+                        </select>
+                        <button
+                          onClick={handleLinkSibling}
+                          disabled={!selectedSiblingId}
+                          className="bg-forest hover:bg-emerald-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Link Sibling
+                        </button>
                       </div>
                     </div>
                   </div>

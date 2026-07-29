@@ -21,7 +21,8 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
   const [packageSize, setPackageSize] = useState('12 classes');
   const [ratePerClass, setRatePerClass] = useState('100');
   const [discount, setDiscount] = useState('None');
-  const [paymentMethod, setPaymentMethod] = useState('Card (NeoPay)');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentRemarks, setPaymentRemarks] = useState('');
   const [paymentDate, setPaymentDate] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -189,18 +190,33 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold text-ink">Payment method</label>
+              <label className="text-xs font-bold text-ink">Payment method *</label>
               <select 
                 value={paymentMethod} 
                 onChange={e => setPaymentMethod(e.target.value)}
                 className="bg-white border border-line rounded-lg px-3 py-2.5 text-xs text-ink outline-none"
               >
-                <option value="Card (NeoPay)">Card (NeoPay)</option>
-                <option value="Cash">Cash</option>
-                <option value="Bank Transfer">Bank Transfer</option>
-                <option value="Cheque">Cheque</option>
+                <option value="cash">Cash</option>
+                <option value="bank transfer">Bank transfer</option>
+                <option value="online">Online</option>
+                <option value="center(POS)">Center(POS)</option>
+                <option value="tabby">Tabby</option>
+                <option value="others">Others</option>
               </select>
             </div>
+
+            {paymentMethod === 'others' && (
+              <div className="flex flex-col gap-1.5 col-span-2">
+                <label className="text-xs font-bold text-ink">Payment method remarks</label>
+                <textarea 
+                  value={paymentRemarks} 
+                  onChange={e => setPaymentRemarks(e.target.value)}
+                  rows={2}
+                  placeholder="Enter remarks for payment method..."
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none w-full"
+                />
+              </div>
+            )}
 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-ink">Payment date</label>

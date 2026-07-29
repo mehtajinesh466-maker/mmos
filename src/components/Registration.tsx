@@ -16,9 +16,15 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
   const bayCentre = centres.find(c => c.name === 'Bay Avenue');
   const jltCentre = centres.find(c => c.name === 'JLT');
 
-  const defaultCentreId = activeCentre === 'All' 
-    ? (bayCentre ? bayCentre.id : (centres[0]?.id || '')) 
-    : activeCentre;
+  const visibleCentres = currentUser.role === 'front_desk' && currentUser.centre_id
+    ? centres.filter(c => c.id === currentUser.centre_id)
+    : centres;
+
+  const defaultCentreId = currentUser.role === 'front_desk' && currentUser.centre_id
+    ? currentUser.centre_id
+    : (activeCentre === 'All' 
+       ? (bayCentre ? bayCentre.id : (centres[0]?.id || '')) 
+       : activeCentre);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -27,6 +33,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
     centre_id: defaultCentreId,
     coach_id: '',
     level: '',
+    category: '',
     school: '',
     parent_name: '',
     relationship: 'Mother',
@@ -34,9 +41,12 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
     email: '',
     sibling: 'No',
     emergency_contact: '',
-    package_size: '12 classes',
+    package_size: '12',
+    bonus_classes: '0',
     rate_per_class: '100',
     start_date: '',
+    payment_method: 'cash',
+    payment_remarks: '',
     acquisition_source: 'Instagram',
     fide_id: '',
     consent_ops: true,
@@ -52,6 +62,27 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
   const [regFormUrl, setRegFormUrl] = useState('');
   const [emiratesIdUrl, setEmiratesIdUrl] = useState('');
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: boolean }>({});
+
+  const [dobYear, setDobYear] = useState('');
+  const [dobMonth, setDobMonth] = useState('');
+  const [dobDay, setDobDay] = useState('');
+
+  const years = Array.from({ length: 30 }, (_, i) => String(2026 - i));
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const days = Array.from({ length: 31 }, (_, i) => String(i + 1));
+
+  useEffect(() => {
+    if (dobYear && dobMonth && dobDay) {
+      const monthIdx = months.indexOf(dobMonth) + 1;
+      const monthStr = monthIdx < 10 ? `0${monthIdx}` : `${monthIdx}`;
+      const dayNum = parseInt(dobDay, 10);
+      const dayStr = dayNum < 10 ? `0${dayNum}` : `${dayNum}`;
+      setFormData(prev => ({
+        ...prev,
+        dob: `${dobYear}-${monthStr}-${dayStr}`
+      }));
+    }
+  }, [dobYear, dobMonth, dobDay]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: 'photo' | 'reg_form' | 'emirates_id') => {
     const file = e.target.files?.[0];
@@ -103,18 +134,15 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
     }));
   };
 
-  // Compute Package Total Box
   const getPackageTotalDetails = () => {
     const classes = parseInt(formData.package_size) || 12;
     const rate = parseFloat(formData.rate_per_class) || 100;
     const baseTotal = classes * rate;
-    const hasSiblingDiscount = formData.sibling === 'Yes';
-    const discount = hasSiblingDiscount ? 0.1 : 0;
-    const finalTotal = baseTotal * (1 - discount);
+    const finalTotal = baseTotal;
 
     return {
       total: finalTotal,
-      text: `Package total: AED ${finalTotal.toLocaleString()} · ${classes} × AED ${rate} · ${hasSiblingDiscount ? '10% sibling discount applied' : 'no discount applied'}`
+      text: `Package total: AED ${finalTotal.toLocaleString()} · ${classes} × AED ${rate}`
     };
   };
 
@@ -126,7 +154,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
     setSaveStatus('');
 
     const tiers = db.getTiers();
-    const classesNum = formData.package_size.match(/\d+/)?.[0] || '12';
+    const classesNum = formData.package_size || '12';
     const matchingTier = tiers.find(t => t.name.includes(`${classesNum} classes`)) 
       || tiers.find(t => t.name.includes(classesNum)) 
       || tiers[0];
@@ -144,14 +172,19 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       fide_id: formData.fide_id,
       centre_id: formData.centre_id,
       coach_id: formData.coach_id,
-      level: formData.level || 'Beginner',
+      level: formData.level || 'Beginner 1',
+      category: formData.category || 'Early Starts',
       tier_id: tierId,
+      package_size: formData.package_size,
+      bonus_classes: formData.bonus_classes,
       consent_ops: formData.consent_ops,
       consent_mktg: formData.consent_mktg,
       photo_url: photoUrl,
       flags: {
         reg_form_url: regFormUrl,
-        emirates_id_url: emiratesIdUrl
+        emirates_id_url: emiratesIdUrl,
+        payment_method: formData.payment_method,
+        payment_remarks: formData.payment_remarks
       }
     };
 
@@ -176,7 +209,10 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
         dob: '',
         school: '',
         fide_id: '',
-        emergency_contact: ''
+        emergency_contact: '',
+        bonus_classes: '0',
+        payment_remarks: '',
+        category: ''
       }));
     } catch (error: any) {
       console.error(error);
@@ -250,14 +286,36 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-ink">Date of birth *</label>
-              <input 
-                type="date" 
-                name="dob" 
-                value={formData.dob} 
-                onChange={handleChange} 
-                required 
-                className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
-              />
+              <div className="grid grid-cols-3 gap-2">
+                <select
+                  value={dobYear}
+                  onChange={e => setDobYear(e.target.value)}
+                  required
+                  className="bg-white border border-line rounded-lg px-2 py-2 text-xs text-ink outline-none"
+                >
+                  <option value="">Year</option>
+                  {years.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <select
+                  value={dobMonth}
+                  onChange={e => setDobMonth(e.target.value)}
+                  required
+                  className="bg-white border border-line rounded-lg px-2 py-2 text-xs text-ink outline-none"
+                >
+                  <option value="">Month</option>
+                  {months.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select
+                  value={dobDay}
+                  onChange={e => setDobDay(e.target.value)}
+                  required
+                  className="bg-white border border-line rounded-lg px-2 py-2 text-xs text-ink outline-none"
+                >
+                  <option value="">Day</option>
+                  {days.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <input type="hidden" name="dob" value={formData.dob} required />
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -282,7 +340,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
                 required 
                 className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
               >
-                {centres.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {visibleCentres.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
 
@@ -301,7 +359,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold text-ink">Level *</label>
+              <label className="text-xs font-bold text-ink">Performance Level *</label>
               <select 
                 name="level" 
                 value={formData.level} 
@@ -309,12 +367,30 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
                 required 
                 className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
               >
-                <option value="">Select...</option>
-                <option value="Beginner">Beginner</option>
+                <option value="">Select Level...</option>
+                <option value="Beginner 1">Beginner 1</option>
+                <option value="Beginner 2">Beginner 2</option>
+                <option value="Intermediate 1">Intermediate 1</option>
+                <option value="Intermediate 2">Intermediate 2</option>
+                <option value="Advanced">Advanced</option>
+                <option value="FIDE">FIDE</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-ink">Age Level (Category) *</label>
+              <select 
+                name="category" 
+                value={formData.category} 
+                onChange={handleChange} 
+                required 
+                className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
+              >
+                <option value="">Select Category...</option>
+                <option value="Early Starts">Early Starts</option>
                 <option value="Intermediate">Intermediate</option>
                 <option value="Advanced">Advanced</option>
               </select>
-              <span className="text-[10px] text-muted-custom">Mandatory — 211 of 362 current students have no level set</span>
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -398,7 +474,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
                 <option value="No">No</option>
                 <option value="Yes">Yes</option>
               </select>
-              <span className="text-[10px] text-muted-custom">Applies sibling discount automatically</span>
+              <span className="text-[10px] text-muted-custom">No sibling discount applies. Linked under same family.</span>
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -420,17 +496,28 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold text-ink">Package size *</label>
-              <select 
+              <label className="text-xs font-bold text-ink">Package size (No. of classes) *</label>
+              <input 
+                type="number" 
                 name="package_size" 
                 value={formData.package_size} 
                 onChange={handleChange} 
-                className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
-              >
-                <option value="12 classes">12 classes</option>
-                <option value="8 classes">8 classes</option>
-                <option value="24 classes">24 classes</option>
-              </select>
+                required 
+                min="1"
+                className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none font-mono"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-ink">Bonus classes</label>
+              <input 
+                type="number" 
+                name="bonus_classes" 
+                value={formData.bonus_classes} 
+                onChange={handleChange} 
+                min="0"
+                className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none font-mono"
+              />
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -471,6 +558,37 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
                 <option value="Word of Mouth">Word of Mouth</option>
               </select>
             </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-ink">Payment method *</label>
+              <select 
+                name="payment_method" 
+                value={formData.payment_method} 
+                onChange={handleChange} 
+                className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
+              >
+                <option value="cash">Cash</option>
+                <option value="bank transfer">Bank transfer</option>
+                <option value="online">Online</option>
+                <option value="center(POS)">Center(POS)</option>
+                <option value="tabby">Tabby</option>
+                <option value="others">Others</option>
+              </select>
+            </div>
+
+            {formData.payment_method === 'others' && (
+              <div className="flex flex-col gap-1.5 md:col-span-2">
+                <label className="text-xs font-bold text-ink">Payment method remarks</label>
+                <textarea 
+                  name="payment_remarks" 
+                  value={formData.payment_remarks} 
+                  onChange={handleChange} 
+                  rows={2}
+                  placeholder="Enter remarks for payment method..."
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none w-full"
+                />
+              </div>
+            )}
           </div>
 
           {/* Package Calculation banner */}

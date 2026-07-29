@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { getActionCentreData, renewPackage } from '../app/actions';
+import { getActionCentreData, renewPackage, approveStudentInactive, syncDatabaseToClient } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
 import { useRouter } from 'next/navigation';
 import { db } from '../lib/db';
@@ -17,10 +17,27 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
   const [centres, setCentres] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
   const [tiers, setTiers] = useState<any[]>([]);
+  const [pendingInactives, setPendingInactives] = useState<any[]>([]);
   
   const [selectedCentre, setSelectedCentre] = useState<string>("All");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
+
+  const handleApproveInactive = async (studentId: string) => {
+    if (!confirm("Are you sure you want to approve this student's inactivation? This will set remaining classes to 0 and remove slot enrollments.")) return;
+    setLoading(true);
+    try {
+      await approveStudentInactive(studentId);
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      loadData();
+      alert("✓ Student inactivation approved.");
+    } catch (e: any) {
+      alert("Error approving inactivation: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const loadData = () => {
     try {
@@ -47,6 +64,7 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
       setCentres(cens);
       setCoaches(coas);
       setTiers(trs);
+      setPendingInactives(enrichedStudents.filter(s => s.status === 'pending_inactive'));
     } catch (error) {
       console.error("Error loading action centre data from local DB:", error);
     } finally {
@@ -210,6 +228,52 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
         </div>
       )}
 
+      {/* Owner Approvals Queue */}
+      {currentUser?.role === 'owner' && pendingInactives.length > 0 && (
+        <div className="flex flex-col gap-4 p-5 rounded-[14px] bg-[#F5F2EB] border border-[#E9E3D3] border-l-4 border-l-[#C4A249] shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🔔</span>
+            <div className="font-bold text-ink">Pending Inactivation Approvals ({pendingInactives.length})</div>
+          </div>
+          <p className="text-xs text-muted-custom">
+            The following students have been requested to be marked inactive by front desk staff. Approving will set remaining classes to 0 and remove slot enrollments.
+          </p>
+          <div className="overflow-x-auto mt-2">
+            <table className="w-full text-xs text-left border-collapse">
+              <thead>
+                <tr className="border-b border-line text-muted-custom font-bold text-[9px] uppercase tracking-wider">
+                  <th className="py-2 px-3">Student Name</th>
+                  <th className="py-2 px-3">Centre</th>
+                  <th className="py-2 px-3">Assigned Coach</th>
+                  <th className="py-2 px-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {pendingInactives.map(s => (
+                  <tr key={s.id} className="hover:bg-canvas/20">
+                    <td className="py-2.5 px-3 font-semibold text-ink">
+                      <a href={`/students?id=${s.id}`} className="text-forest hover:underline font-bold">
+                        {s.name}
+                      </a>
+                    </td>
+                    <td className="py-2.5 px-3 text-forest">{s.centre?.name || '—'}</td>
+                    <td className="py-2.5 px-3 text-ink">{s.coach?.user?.name || 'Unassigned'}</td>
+                    <td className="py-2.5 px-3 text-right">
+                      <button
+                        onClick={() => handleApproveInactive(s.id)}
+                        className="bg-forest hover:bg-emerald-700 text-white font-bold text-[10px] px-3 py-1 rounded-lg transition-all"
+                      >
+                        Approve Inactive
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Top KPIs Grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {[
@@ -314,7 +378,7 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
                       <tr key={s.id} className="border-b border-line hover:bg-canvas/50 transition-all">
                         <td className="py-4 px-4">
                           <div className="font-semibold text-ink">
-                            <a href={`/student-dashboard?studentId=${s.id}`} className="hover:text-forest hover:underline">
+                            <a href={`/students?id=${s.id}`} className="text-forest hover:underline font-bold">
                               {s.name}
                             </a>
                           </div>

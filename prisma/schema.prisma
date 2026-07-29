@@ -133,6 +133,7 @@ model Package {
   frozen            Boolean?  @default(false)
   start_date        DateTime? @default(now()) @db.Date
   expiry_date       DateTime? @db.Date
+  bonus_classes     Int?      @default(0)
   invoices          Invoice[]
   student           Student   @relation(fields: [student_id], references: [id])
   tier              Tier?     @relation(fields: [tier_id], references: [id])

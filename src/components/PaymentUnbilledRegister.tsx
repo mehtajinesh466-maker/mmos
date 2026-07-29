@@ -6,6 +6,7 @@ import type { User, Student, Package, Coach, Centre } from '../lib/db';
 import { updateInvoiceDB, deleteInvoiceDB, syncDatabaseToClient } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
 import { computeStudentStatus, getStatusBadgeClasses, getPackageRate } from '../lib/segmentRules';
+import * as XLSX from 'xlsx';
 interface PaymentUnbilledRegisterProps {
   currentUser: User;
   activeCentre: string;
@@ -248,6 +249,312 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
     }
   };
 
+  const handleDownloadOverdueReportExcel = () => {
+    const allStudents = db.getStudents();
+    const allPackages = db.getPackages();
+    const allAttendance = db.getAttendance();
+    const allCoaches = db.getCoaches();
+    const allCentres = db.getCentres();
+    const allInvoices = db.get<any>('invoices') || [];
+    const allFamilies = db.get<any>('families') || [];
+    const tiers = db.get<any>('tiers') || [];
+
+    const today = new Date();
+
+    // Map each student to their metrics
+    const studentRows = allStudents.map(s => {
+      const centre = allCentres.find(c => c.id === s.centre_id);
+      const coach = allCoaches.find(c => c.id === s.coach_id);
+      const family = allFamilies.find(f => f.id === s.family_id);
+      const studentPkgs = allPackages.filter(p => p.student_id === s.id && !p.frozen);
+      const studentAtts = allAttendance.filter(a => a.student_id === s.id && (a.status === 'present' || a.status === 'makeup'));
+      
+      const centreName = centre?.name || 'Bay Avenue';
+      const rawCoach = coach?.name || 'Unassigned';
+      const coachName = rawCoach === 'Unassigned' ? 'Unassigned' : rawCoach.split(' ')[0].toUpperCase();
+
+      const pkgsCount = studentPkgs.length;
+      const totalClasses = studentPkgs.reduce((sum, p) => sum + p.classes_total, 0);
+      const classesLeft = studentPkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
+
+      const attDuration = studentAtts.reduce((sum, a) => sum + (a.duration || 2), 0);
+      const attSessions = studentAtts.length;
+
+      const overdueClasses = (s.flags as any)?.unpaid_classes || 0;
+      const overdueValue = (s.flags as any)?.unpaid_value || 0;
+
+      // Rate per class: if overdueValue and overdueClasses exist, compute. Else fallback.
+      let pricePerClass = 100;
+      if (overdueClasses > 0 && overdueValue > 0) {
+        pricePerClass = Math.round(overdueValue / overdueClasses);
+      } else {
+        const activePkg = studentPkgs.find(p => p.classes_remaining > 0) || studentPkgs[0] || null;
+        pricePerClass = activePkg ? getPackageRate(activePkg, allInvoices, tiers) : 125;
+      }
+
+      let totalPaid = allInvoices
+        .filter(inv => inv.student_id === s.id && inv.status === 'paid')
+        .reduce((sum, inv) => sum + Number(inv.amount), 0);
+      
+      if (totalPaid === 0 && studentPkgs.length > 0) {
+        studentPkgs.forEach(pkg => {
+          const pkgRate = getPackageRate(pkg, allInvoices, tiers);
+          const completed = pkg.classes_total - pkg.classes_remaining;
+          totalPaid += completed * pkgRate;
+        });
+      }
+
+      let daysSinceLastClass = 999;
+      let lastAttendedStr = '—';
+      if (s.last_attended) {
+        const d = new Date(s.last_attended);
+        const diffMs = today.getTime() - d.getTime();
+        daysSinceLastClass = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+        lastAttendedStr = d.toISOString().split('T')[0];
+      } else if (studentAtts.length > 0) {
+        const maxDate = studentAtts.reduce((latest, a) => {
+          const d = new Date(a.date);
+          return d > latest ? d : latest;
+        }, new Date(0));
+        daysSinceLastClass = Math.max(0, Math.floor((today.getTime() - maxDate.getTime()) / (1000 * 60 * 60 * 24)));
+        lastAttendedStr = maxDate.toISOString().split('T')[0];
+      }
+
+      // Determine Bucket
+      let bucket = 'HEALTHY';
+      if (overdueClasses > 0) {
+        bucket = 'OVERDUE';
+      } else if (classesLeft === 0) {
+        bucket = '0 LEFT';
+      } else if (classesLeft >= 1 && classesLeft <= 5) {
+        bucket = '1-5 LEFT';
+      } else if (classesLeft >= 6 && classesLeft <= 10) {
+        bucket = '6-10 LEFT';
+      } else if (classesLeft >= 11 && classesLeft <= 20) {
+        bucket = '11-20 LEFT';
+      } else {
+        bucket = '21+ LEFT';
+      }
+
+      const isStillAttending = daysSinceLastClass <= 120 && s.status === 'active';
+
+      return {
+        id: s.id,
+        name: s.name,
+        centre: centreName,
+        coach: coachName,
+        status: s.status,
+        level: s.level,
+        phone: family?.phone || '—',
+        pkgs: pkgsCount,
+        totalClasses,
+        attDuration,
+        attSessions,
+        classesLeft,
+        overdueClasses,
+        pricePerClass,
+        overdueValue,
+        totalPaid,
+        lastAttendedStr,
+        daysSinceLastClass,
+        bucket,
+        isStillAttending
+      };
+    });
+
+    // 1. Overdue Sheet Data
+    const overdueData = studentRows
+      .filter(r => r.isStillAttending && r.overdueClasses > 0)
+      .sort((a, b) => a.centre.localeCompare(b.centre) || a.name.localeCompare(b.name))
+      .map(r => ({
+        'Student Name': r.name,
+        'Centre': r.centre,
+        'Coach': r.coach,
+        'Status': r.status,
+        'Level': r.level,
+        'Mobile / WhatsApp': r.phone,
+        'Pkgs': r.pkgs,
+        'Package Paid - Total Classes': r.totalClasses,
+        'Attendance (by Class Duration)': r.attDuration,
+        'Attendance (by No. of Sessions)': r.attSessions,
+        'Overdue Classes': r.overdueClasses,
+        'Overdue (Sessions)': r.overdueClasses,
+        'Price / Class': r.pricePerClass,
+        'Unbilled Value (AED)': r.overdueValue,
+        'Last Attended': r.lastAttendedStr,
+        'Days Since': r.daysSinceLastClass === 999 ? '—' : r.daysSinceLastClass
+      }));
+
+    // 2. 0 Classes Left Sheet Data
+    const zeroLeftData = studentRows
+      .filter(r => r.isStillAttending && r.classesLeft === 0 && r.overdueClasses === 0)
+      .sort((a, b) => a.centre.localeCompare(b.centre) || a.name.localeCompare(b.name))
+      .map(r => ({
+        'Student Name': r.name,
+        'Centre': r.centre,
+        'Coach': r.coach,
+        'Status': r.status,
+        'Level': r.level,
+        'Mobile / WhatsApp': r.phone,
+        'Pkgs': r.pkgs,
+        'Package Paid - Total Classes': r.totalClasses,
+        'Attendance (by Class Duration)': r.attDuration,
+        'Attendance (by No. of Sessions)': r.attSessions,
+        'Classes Left': r.classesLeft,
+        'Classes Left (Sessions)': r.classesLeft,
+        'Last Attended': r.lastAttendedStr,
+        'Days Since': r.daysSinceLastClass === 999 ? '—' : r.daysSinceLastClass
+      }));
+
+    // 3. 1-5 Classes Left Sheet Data
+    const oneToFiveLeftData = studentRows
+      .filter(r => r.isStillAttending && r.classesLeft >= 1 && r.classesLeft <= 5)
+      .sort((a, b) => a.centre.localeCompare(b.centre) || a.name.localeCompare(b.name))
+      .map(r => ({
+        'Student Name': r.name,
+        'Centre': r.centre,
+        'Coach': r.coach,
+        'Status': r.status,
+        'Level': r.level,
+        'Mobile / WhatsApp': r.phone,
+        'Pkgs': r.pkgs,
+        'Package Paid - Total Classes': r.totalClasses,
+        'Attendance (by Class Duration)': r.attDuration,
+        'Attendance (by No. of Sessions)': r.attSessions,
+        'Classes Left': r.classesLeft,
+        'Classes Left (Sessions)': r.classesLeft,
+        'Last Attended': r.lastAttendedStr,
+        'Days Since': r.daysSinceLastClass === 999 ? '—' : r.daysSinceLastClass
+      }));
+
+    // 4. 6-10 Classes Left Sheet Data
+    const sixToTenLeftData = studentRows
+      .filter(r => r.isStillAttending && r.classesLeft >= 6 && r.classesLeft <= 10)
+      .sort((a, b) => a.centre.localeCompare(b.centre) || a.name.localeCompare(b.name))
+      .map(r => ({
+        'Student Name': r.name,
+        'Centre': r.centre,
+        'Coach': r.coach,
+        'Status': r.status,
+        'Level': r.level,
+        'Mobile / WhatsApp': r.phone,
+        'Pkgs': r.pkgs,
+        'Package Paid - Total Classes': r.totalClasses,
+        'Attendance (by Class Duration)': r.attDuration,
+        'Attendance (by No. of Sessions)': r.attSessions,
+        'Classes Left': r.classesLeft,
+        'Classes Left (Sessions)': r.classesLeft,
+        'Last Attended': r.lastAttendedStr,
+        'Days Since': r.daysSinceLastClass === 999 ? '—' : r.daysSinceLastClass
+      }));
+
+    // 5. Inactive List Sheet Data
+    const inactiveListData = studentRows
+      .filter(r => !r.isStillAttending)
+      .sort((a, b) => a.centre.localeCompare(b.centre) || a.name.localeCompare(b.name))
+      .map(r => ({
+        'Student Name': r.name,
+        'Centre': r.centre,
+        'Coach': r.coach,
+        'Status': r.status,
+        'Level': r.level,
+        'Mobile / WhatsApp': r.phone,
+        'Pkgs': r.pkgs,
+        'Package Paid - Total Classes': r.totalClasses,
+        'Attendance (by Class Duration)': r.attDuration,
+        'Attendance (by No. of Sessions)': r.attSessions,
+        'Classes Left': r.classesLeft,
+        'Overdue Classes': r.overdueClasses,
+        'Unbilled Value (AED)': r.overdueValue,
+        'Total Paid (AED)': r.totalPaid,
+        'Last Attended': r.lastAttendedStr,
+        'Days Since': r.daysSinceLastClass === 999 ? '—' : r.daysSinceLastClass,
+        'Bucket': r.bucket
+      }));
+
+    // 6. Full Ledger Sheet Data
+    const fullLedgerData = studentRows
+      .sort((a, b) => a.centre.localeCompare(b.centre) || a.name.localeCompare(b.name))
+      .map(r => ({
+        'Student Name': r.name,
+        'Centre': r.centre,
+        'Coach': r.coach,
+        'Status': r.status,
+        'Level': r.level,
+        'Mobile / WhatsApp': r.phone,
+        'Pkgs': r.pkgs,
+        'Package Paid - Total Classes': r.totalClasses,
+        'Attendance (by Class Duration)': r.attDuration,
+        'Attendance (by No. of Sessions)': r.attSessions,
+        'Total Paid (AED)': r.totalPaid,
+        'Classes Left': r.classesLeft,
+        'Overdue Classes': r.overdueClasses,
+        'Classes Left (Sessions)': r.classesLeft,
+        'Overdue (Sessions)': r.overdueClasses,
+        'Price / Class': r.pricePerClass,
+        'Unbilled Value (AED)': r.overdueValue,
+        'Last Attended': r.lastAttendedStr,
+        'Days Since': r.daysSinceLastClass === 999 ? '—' : r.daysSinceLastClass,
+        'Bucket': r.bucket,
+        'Activity': r.isStillAttending ? 'Active' : 'Inactive'
+      }));
+
+    // 7. Package Timeline Sheet Data
+    const packageTimelineData: any[] = [];
+    // Group timeline rows by centre and name
+    const timelineStudents = [...allStudents].sort((a, b) => {
+      const centreA = allCentres.find(c => c.id === a.centre_id)?.name || 'Bay Avenue';
+      const centreB = allCentres.find(c => c.id === b.centre_id)?.name || 'Bay Avenue';
+      return centreA.localeCompare(centreB) || a.name.localeCompare(b.name);
+    });
+
+    timelineStudents.forEach(s => {
+      const studentPkgs = allPackages.filter(p => p.student_id === s.id);
+      const sortedPkgs = [...studentPkgs].sort((a, b) => new Date(a.start_date || 0).getTime() - new Date(b.start_date || 0).getTime());
+      
+      const centre = allCentres.find(c => c.id === s.centre_id);
+      const centreName = centre?.name || 'Bay Avenue';
+
+      sortedPkgs.forEach((pkg, idx) => {
+        const pricePerClass = getPackageRate(pkg, allInvoices, tiers);
+        const pkgPrice = pkg.tier_id ? Number(tiers.find((t: any) => t.id === pkg.tier_id)?.price || 1000) : 1000;
+        const discount = pkg.discount_pct ? Number(pkg.discount_pct) : 0;
+        const netPrice = Math.round(pkgPrice * (1 - discount / 100));
+
+        packageTimelineData.push({
+          'Student Name': s.name,
+          'Centre': centreName,
+          'Pkg #': idx + 1,
+          'Type': pkg.kind === 'renewal' ? 'Renewal' : pkg.kind === 'new' ? 'New' : 'Tournament',
+          'Classes': pkg.classes_total,
+          'Price (AED)': netPrice,
+          'Price / Class': pricePerClass,
+          'Date of Payment': pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '—',
+          'Classes Used': pkg.classes_total - pkg.classes_remaining,
+          'Package Balance': pkg.classes_remaining
+        });
+      });
+    });
+
+    // Generate sheets and workbook
+    const wb = XLSX.utils.book_new();
+    
+    const addSheet = (data: any[], sheetName: string) => {
+      const ws = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    };
+
+    addSheet(overdueData, 'Overdue');
+    addSheet(zeroLeftData, '0 Classes Left');
+    addSheet(oneToFiveLeftData, '1-5 Classes Left');
+    addSheet(sixToTenLeftData, '6-10 Classes Left');
+    addSheet(inactiveListData, 'Inactive List');
+    addSheet(fullLedgerData, 'Full Ledger');
+    addSheet(packageTimelineData, 'Package Timeline');
+
+    XLSX.writeFile(wb, `Master_Moves_Overdue_Report_Jul2026_1.xlsx`);
+  };
+
   const SortTh = ({ col, children, right }: { col: string; children: React.ReactNode; right?: boolean }) => (
     <th
       onClick={() => toggleSort(col)}
@@ -374,7 +681,13 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
             onClick={() => exportTableToCSV('#payment-table', 'payments_register.csv')}
             className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
           >
-            ↓ Excel
+            ↓ Page Excel
+          </button>
+          <button 
+            onClick={handleDownloadOverdueReportExcel}
+            className="bg-forest hover:bg-emerald-700 active:scale-95 text-white font-bold text-[10px] px-3.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+          >
+            ↓ Overdue Excel Report
           </button>
           <button 
             onClick={exportToPDF}
@@ -449,9 +762,8 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
                     onClick={() => setSelectedStudent(row)}
                     className="border-b border-line hover:bg-canvas/40 transition-colors cursor-pointer"
                   >
-                    {/* Student */}
                     <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      <a href={`/student-dashboard?studentId=${row.id}`} className="hover:text-forest hover:underline">
+                      <a href={`/students?id=${row.id}`} className="text-forest hover:underline font-bold">
                         {row.studentName}
                       </a>
                     </td>
