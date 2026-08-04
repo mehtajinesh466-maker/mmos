@@ -14,12 +14,8 @@ export default function AttendancePage() {
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login");
-    } else if (session?.user?.role === "front_desk") {
-      // Front desk shouldn't access attendance typically, but if allowed, adjust here.
-      // Default deny for front_desk to attendance for now
-      router.push("/");
     }
-  }, [status, router, session]);
+  }, [status, router]);
 
   if (status === "loading" || !session) return null;
 

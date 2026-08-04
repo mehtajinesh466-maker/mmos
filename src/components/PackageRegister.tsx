@@ -23,7 +23,17 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
   const [filterCoach, setFilterCoach] = useState<string>('All coaches');
   const [filterSegment, setFilterSegment] = useState<string>('All segments');
   const [filterEngagement, setFilterEngagement] = useState<string>('All engagement');
+  const [filterType, setFilterType] = useState<string>('All types');
   const [search, setSearch] = useState<string>('');
+
+  const handleResetFilters = () => {
+    setFilterCentre('All centres');
+    setFilterCoach('All coaches');
+    setFilterSegment('All segments');
+    setFilterEngagement('All engagement');
+    setFilterType('All types');
+    setSearch('');
+  };
 
   // Sorting
   const [sortCol, setSortCol] = useState<string>('studentName');
@@ -237,6 +247,9 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
     if (filterSegment !== 'All segments') {
       rows = rows.filter(r => r.segment === filterSegment);
     }
+    if (filterType !== 'All types') {
+      rows = rows.filter(r => r.type === filterType);
+    }
     if (filterEngagement !== 'All engagement') {
       rows = rows.filter(r => 
         r.engagement === filterEngagement || 
@@ -262,7 +275,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
       if (av > bv) return sortAsc ? 1 : -1;
       return 0;
     });
-  }, [enriched, filterCentre, filterCoach, filterSegment, filterEngagement, search, sortCol, sortAsc]);
+  }, [enriched, filterCentre, filterCoach, filterSegment, filterEngagement, filterType, search, sortCol, sortAsc]);
 
   const toggleSort = (col: string) => {
     if (sortCol === col) {
@@ -376,6 +389,17 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
           </optgroup>
         </select>
 
+        <select
+          value={filterType}
+          onChange={e => setFilterType(e.target.value)}
+          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
+        >
+          <option>All types</option>
+          <option value="Renewal">Renewal</option>
+          <option value="New">New</option>
+          <option value=">> UNPAID <<">UNPAID</option>
+        </select>
+
         <input
           type="text"
           placeholder="Search..."
@@ -383,6 +407,15 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
           onChange={e => setSearch(e.target.value)}
           className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
         />
+
+        {(filterCentre !== 'All centres' || filterCoach !== 'All coaches' || filterSegment !== 'All segments' || filterEngagement !== 'All engagement' || filterType !== 'All types' || search !== '') && (
+          <button
+            onClick={handleResetFilters}
+            className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[10px] px-2.5 py-1 rounded transition-all cursor-pointer"
+          >
+            ✕ Reset Filters
+          </button>
+        )}
 
         <div className="ml-auto flex items-center gap-2 no-print">
           <span className="text-xs text-muted-custom font-semibold">{filtered.length} rows</span>

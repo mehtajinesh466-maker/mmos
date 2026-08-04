@@ -14,6 +14,23 @@ async function verifySession() {
   return session;
 }
 
+export async function logAuditDB(actorId: string | null, action: string, entity: string, before: any = null, after: any = null) {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        actor_id: actorId,
+        action,
+        entity,
+        before: before ? JSON.parse(JSON.stringify(before)) : null,
+        after: after ? JSON.parse(JSON.stringify(after)) : null,
+        at: new Date()
+      }
+    });
+  } catch (err) {
+    console.warn("Failed to record DB audit log:", err);
+  }
+}
+
 function generateRandomPassword(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
   let pass = "";
@@ -177,7 +194,7 @@ export async function deleteCentreDB(centreId: string) {
 
 export async function createScheduleSlot(centreId: string, coachId: string, day: string, time: string, level: string, capacity: number = 10) {
   const session = await verifySession();
-  if (session.user.role !== 'owner' && session.user.role !== 'coach') {
+  if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
   }
   if (session.user.role === 'coach') {
@@ -281,7 +298,8 @@ export async function syncDatabaseToClient() {
       enrollments,
       progressLogsRaw,
       notifications,
-      tournamentReports
+      tournamentReports,
+      auditLogsRaw
     ] = await Promise.all([
       prisma.centre.findMany(),
       prisma.user.findMany(),
@@ -303,12 +321,27 @@ export async function syncDatabaseToClient() {
       prisma.enrollment.findMany(),
       prisma.progressLog.findMany(),
       prisma.notification.findMany(),
-      prisma.tournamentReport.findMany()
+      prisma.tournamentReport.findMany(),
+      prisma.auditLog.findMany({
+        orderBy: { at: 'desc' },
+        take: 200,
+        include: { actor: true }
+      })
     ]);
 
     const coaches = coachesRaw.map(c => ({
       ...c,
       name: c.user?.name || 'Unassigned',
+    }));
+
+    const auditLogs = auditLogsRaw.map(l => ({
+      id: l.id,
+      actor: l.actor?.name || l.actor_id || 'System',
+      action: l.action || 'activity',
+      entity: l.entity || 'general',
+      before: l.before,
+      after: l.after,
+      at: l.at ? l.at.toISOString() : new Date().toISOString()
     }));
 
     const progressLogs = progressLogsRaw.map(l => ({
@@ -337,7 +370,8 @@ export async function syncDatabaseToClient() {
       enrollments,
       progressLogs,
       notifications,
-      tournamentReports
+      tournamentReports,
+      auditLogs
     }));
   }
 
@@ -784,6 +818,7 @@ export async function logAttendance(studentId: string, status: string | null, co
         where: { id: existing.id }
       });
       await updateStudentFlags(studentId);
+      await logAuditDB(session.user.id, 'DELETE_ATTENDANCE', 'attendance', existing, null);
       return deletedRecord;
     }
 
@@ -799,6 +834,7 @@ export async function logAttendance(studentId: string, status: string | null, co
       where: { id: existing.id },
       data: { status, duration }
     });
+    await logAuditDB(session.user.id, 'UPDATE_ATTENDANCE', 'attendance', { status: oldStatus, duration: oldDuration }, updated);
 
     if (oldStatus === 'present' && status !== 'present') {
       // Restore class
@@ -863,6 +899,8 @@ export async function logAttendance(studentId: string, status: string | null, co
       duration: duration
     }
   });
+
+  await logAuditDB(session.user.id, 'CREATE_ATTENDANCE', 'attendance', null, newRecord);
 
   if (status === 'present') {
     const pkg = await prisma.package.findFirst({
@@ -1291,6 +1329,70 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
   return JSON.parse(JSON.stringify(pkg));
 }
 
+export async function renewSiblingPackage(
+  tierId: string,
+  kind: 'renewal' | 'new' | 'tournament' = 'renewal',
+  allocations: Array<{ studentId: string; classes: number; amount: number; discountPct?: number }>
+) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+
+  const results = [];
+  const tier = await prisma.tier.findUnique({ where: { id: tierId } }) || { id: tierId };
+
+  for (const alloc of allocations) {
+    const student = await prisma.student.findUnique({
+      where: { id: alloc.studentId }
+    });
+    if (!student) continue;
+
+    if (session.user.role === 'front_desk' && session.user.centre_id) {
+      if (student.centre_id !== session.user.centre_id) {
+        throw new Error("Unauthorized student centre access");
+      }
+    }
+
+    const pkg = await prisma.package.create({
+      data: {
+        student_id: student.id,
+        tier_id: tier.id,
+        kind: kind,
+        classes_total: alloc.classes,
+        classes_remaining: alloc.classes,
+        discount_pct: alloc.discountPct ?? 10,
+        start_date: new Date(),
+      }
+    });
+
+    await prisma.invoice.create({
+      data: {
+        student_id: student.id,
+        package_id: pkg.id,
+        amount: Math.round(alloc.amount),
+        status: 'paid',
+        created_at: new Date()
+      }
+    }).catch(err => console.warn("Auto invoice generation skipped:", err));
+
+    // Clear low_package flag on student
+    const updatedFlags = typeof student.flags === 'object' && student.flags
+      ? { ...(student.flags as any) }
+      : {};
+    delete updatedFlags.low_package;
+
+    await prisma.student.update({
+      where: { id: student.id },
+      data: { flags: updatedFlags }
+    });
+
+    results.push(pkg);
+  }
+
+  return JSON.parse(JSON.stringify(results));
+}
+
 export async function getReconciliationData() {
   const session = await verifySession();
   const role = session.user.role;
@@ -1391,23 +1493,29 @@ export async function updatePackageDB(id: string, data: any) {
 
 export async function deleteAttendanceDB(id: string) {
   const session = await verifySession();
-  if (session.user.role !== 'owner') {
+  if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
   }
-  return await prisma.attendance.delete({
+  const before = await prisma.attendance.findUnique({ where: { id } });
+  const deleted = await prisma.attendance.delete({
     where: { id }
   });
+  await logAuditDB(session.user.id, 'DELETE_ATTENDANCE_REGISTER', 'attendance', before, null);
+  return deleted;
 }
 
 export async function updateAttendanceDB(id: string, status: string) {
   const session = await verifySession();
-  if (session.user.role !== 'owner') {
+  if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
   }
-  return await prisma.attendance.update({
+  const before = await prisma.attendance.findUnique({ where: { id } });
+  const updated = await prisma.attendance.update({
     where: { id },
     data: { status }
   });
+  await logAuditDB(session.user.id, 'UPDATE_ATTENDANCE_REGISTER', 'attendance', before, updated);
+  return updated;
 }
 
 export async function deleteInvoiceDB(id: string) {
@@ -1788,5 +1896,57 @@ export async function linkSiblingFamily(studentId: string, familyId: string) {
     where: { id: studentId },
     data: { family_id: familyId }
   });
+}
+
+export async function generateOnlineBackup() {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+
+  const [
+    centres, users, coaches, families, students, tiers, packages, scheduleSlots, attendance, invoices, enquiries, enrollments, progressLogs, notifications, auditLogs
+  ] = await Promise.all([
+    prisma.centre.findMany(),
+    prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, centre_id: true } }),
+    prisma.coach.findMany(),
+    prisma.family.findMany(),
+    prisma.student.findMany(),
+    prisma.tier.findMany(),
+    prisma.package.findMany(),
+    prisma.scheduleSlot.findMany(),
+    prisma.attendance.findMany(),
+    prisma.invoice.findMany(),
+    prisma.enquiry.findMany(),
+    prisma.enrollment.findMany(),
+    prisma.progressLog.findMany(),
+    prisma.notification.findMany(),
+    prisma.auditLog.findMany({ take: 500, orderBy: { at: 'desc' } })
+  ]);
+
+  const timestamp = new Date().toISOString();
+  const backupPayload = {
+    metadata: {
+      version: "1.0.0",
+      timestamp,
+      generatedBy: session.user.name || session.user.email,
+      environment: "online_server"
+    },
+    counts: {
+      students: students.length,
+      packages: packages.length,
+      attendance: attendance.length,
+      invoices: invoices.length,
+      coaches: coaches.length,
+      auditLogs: auditLogs.length
+    },
+    data: {
+      centres, users, coaches, families, students, tiers, packages, scheduleSlots, attendance, invoices, enquiries, enrollments, progressLogs, notifications, auditLogs
+    }
+  };
+
+  await logAuditDB(session.user.id, 'GENERATE_ONLINE_BACKUP', 'system', null, { timestamp, counts: backupPayload.counts });
+
+  return JSON.parse(JSON.stringify(backupPayload));
 }
 

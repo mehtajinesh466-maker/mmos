@@ -25,10 +25,22 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   const [filterCentre, setFilterCentre]   = useState<string>('All centres');
   const [filterCoach, setFilterCoach]     = useState<string>('All coaches');
   const [filterSegment, setFilterSegment] = useState<string>('All segments');
+  const [filterLevel, setFilterLevel]     = useState<string>('All levels');
   const [filterEngagement, setFilterEngagement] = useState<string>('All engagement');
   const [filterStatus, setFilterStatus]   = useState<string>('All');
   const [filterHeat, setFilterHeat]       = useState<string>('All urgency');
   const [search, setSearch]               = useState<string>('');
+
+  const handleResetFilters = () => {
+    setFilterCentre('All centres');
+    setFilterCoach('All coaches');
+    setFilterSegment('All segments');
+    setFilterLevel('All levels');
+    setFilterEngagement('All engagement');
+    setFilterStatus('All');
+    setFilterHeat('All urgency');
+    setSearch('');
+  };
 
   // Detail panel / Edit
   const [selected, setSelected] = useState<Student | null>(null);
@@ -289,6 +301,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
     if (filterCentre !== 'All centres') rows = rows.filter(r => r.centreName === filterCentre);
     if (filterCoach  !== 'All coaches')  rows = rows.filter(r => r.coachName === filterCoach);
     if (filterSegment !== 'All segments') rows = rows.filter(r => r.segment === filterSegment);
+    if (filterLevel !== 'All levels') rows = rows.filter(r => r.level === filterLevel);
     if (filterEngagement !== 'All engagement') rows = rows.filter(r => r.engagement === filterEngagement);
     if (filterHeat !== 'All urgency') rows = rows.filter(r => r.heat === filterHeat);
     if (search) rows = rows.filter(r => r.name.toLowerCase().includes(search.toLowerCase()) || r.displayId.toLowerCase().includes(search.toLowerCase()));
@@ -310,7 +323,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
       if (av > bv) return sortAsc ? 1 : -1;
       return 0;
     });
-  }, [enriched, filterCentre, filterCoach, filterSegment, filterEngagement, filterStatus, search, sortCol, sortAsc, currentUser, coachRecord]);
+  }, [enriched, filterCentre, filterCoach, filterSegment, filterLevel, filterEngagement, filterStatus, filterHeat, search, sortCol, sortAsc, currentUser, coachRecord]);
 
   // Coach-specific metrics
   const coachStats = useMemo(() => {
@@ -525,6 +538,18 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
         </select>
 
         <select
+          value={filterLevel}
+          onChange={e => setFilterLevel(e.target.value)}
+          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
+        >
+          <option>All levels</option>
+          <option value="Beginner">Beginner</option>
+          <option value="Intermediate">Intermediate</option>
+          <option value="Advanced">Advanced</option>
+          <option value="Pro-Track">Pro-Track</option>
+        </select>
+
+        <select
           value={filterEngagement}
           onChange={e => setFilterEngagement(e.target.value)}
           className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
@@ -566,6 +591,15 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
           onChange={e => setSearch(e.target.value)}
           className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
         />
+
+        {(filterCentre !== 'All centres' || filterCoach !== 'All coaches' || filterSegment !== 'All segments' || filterLevel !== 'All levels' || filterEngagement !== 'All engagement' || filterStatus !== 'All' || filterHeat !== 'All urgency' || search !== '') && (
+          <button
+            onClick={handleResetFilters}
+            className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[10px] px-2.5 py-1 rounded transition-all cursor-pointer"
+          >
+            ✕ Reset Filters
+          </button>
+        )}
 
         <div className="ml-auto flex items-center gap-2 no-print">
           <span className="text-xs text-muted-custom font-semibold">{filtered.length} rows</span>

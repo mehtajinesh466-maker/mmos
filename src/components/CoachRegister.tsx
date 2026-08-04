@@ -25,6 +25,14 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
   const [filterEngagement, setFilterEngagement] = useState<string>('All engagement');
   const [search, setSearch] = useState<string>('');
 
+  const handleResetFilters = () => {
+    setFilterCentre('All centres');
+    setFilterCoach('All coaches');
+    setFilterSegment('All segments');
+    setFilterEngagement('All engagement');
+    setSearch('');
+  };
+
   // Sorting
   const [sortCol, setSortCol] = useState<string>('studentsCount');
   const [sortAsc, setSortAsc] = useState<boolean>(false); // default sort descending by students count
@@ -362,6 +370,15 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
           onChange={e => setSearch(e.target.value)}
           className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
         />
+
+        {(filterCentre !== 'All centres' || filterCoach !== 'All coaches' || search !== '') && (
+          <button
+            onClick={handleResetFilters}
+            className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[10px] px-2.5 py-1 rounded transition-all cursor-pointer"
+          >
+            ✕ Reset Filters
+          </button>
+        )}
 
         <div className="ml-auto flex items-center gap-2 no-print">
           <span className="text-xs text-muted-custom font-semibold">{filtered.length} rows</span>

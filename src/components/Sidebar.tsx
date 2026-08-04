@@ -90,6 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         items: [
           { id: 'register', path: '/registration', label: 'Register Student', glyph: '♙' },
           { id: 'package', path: '/packages', label: 'New / Renew Package', glyph: '♜' },
+          { id: 'attendance', path: '/attendance', label: 'Attendance Entry', glyph: '♞', badge: offlineCount > 0 ? offlineCount : undefined },
           { id: 'enquiry', path: '/crm', label: 'Enquiry Intake', glyph: '♟' }
         ]
       });
@@ -98,8 +99,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
         items: [
           { id: 'student_reg', path: '/students', label: 'Student Register', glyph: '⚏' },
           { id: 'package_reg', path: '/package-register', label: 'Package Register', glyph: '⚏' },
+          { id: 'attendance_reg', path: '/attendance-register', label: 'Attendance Register', glyph: '⚏' },
           { id: 'payment_unbilled', path: '/payment-unbilled', label: 'Payment & Unbilled', glyph: '❖' },
+          { id: 'coach_reg', path: '/coach-register', label: 'Coach Register', glyph: '◎' },
           { id: 'student_dashboard', path: '/student-dashboard', label: 'Student Dashboard', glyph: '♟' }
+        ]
+      });
+      sections.push({
+        title: 'COACHING',
+        items: [
+          { id: 'schedules', path: '/schedule', label: 'Schedules', glyph: '▦' }
         ]
       });
       sections.push({
