@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "../../components/Sidebar";
 import { db } from "../../lib/db";
 import { syncDatabaseToClient } from "../actions";
+import { useCentre } from "../../context/CentreContext";
 
 export default function DashboardLayout({
   children,
@@ -12,19 +13,12 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const { data: session, status } = useSession();
-  const [activeCentre, setActiveCentre] = useState<string>("All");
+  const { activeCentre, setActiveCentre } = useCentre();
   const [offlineCount, setOfflineCount] = useState<number>(0);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     if (status !== "authenticated" || !session?.user) return;
-
-    const user = session.user as any;
-    if (user.role !== "owner" && user.centre_id) {
-      setActiveCentre(user.centre_id);
-    } else if (user.role === "owner") {
-      setActiveCentre("All");
-    }
 
     // Render immediately using local cached data
     setIsReady(true);

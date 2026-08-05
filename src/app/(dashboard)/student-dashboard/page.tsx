@@ -4,10 +4,12 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, Suspense } from "react";
 import { StudentDashboard } from "../../../components/StudentDashboard";
+import { useCentre } from "../../../context/CentreContext";
 
 export default function StudentDashboardPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { activeCentre } = useCentre();
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -18,7 +20,6 @@ export default function StudentDashboardPage() {
   if (status === "loading" || !session) return null;
 
   const currentUser = session.user as any;
-  const activeCentre = currentUser.centre_id || "All";
 
   return (
     <Suspense fallback={<div className="p-10 text-center text-muted-custom">Loading Dashboard...</div>}>

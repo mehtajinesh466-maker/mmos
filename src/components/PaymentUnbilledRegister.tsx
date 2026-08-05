@@ -753,6 +753,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
           <table id="payment-table" className="w-full border-collapse text-xs">
             <thead className="border-b border-line bg-canvas">
               <tr>
+                <th className="py-2.5 px-4 text-left font-semibold text-muted-custom w-12">S.No</th>
                 <SortTh col="studentName">Student</SortTh>
                 <SortTh col="displayId">ID</SortTh>
                 <SortTh col="centreName">Centre</SortTh>
@@ -768,17 +769,18 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-muted-custom text-xs">
+                  <td colSpan={11} className="py-12 text-center text-muted-custom text-xs">
                     No records match your filters.
                   </td>
                 </tr>
               ) : (
-                filtered.map(row => (
+                filtered.map((row, idx) => (
                   <tr
                     key={row.id}
                     onClick={() => setSelectedStudent(row)}
                     className="border-b border-line hover:bg-canvas/40 transition-colors cursor-pointer"
                   >
+                    <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">{idx + 1}</td>
                     <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       <a href={`/students?id=${row.id}`} className="text-forest hover:underline font-bold">
                         {row.studentName}

@@ -27,6 +27,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
   const [expiryDate, setExpiryDate] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
+  const [isFamilyShared, setIsFamilyShared] = useState(false);
 
   // Sibling tagging and class/amount split state
   const [siblingAllocations, setSiblingAllocations] = useState<Array<{ studentId: string; classes: number; amount: number }>>([]);
@@ -204,7 +205,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
 
         setSaveStatus(`✓ Sibling package created! Split ${calculatedDetails.classes} classes & AED ${Math.round(calculatedDetails.total)} across tagged siblings: ${taggedNames}.`);
       } else {
-        await renewPackage(selectedStudentId, tierId, packageType.toLowerCase() as any);
+        await renewPackage(selectedStudentId, tierId, packageType.toLowerCase() as any, isFamilyShared);
         const freshData = await syncDatabaseToClient();
         db.syncFromNeon(freshData);
         setSaveStatus('✓ Package created and saved to database! Ledger records updated.');
@@ -366,6 +367,19 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
               />
               <span className="text-[10px] text-muted-custom">Optional — drives the renewal trigger</span>
             </div>
+          </div>
+
+          <div className="flex items-center gap-2 py-2 px-1">
+            <input
+              type="checkbox"
+              id="isFamilyShared"
+              checked={isFamilyShared}
+              onChange={(e) => setIsFamilyShared(e.target.checked)}
+              className="rounded border-line text-forest focus:ring-forest w-4 h-4 cursor-pointer"
+            />
+            <label htmlFor="isFamilyShared" className="text-xs font-bold text-ink cursor-pointer select-none flex items-center gap-1.5">
+              <span>👪</span> Share package with siblings (Family Package)
+            </label>
           </div>
 
           {/* Pricing Calc Box */}

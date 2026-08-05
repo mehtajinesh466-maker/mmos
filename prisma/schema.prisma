@@ -131,6 +131,7 @@ model Package {
   classes_remaining Int
   discount_pct      Decimal?  @default(0) @db.Decimal(5, 2)
   frozen            Boolean?  @default(false)
+  is_family_shared  Boolean   @default(false)
   start_date        DateTime? @default(now()) @db.Date
   expiry_date       DateTime? @db.Date
   bonus_classes     Int?      @default(0)
@@ -142,17 +143,18 @@ model Package {
 }
 
 model ScheduleSlot {
-  id          String       @id @default(uuid()) @db.Uuid
-  centre_id   String       @db.Uuid
-  coach_id    String       @db.Uuid
-  day         String
-  time        String
-  level       String
-  capacity    Int          @default(10)
-  attendance  Attendance[]
-  enrollments Enrollment[]
-  centre      Centre       @relation(fields: [centre_id], references: [id])
-  coach       Coach        @relation(fields: [coach_id], references: [id])
+  id             String       @id @default(uuid()) @db.Uuid
+  centre_id      String       @db.Uuid
+  coach_id       String       @db.Uuid
+  day            String
+  time           String
+  level          String
+  capacity       Int          @default(10)
+  is_summer_camp Boolean      @default(false)
+  attendance     Attendance[]
+  enrollments    Enrollment[]
+  centre         Centre       @relation(fields: [centre_id], references: [id])
+  coach          Coach        @relation(fields: [coach_id], references: [id])
 
   @@map("schedule_slots")
 }

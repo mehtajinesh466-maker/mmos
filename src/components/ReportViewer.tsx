@@ -5401,7 +5401,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         )
       ) : (
         /* Original reports layout */
-        (currentUser?.role === 'front_desk' || currentUser?.role === 'coach') ? (
+        (currentUser?.role === 'coach') ? (
           /* Student level only layout */
           <div className="bg-surface border border-line rounded-2xl p-5 shadow-sm space-y-4 w-full">
             <div>

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/db';
 import type { User, Student, Package, ScheduleSlot, Attendance as AttendanceType, Coach } from '../lib/db';
-import { logAttendance, syncDatabaseToClient } from '../app/actions';
+import { logAttendance, syncDatabaseToClient, toggleSummerCampSlot } from '../app/actions';
 
 interface AttendanceProps {
   currentUser: User;
@@ -55,6 +55,13 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
   useEffect(() => {
     loadData();
+    syncDatabaseToClient()
+      .then((data) => {
+        db.syncFromNeon(data);
+        loadData();
+      })
+      .catch((e) => console.error("Failed to sync on mount:", e));
+
     window.addEventListener('db-synced', loadData);
     return () => window.removeEventListener('db-synced', loadData);
   }, [selectedCoachId]);
@@ -206,7 +213,11 @@ export const Attendance: React.FC<AttendanceProps> = ({
         const status = markings[key];
         if (!status) continue;
 
-        const duration = billedHours[key] ?? 2;
+        let duration = billedHours[key] ?? 2;
+        if (slot.is_summer_camp) {
+          const stored = typeof window !== 'undefined' ? localStorage.getItem('mmos_summer_camp_duration') : '2';
+          duration = stored === '1' ? 1 : 2;
+        }
         const record: AttendanceType = {
           id: `att-${slot.id}-${studentId}-${selectedDate}`,
           student_id: studentId,
@@ -222,7 +233,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
         if (isOnline) {
           db.processAttendanceRecord(record);
-          await logAttendance(record.student_id, record.status, record.coach_id, record.slot_id || undefined, duration);
+          await logAttendance(record.student_id, record.status, record.coach_id, record.slot_id || undefined, duration, selectedDate);
           savedCount++;
         } else {
           db.addToOfflineQueue(record);
@@ -357,8 +368,13 @@ export const Attendance: React.FC<AttendanceProps> = ({
                   <div className="flex items-center gap-6">
                     <span className="font-mono font-bold text-sm text-ink">{slot.time}</span>
                     <div>
-                      <h4 className="font-bold text-ink text-sm">
+                      <h4 className="font-bold text-ink text-sm flex items-center gap-2">
                         {slot.level || 'Unassigned level'}
+                        {slot.is_summer_camp && (
+                          <span className="bg-orange-100 text-orange-800 border border-orange-200 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                            ☀️ Summer Camp
+                          </span>
+                        )}
                       </h4>
                       <p className="text-[10px] text-muted-custom mt-0.5">
                         {getCentreName(slot.centre_id)} · {roster.length} student{roster.length > 1 ? 's' : ''}
@@ -474,6 +490,32 @@ export const Attendance: React.FC<AttendanceProps> = ({
                         >
                           {saveStatus === 'Saving attendance...' ? 'Saving...' : 'Save attendance'}
                         </button>
+
+                        <label className="flex items-center gap-1.5 text-xs font-semibold text-ink cursor-pointer bg-white border border-line px-3 py-2 rounded-lg hover:bg-canvas transition-all select-none">
+                           <input
+                             type="checkbox"
+                             checked={slot.is_summer_camp || false}
+                             onChange={async (e) => {
+                               const checked = e.target.checked;
+                               const existing = db.getScheduleSlots();
+                               const sIdx = existing.findIndex(s => s.id === slot.id);
+                               if (sIdx !== -1) {
+                                 existing[sIdx].is_summer_camp = checked;
+                                 db.save('schedule_slots', existing);
+                               }
+                               try {
+                                 await toggleSummerCampSlot(slot.id, checked);
+                                 const freshData = await syncDatabaseToClient();
+                                 db.syncFromNeon(freshData);
+                                 loadData();
+                               } catch (err) {
+                                 console.error("Failed to toggle summer camp on server:", err);
+                               }
+                             }}
+                             className="rounded border-line text-forest focus:ring-forest w-4 h-4 cursor-pointer"
+                           />
+                           <span>Summer Camp Class ☀️</span>
+                         </label>
 
                         <span className="text-[10px] text-muted-custom italic">
                           Present decrements the package · works offline

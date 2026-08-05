@@ -68,7 +68,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         items: [
           { id: 'reports_centre', path: '/reports-centre', label: 'Reports Centre', glyph: '📤' },
           { id: 'explorer', path: '/explorer', label: 'Explorer', glyph: '◎' },
-          { id: 'report_builder', path: '/analytics?tab=builder', label: 'Report Builder', glyph: '✚' }
+          { id: 'report_builder', path: '/analytics?tab=builder', label: 'Report Builder', glyph: '✚' },
+          { id: 'audit_log', path: '/audit', label: 'Audit Log & Backups', glyph: '🛡️' }
         ]
       });
       sections.push({
@@ -114,7 +115,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       sections.push({
         title: 'REPORTS',
         items: [
-          { id: 'reports_centre', path: '/reports-centre', label: 'Reports Centre', glyph: '📤' }
+          { id: 'reports_centre', path: '/reports-centre', label: 'Reports Centre', glyph: '📤' },
+          { id: 'audit_log', path: '/audit', label: 'Audit Log & Backups', glyph: '🛡️' }
         ]
       });
     } else if (role === 'coach') {
@@ -231,8 +233,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           Centre Focus
         </div>
         <div className="flex flex-wrap gap-1.5">
+          {(currentUser.role === 'owner' || currentUser.role === 'front_desk') && (
+            <button
+              onClick={() => setActiveCentre('All')}
+              className={`text-[11px] px-2.5 py-1 rounded-full border transition-all ${
+                activeCentre === 'All'
+                  ? 'bg-forest border-mint text-white font-medium'
+                  : 'bg-white/5 border-white/5 text-[#CFE3DC] hover:bg-white/10 hover:text-white'
+              } cursor-pointer`}
+            >
+              All Centres
+            </button>
+          )}
           {centres.map(c => {
-            const isActive = activeCentre === c.id || (activeCentre === 'All' && currentUser.role === 'owner');
+            const isActive = activeCentre === c.id;
             const isSoon = c.status === 'inactive';
             return (
               <button

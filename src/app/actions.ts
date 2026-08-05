@@ -192,7 +192,7 @@ export async function deleteCentreDB(centreId: string) {
 // Module 3 & 4: Scheduling and Progress
 // -------------------------------------------------------------
 
-export async function createScheduleSlot(centreId: string, coachId: string, day: string, time: string, level: string, capacity: number = 10) {
+export async function createScheduleSlot(centreId: string, coachId: string, day: string, time: string, level: string, capacity: number = 10, isSummerCamp: boolean = false) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
@@ -210,8 +210,20 @@ export async function createScheduleSlot(centreId: string, coachId: string, day:
       day,
       time,
       level,
-      capacity
+      capacity,
+      is_summer_camp: isSummerCamp
     }
+  });
+}
+
+export async function toggleSummerCampSlot(slotId: string, isSummerCamp: boolean) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  return await prisma.scheduleSlot.update({
+    where: { id: slotId },
+    data: { is_summer_camp: isSummerCamp }
   });
 }
 
@@ -312,7 +324,7 @@ export async function syncDatabaseToClient() {
       prisma.attendance.findMany({
         where: {
           date: {
-            gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+            gte: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000)
           }
         }
       }),
@@ -404,7 +416,7 @@ export async function syncDatabaseToClient() {
       prisma.attendance.findMany({
         where: {
           date: {
-            gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+            gte: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000)
           }
         }
       }),
@@ -463,10 +475,26 @@ export async function syncDatabaseToClient() {
       };
     }
 
-    const students = await prisma.student.findMany({
+    const primaryStudents = await prisma.student.findMany({
       where: { coach_id: coachRecord.id }
     });
-    const studentIds = students.map(s => s.id);
+    const primaryStudentIds = primaryStudents.map(s => s.id);
+
+    const coachSlots = await prisma.scheduleSlot.findMany({
+      where: { coach_id: coachRecord.id }
+    });
+    const coachSlotIds = coachSlots.map(s => s.id);
+
+    const enrollmentsRaw = await prisma.enrollment.findMany({
+      where: { slot_id: { in: coachSlotIds } }
+    });
+    const enrolledStudentIds = enrollmentsRaw.map(e => e.student_id);
+
+    const allVisibleStudentIds = Array.from(new Set([...primaryStudentIds, ...enrolledStudentIds]));
+
+    const students = await prisma.student.findMany({
+      where: { id: { in: allVisibleStudentIds } }
+    });
     const familyIds = students.map(s => s.family_id).filter(Boolean) as string[];
 
     const [
@@ -498,16 +526,16 @@ export async function syncDatabaseToClient() {
       }),
       prisma.tier.findMany({ where: { active: true } }),
       prisma.package.findMany({
-        where: { student_id: { in: studentIds } }
+        where: { student_id: { in: allVisibleStudentIds } }
       }),
       prisma.scheduleSlot.findMany({
         where: { coach_id: coachRecord.id }
       }),
       prisma.attendance.findMany({
-        where: { student_id: { in: studentIds } }
+        where: { student_id: { in: allVisibleStudentIds } }
       }),
       prisma.invoice.findMany({
-        where: { student_id: { in: studentIds } }
+        where: { student_id: { in: allVisibleStudentIds } }
       }),
       prisma.enquiry.findMany(),
       prisma.enrollment.findMany(),
@@ -515,10 +543,10 @@ export async function syncDatabaseToClient() {
         where: { coach_id: coachRecord.id }
       }),
       prisma.notification.findMany({
-        where: { student_id: { in: studentIds } }
+        where: { student_id: { in: allVisibleStudentIds } }
       }),
       prisma.tournamentReport.findMany({
-        where: { student_id: { in: studentIds } }
+        where: { student_id: { in: allVisibleStudentIds } }
       })
     ]);
 
@@ -768,7 +796,7 @@ async function updateStudentFlags(studentId: string, pkgId?: string, updatedRema
   }
 }
 
-export async function logAttendance(studentId: string, status: string | null, coachId: string, slotId?: string, duration: number = 2) {
+export async function logAttendance(studentId: string, status: string | null, coachId: string, slotId?: string, duration: number = 2, customDateStr?: string) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
@@ -780,19 +808,24 @@ export async function logAttendance(studentId: string, status: string | null, co
     }
   }
 
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
+  let targetDate = new Date();
+  if (customDateStr) {
+    targetDate = new Date(customDateStr);
+  }
 
-  const endOfToday = new Date();
-  endOfToday.setHours(23, 59, 59, 999);
+  const startOfDate = new Date(targetDate);
+  startOfDate.setHours(0, 0, 0, 0);
+
+  const endOfDate = new Date(targetDate);
+  endOfDate.setHours(23, 59, 59, 999);
 
   const existing = await prisma.attendance.findFirst({
     where: {
       student_id: studentId,
       slot_id: slotId || null,
       date: {
-        gte: startOfToday,
-        lte: endOfToday
+        gte: startOfDate,
+        lte: endOfDate
       }
     }
   });
@@ -805,7 +838,21 @@ export async function logAttendance(studentId: string, status: string | null, co
           where: { student_id: studentId, frozen: false },
           orderBy: { start_date: 'asc' }
         });
-        const pkgToRestore = pkgs.find(p => p.classes_remaining < p.classes_total);
+        let pkgToRestore = pkgs.find(p => p.classes_remaining < p.classes_total);
+        if (!pkgToRestore) {
+          const student = await prisma.student.findUnique({ where: { id: studentId } });
+          if (student && student.family_id) {
+            const siblings = await prisma.student.findMany({
+              where: { family_id: student.family_id }
+            });
+            const siblingIds = siblings.map(s => s.id);
+            const sharedPkgs = await prisma.package.findMany({
+              where: { student_id: { in: siblingIds }, is_family_shared: true, frozen: false },
+              orderBy: { start_date: 'asc' }
+            });
+            pkgToRestore = sharedPkgs.find(p => p.classes_remaining < p.classes_total);
+          }
+        }
         if (pkgToRestore) {
           const updatedPkg = await prisma.package.update({
             where: { id: pkgToRestore.id },
@@ -842,7 +889,21 @@ export async function logAttendance(studentId: string, status: string | null, co
         where: { student_id: studentId, frozen: false },
         orderBy: { start_date: 'asc' }
       });
-      const pkgToRestore = pkgs.find(p => p.classes_remaining < p.classes_total);
+      let pkgToRestore = pkgs.find(p => p.classes_remaining < p.classes_total);
+      if (!pkgToRestore) {
+        const student = await prisma.student.findUnique({ where: { id: studentId } });
+        if (student && student.family_id) {
+          const siblings = await prisma.student.findMany({
+            where: { family_id: student.family_id }
+          });
+          const siblingIds = siblings.map(s => s.id);
+          const sharedPkgs = await prisma.package.findMany({
+            where: { student_id: { in: siblingIds }, is_family_shared: true, frozen: false },
+            orderBy: { start_date: 'asc' }
+          });
+          pkgToRestore = sharedPkgs.find(p => p.classes_remaining < p.classes_total);
+        }
+      }
       if (pkgToRestore) {
         const updatedPkg = await prisma.package.update({
           where: { id: pkgToRestore.id },
@@ -860,12 +921,31 @@ export async function logAttendance(studentId: string, status: string | null, co
         },
         orderBy: { start_date: 'asc' }
       });
-      if (pkg) {
+      let targetPkg = pkg;
+      if (!targetPkg) {
+        const student = await prisma.student.findUnique({ where: { id: studentId } });
+        if (student && student.family_id) {
+          const siblings = await prisma.student.findMany({
+            where: { family_id: student.family_id }
+          });
+          const siblingIds = siblings.map(s => s.id);
+          targetPkg = await prisma.package.findFirst({
+            where: {
+              student_id: { in: siblingIds },
+              is_family_shared: true,
+              frozen: false,
+              classes_remaining: { gt: 0 }
+            },
+            orderBy: { start_date: 'asc' }
+          });
+        }
+      }
+      if (targetPkg) {
         const updatedPkg = await prisma.package.update({
-          where: { id: pkg.id },
-          data: { classes_remaining: pkg.classes_remaining - duration }
+          where: { id: targetPkg.id },
+          data: { classes_remaining: targetPkg.classes_remaining - duration }
         });
-        await updateStudentFlags(studentId, pkg.id, updatedPkg.classes_remaining);
+        await updateStudentFlags(studentId, targetPkg.id, updatedPkg.classes_remaining);
       }
     } else if (oldStatus === 'present' && status === 'present' && oldDuration !== duration) {
       // Adjust class deduction difference
@@ -873,13 +953,31 @@ export async function logAttendance(studentId: string, status: string | null, co
         where: { student_id: studentId, frozen: false },
         orderBy: { start_date: 'asc' }
       });
-      if (pkg) {
+      let targetPkg = pkg;
+      if (!targetPkg) {
+        const student = await prisma.student.findUnique({ where: { id: studentId } });
+        if (student && student.family_id) {
+          const siblings = await prisma.student.findMany({
+            where: { family_id: student.family_id }
+          });
+          const siblingIds = siblings.map(s => s.id);
+          targetPkg = await prisma.package.findFirst({
+            where: {
+              student_id: { in: siblingIds },
+              is_family_shared: true,
+              frozen: false
+            },
+            orderBy: { start_date: 'asc' }
+          });
+        }
+      }
+      if (targetPkg) {
         const diff = duration - oldDuration; // e.g. from 2 to 1 (diff = -1) or 1 to 2 (diff = 1)
         const updatedPkg = await prisma.package.update({
-          where: { id: pkg.id },
-          data: { classes_remaining: pkg.classes_remaining - diff }
+          where: { id: targetPkg.id },
+          data: { classes_remaining: targetPkg.classes_remaining - diff }
         });
-        await updateStudentFlags(studentId, pkg.id, updatedPkg.classes_remaining);
+        await updateStudentFlags(studentId, targetPkg.id, updatedPkg.classes_remaining);
       }
     }
 
@@ -895,7 +993,7 @@ export async function logAttendance(studentId: string, status: string | null, co
       status: status,
       coach_id: coachId,
       slot_id: slotId || null,
-      date: new Date(),
+      date: targetDate,
       duration: duration
     }
   });
@@ -911,12 +1009,31 @@ export async function logAttendance(studentId: string, status: string | null, co
       },
       orderBy: { start_date: 'asc' }
     });
-    if (pkg) {
+    let targetPkg = pkg;
+    if (!targetPkg) {
+      const student = await prisma.student.findUnique({ where: { id: studentId } });
+      if (student && student.family_id) {
+        const siblings = await prisma.student.findMany({
+          where: { family_id: student.family_id }
+        });
+        const siblingIds = siblings.map(s => s.id);
+        targetPkg = await prisma.package.findFirst({
+          where: {
+            student_id: { in: siblingIds },
+            is_family_shared: true,
+            frozen: false,
+            classes_remaining: { gt: 0 }
+          },
+          orderBy: { start_date: 'asc' }
+        });
+      }
+    }
+    if (targetPkg) {
       const updatedPkg = await prisma.package.update({
-        where: { id: pkg.id },
-        data: { classes_remaining: pkg.classes_remaining - duration }
+        where: { id: targetPkg.id },
+        data: { classes_remaining: targetPkg.classes_remaining - duration }
       });
-      await updateStudentFlags(studentId, pkg.id, updatedPkg.classes_remaining);
+      await updateStudentFlags(studentId, targetPkg.id, updatedPkg.classes_remaining);
     }
   }
 
@@ -1252,7 +1369,7 @@ export async function registerStudent(data: any) {
   return student;
 }
 
-export async function renewPackage(studentId: string, tierId: string, kind: 'renewal' | 'tournament' = 'renewal') {
+export async function renewPackage(studentId: string, tierId: string, kind: 'renewal' | 'tournament' = 'renewal', isFamilyShared: boolean = false) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
@@ -1296,6 +1413,7 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
       classes_total: classesTotal,
       classes_remaining: classesTotal,
       discount_pct: discount,
+      is_family_shared: isFamilyShared,
       start_date: new Date(),
     }
   });

@@ -22,6 +22,14 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [status, setStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [summerCampDuration, setSummerCampDuration] = useState<number>(2);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('mmos_summer_camp_duration');
+      setSummerCampDuration(stored === '1' ? 1 : 2);
+    }
+  }, []);
 
   // User management state
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -398,6 +406,7 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b border-line">
+                    <th className="text-left text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 px-3 w-12">S.No</th>
                     <th className="text-left text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 px-3">Coach</th>
                     <th className="text-left text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 px-3">Rename</th>
                     <th className="text-left text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 px-3">Centre</th>
@@ -411,13 +420,14 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
                 <tbody>
                   {coaches.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-xs text-muted-custom">No coaches found. Add one above.</td>
+                      <td colSpan={9} className="py-8 text-center text-xs text-muted-custom">No coaches found. Add one above.</td>
                     </tr>
-                  ) : coaches.map(coach => {
+                  ) : coaches.map((coach, idx) => {
                     const stats = coachStats.find(s => s.coachId === coach.id) || { students: 0, engaged: 0, cls30d: 0, runRate: 0 };
                     const isHighLoad = stats.students > 80;
                     return (
                       <tr key={coach.id} className="border-b border-line hover:bg-canvas/40">
+                        <td className="py-3 px-3 font-mono text-muted-custom text-xs w-12">{idx + 1}</td>
                         <td className="py-3 px-3 font-bold text-xs text-ink uppercase">{coach.name}</td>
                         <td className="py-3 px-3">
                           <div className="flex items-center gap-2">
@@ -489,6 +499,7 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="border-b border-line">
+                  <th className="text-left text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 pr-4 w-12">S.No</th>
                   <th className="text-left text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 pr-4">Centre</th>
                   <th className="text-left text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 pr-4">Code</th>
                   <th className="text-left text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 pr-4">Descriptor</th>
@@ -502,14 +513,15 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
               <tbody>
                 {centres.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-xs text-muted-custom">No centres found.</td>
+                    <td colSpan={9} className="py-8 text-center text-xs text-muted-custom">No centres found.</td>
                   </tr>
-                ) : centres.map(c => {
+                ) : centres.map((c, idx) => {
                   const stats = centreStats.find(s => s.centreId === c.id) || { students: 0, active: 0, runRate: 0 };
                   const isLive = c.status === 'active' || c.status === 'live';
                   const code = c.name.charAt(0).toUpperCase();
                   return (
                     <tr key={c.id} className="border-b border-line hover:bg-canvas/30">
+                      <td className="py-3 pr-4 font-mono text-muted-custom text-xs w-12">{idx + 1}</td>
                       <td className="py-3 pr-4 font-bold text-xs text-ink">{c.name}</td>
                       <td className="py-3 pr-4">
                         <span className="text-[#C4A249] font-bold text-xs">{code}</span>
@@ -811,6 +823,47 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
           </div>
         </div>
       )}
+
+      {/* Summer Camp Setting */}
+      <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm mt-6 space-y-4 max-w-4xl">
+        <div className="flex items-center gap-2">
+          <span className="text-sm">☀️</span>
+          <h3 className="font-bold text-sm text-ink uppercase tracking-wider font-display">Summer Camp Settings</h3>
+        </div>
+        <p className="text-[11px] text-muted-custom">
+          Choose the package burn rate (billing duration) when a student attendance status is logged as <b>Present</b> in a Summer Camp class.
+        </p>
+        <div className="flex flex-wrap gap-6 pt-1">
+          <label className="flex items-center gap-2 text-xs font-semibold text-ink cursor-pointer bg-canvas/30 px-4 py-2.5 rounded-xl border border-line hover:bg-canvas/50 transition-all select-none">
+            <input
+              type="radio"
+              name="summerCampDuration"
+              value={1}
+              checked={summerCampDuration === 1}
+              onChange={() => {
+                localStorage.setItem('mmos_summer_camp_duration', '1');
+                setSummerCampDuration(1);
+              }}
+              className="text-forest focus:ring-forest cursor-pointer"
+            />
+            Deduct 1 Class Credit (e.g. 2-hour summer camp class counts as 1 hour)
+          </label>
+          <label className="flex items-center gap-2 text-xs font-semibold text-ink cursor-pointer bg-canvas/30 px-4 py-2.5 rounded-xl border border-line hover:bg-canvas/50 transition-all select-none">
+            <input
+              type="radio"
+              name="summerCampDuration"
+              value={2}
+              checked={summerCampDuration === 2}
+              onChange={() => {
+                localStorage.setItem('mmos_summer_camp_duration', '2');
+                setSummerCampDuration(2);
+              }}
+              className="text-forest focus:ring-forest cursor-pointer"
+            />
+            Deduct 2 Class Credits (Charge full 2 hours)
+          </label>
+        </div>
+      </div>
     </div>
   );
 };

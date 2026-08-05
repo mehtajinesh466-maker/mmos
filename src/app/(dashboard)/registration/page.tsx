@@ -4,9 +4,11 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Registration } from "../../../components/Registration";
+import { useCentre } from "../../../context/CentreContext";
 
 export default function RegistrationPage() {
   const { data: session, status } = useSession();
+  const { activeCentre } = useCentre();
   const router = useRouter();
 
   useEffect(() => {
@@ -20,7 +22,6 @@ export default function RegistrationPage() {
   if (status === "loading" || !session) return null;
 
   const currentUser = session.user as any;
-  const activeCentre = currentUser.centre_id || "All";
-
+  
   return <Registration currentUser={currentUser} activeCentre={activeCentre} />;
 }

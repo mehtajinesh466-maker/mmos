@@ -403,6 +403,7 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
           <table id="coach-table" className="w-full border-collapse text-xs">
             <thead className="border-b border-line bg-canvas">
               <tr>
+                <th className="py-2.5 px-4 text-left font-semibold text-muted-custom w-12">S.No</th>
                 <SortTh col="coachName">Coach</SortTh>
                 <SortTh col="centreName">Centre</SortTh>
                 <SortTh col="studentsCount" right>Students</SortTh>
@@ -419,13 +420,13 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-12 text-center text-muted-custom text-xs">
+                  <td colSpan={12} className="py-12 text-center text-muted-custom text-xs">
                     No records match your filters.
                   </td>
                 </tr>
               ) : (
                 <>
-                  {filtered.map(row => (
+                  {filtered.map((row, idx) => (
                     <tr
                       key={row.id}
                       onClick={() => {
@@ -438,6 +439,7 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
                       }}
                       className="border-b border-line hover:bg-canvas/40 transition-colors font-medium cursor-pointer"
                     >
+                      <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">{idx + 1}</td>
                       {/* Coach */}
                       <td className="py-3 px-4 font-bold text-ink whitespace-nowrap">
                         {row.coachName === 'UNASSIGNED' ? (

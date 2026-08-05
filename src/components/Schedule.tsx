@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '../lib/db';
 import type { User, Student, Package, ScheduleSlot, Attendance, Coach } from '../lib/db';
-import { logAttendance, syncDatabaseToClient, createScheduleSlot, notifyEnrolledStudents, enrollStudent, unenrollStudent } from '../app/actions';
+import { logAttendance, syncDatabaseToClient, createScheduleSlot, notifyEnrolledStudents, enrollStudent, unenrollStudent, toggleSummerCampSlot } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
 
 interface ScheduleProps {
@@ -44,6 +44,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   const [newSlotCapacity, setNewSlotCapacity] = useState(10);
   const [newSlotCentreId, setNewSlotCentreId] = useState('');
   const [newSlotCoachId, setNewSlotCoachId] = useState('');
+  const [newSlotIsSummerCamp, setNewSlotIsSummerCamp] = useState(false);
 
   const loadData = () => {
     const stds = db.getStudents();
@@ -73,6 +74,13 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
 
   useEffect(() => {
     loadData();
+    syncDatabaseToClient()
+      .then((data) => {
+        db.syncFromNeon(data);
+        loadData();
+      })
+      .catch((e) => console.error("Failed to sync on mount:", e));
+
     window.addEventListener('db-synced', loadData);
     return () => window.removeEventListener('db-synced', loadData);
   }, [selectedCoachId]);
@@ -311,10 +319,16 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
 
     try {
       let savedCount = 0;
+      const slot = slots.find(s => s.id === slotId);
+      let duration = 2;
+      if (slot?.is_summer_camp) {
+        const stored = typeof window !== 'undefined' ? localStorage.getItem('mmos_summer_camp_duration') : '2';
+        duration = stored === '1' ? 1 : 2;
+      }
       for (const key of slotMarkings) {
         const studentId = key.substring(slotId.length + 1);
         const status = markings[key];
-        await logAttendance(studentId, status, activeCoachId, slotId);
+        await logAttendance(studentId, status, activeCoachId, slotId, duration);
         savedCount++;
       }
       const freshData = await syncDatabaseToClient();
@@ -514,8 +528,13 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                   <div className="flex items-center gap-6">
                     <span className="font-mono font-bold text-sm text-ink">{slot.time}</span>
                     <div>
-                      <h4 className="font-bold text-ink text-sm">
+                      <h4 className="font-bold text-ink text-sm flex items-center gap-2">
                         {slot.level || 'Unassigned level'}
+                        {slot.is_summer_camp && (
+                          <span className="bg-orange-100 text-orange-800 border border-orange-200 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                            ☀️ Summer Camp
+                          </span>
+                        )}
                       </h4>
                       <p className="text-[10px] text-muted-custom mt-0.5">
                         {getCentreName(slot.centre_id)} · {roster.length} student{roster.length > 1 ? 's' : ''} · 
@@ -646,6 +665,32 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                         >
                           Save attendance
                         </button>
+
+                        <label className="flex items-center gap-1.5 text-xs font-semibold text-ink cursor-pointer bg-white border border-line px-3 py-2 rounded-lg hover:bg-canvas transition-all select-none">
+                          <input
+                            type="checkbox"
+                            checked={slot.is_summer_camp || false}
+                            onChange={async (e) => {
+                              const checked = e.target.checked;
+                              const existing = db.getScheduleSlots();
+                              const sIdx = existing.findIndex(s => s.id === slot.id);
+                              if (sIdx !== -1) {
+                                existing[sIdx].is_summer_camp = checked;
+                                db.save('schedule_slots', existing);
+                              }
+                              try {
+                                await toggleSummerCampSlot(slot.id, checked);
+                                const freshData = await syncDatabaseToClient();
+                                db.syncFromNeon(freshData);
+                                loadData();
+                              } catch (err) {
+                                console.error("Failed to toggle summer camp on server:", err);
+                              }
+                            }}
+                            className="rounded border-line text-forest focus:ring-forest w-4 h-4 cursor-pointer"
+                          />
+                          <span>Summer Camp Class ☀️</span>
+                        </label>
 
                         <button
                           onClick={() => router.push(`/progress?slotId=${slot.id}`)}
@@ -880,7 +925,8 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                     day: newSlotDay,
                     time: newSlotTime,
                     level: newSlotLevel,
-                    capacity: newSlotCapacity
+                    capacity: newSlotCapacity,
+                    is_summer_camp: newSlotIsSummerCamp
                   };
 
                   const existingSlots = db.getScheduleSlots();
@@ -888,7 +934,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                   db.save('schedule_slots', existingSlots);
                   
                   try {
-                    await createScheduleSlot(targetCentreId, targetCoachId, newSlotDay, newSlotTime, newSlotLevel, newSlotCapacity);
+                    await createScheduleSlot(targetCentreId, targetCoachId, newSlotDay, newSlotTime, newSlotLevel, newSlotCapacity, newSlotIsSummerCamp);
                   } catch (err) {
                     console.warn("Server createScheduleSlot fallback:", err);
                   }
@@ -972,6 +1018,19 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                     className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
                   />
                 </div>
+              </div>
+
+              <div className="flex items-center gap-2 py-1">
+                <input
+                  type="checkbox"
+                  id="newSlotIsSummerCamp"
+                  checked={newSlotIsSummerCamp}
+                  onChange={(e) => setNewSlotIsSummerCamp(e.target.checked)}
+                  className="rounded border-line text-forest focus:ring-forest w-4 h-4 cursor-pointer"
+                />
+                <label htmlFor="newSlotIsSummerCamp" className="font-bold text-ink cursor-pointer select-none">
+                  Mark as Summer Camp Class ☀️
+                </label>
               </div>
 
               <div className="pt-4 border-t border-line flex gap-3">

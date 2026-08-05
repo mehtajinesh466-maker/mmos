@@ -4,9 +4,11 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, Suspense } from "react";
 import { PackageReport } from "../../../components/PackageReport";
+import { useCentre } from "../../../context/CentreContext";
 
 export default function PackageReportPage() {
   const { data: session, status } = useSession();
+  const { activeCentre } = useCentre();
   const router = useRouter();
 
   useEffect(() => {
@@ -18,8 +20,7 @@ export default function PackageReportPage() {
   if (status === "loading" || !session) return null;
 
   const currentUser = session.user as any;
-  const activeCentre = currentUser.centre_id || "All";
-
+  
   return (
     <Suspense fallback={<div className="p-10 text-center text-muted-custom">Loading Package Report...</div>}>
       <PackageReport currentUser={currentUser} activeCentre={activeCentre} />

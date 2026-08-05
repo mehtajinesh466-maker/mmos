@@ -79,6 +79,7 @@ export interface Package {
   classes_remaining: number;
   discount_pct: number;
   frozen: boolean;
+  is_family_shared?: boolean;
   start_date: string;
   expiry_date?: string;
 }
@@ -98,6 +99,7 @@ export interface ScheduleSlot {
   time: string; // HH:MM
   level: string;
   capacity?: number;
+  is_summer_camp?: boolean;
 }
 
 export interface Attendance {
@@ -202,10 +204,10 @@ export const db = {
     if (data.packages) this.save('packages', data.packages);
     if (data.scheduleSlots) this.save('schedule_slots', data.scheduleSlots);
     if (data.attendance) {
-      // Proactively keep only the last 60 days of attendance locally to save localStorage quota
-      const sixtyDaysAgo = new Date();
-      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
-      const filteredAttendance = data.attendance.filter((a: any) => new Date(a.date).getTime() >= sixtyDaysAgo.getTime());
+      // Proactively keep only the last 180 days of attendance locally to save localStorage quota
+      const hundredEightyDaysAgo = new Date();
+      hundredEightyDaysAgo.setDate(hundredEightyDaysAgo.getDate() - 180);
+      const filteredAttendance = data.attendance.filter((a: any) => new Date(a.date).getTime() >= hundredEightyDaysAgo.getTime());
       this.save('attendance', filteredAttendance);
     }
     if (data.invoices) this.save('invoices', data.invoices);
@@ -452,18 +454,30 @@ export const db = {
       const packages = this.get<Package>('packages');
       const students = this.get<Student>('students');
 
-      // 1) Find the active non-frozen package with remaining classes, sorted by start_date asc
-      const activePkg = packages
+      // 1) Find the active non-frozen individual package with remaining classes, sorted by start_date asc
+      let targetPkg = packages
         .filter(p => p.student_id === record.student_id && !p.frozen && p.classes_remaining > 0)
         .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())[0];
 
-      const beforePkg = activePkg ? { ...activePkg } : null;
+      // 2) Fallback: if no individual package, look for a sibling package marked as family-shared
+      if (!targetPkg) {
+        const student = students.find(s => s.id === record.student_id);
+        if (student && student.family_id) {
+          const siblingIds = students.filter(s => s.family_id === student.family_id).map(s => s.id);
+          targetPkg = packages
+            .filter(p => siblingIds.includes(p.student_id) && p.is_family_shared && !p.frozen && p.classes_remaining > 0)
+            .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())[0];
+        }
+      }
 
-      if (activePkg) {
-        // Decrement class remaining
-        activePkg.classes_remaining = Math.max(activePkg.classes_remaining - 1, 0);
+      const beforePkg = targetPkg ? { ...targetPkg } : null;
+
+      if (targetPkg) {
+        // Decrement class remaining based on attendance duration
+        const decrementVal = typeof record.duration === 'number' ? record.duration : 1;
+        targetPkg.classes_remaining = Math.max(targetPkg.classes_remaining - decrementVal, 0);
         this.save('packages', packages);
-        this.logAudit('package_decrement_trigger', 'packages', beforePkg, activePkg);
+        this.logAudit('package_decrement_trigger', 'packages', beforePkg, targetPkg);
       }
 
       // 2) Update student last_attended and clear 'inactive' flag

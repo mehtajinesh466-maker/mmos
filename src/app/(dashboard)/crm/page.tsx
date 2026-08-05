@@ -4,9 +4,11 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { CRM } from "../../../components/CRM";
+import { useCentre } from "../../../context/CentreContext";
 
 export default function CRMPage() {
   const { data: session, status } = useSession();
+  const { activeCentre } = useCentre();
   const router = useRouter();
 
   useEffect(() => {
@@ -20,7 +22,6 @@ export default function CRMPage() {
   if (status === "loading" || !session) return null;
 
   const currentUser = session.user as any;
-  const activeCentre = currentUser.centre_id || "All";
-
+  
   return <CRM currentUser={currentUser} activeCentre={activeCentre} />;
 }

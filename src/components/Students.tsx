@@ -423,6 +423,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
             <table id="coach-students-table" className="w-full border-collapse">
               <thead>
                 <tr className="border-b border-line text-left text-muted-custom text-[9px] uppercase tracking-wider font-bold">
+                  <th className="py-3 px-4 w-12">S.No</th>
                   <th className="py-3 px-4">Student</th>
                   <th className="py-3 px-4">Level</th>
                   <th className="py-3 px-4 text-right">Classes Left</th>
@@ -435,13 +436,14 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center text-muted-custom py-8">
+                    <td colSpan={8} className="text-center text-muted-custom py-8">
                       No active students found.
                     </td>
                   </tr>
                 ) : (
-                  filtered.map(row => (
+                  filtered.map((row, idx) => (
                     <tr key={row.id} className="border-b border-line hover:bg-canvas/50 transition-all font-medium text-ink">
+                      <td className="py-4 px-4 font-mono text-muted-custom text-xs w-12">{idx + 1}</td>
                       <td className="py-4 px-4 font-bold text-ink flex items-center gap-2">
                         {row.photo_url ? (
                           <img src={row.photo_url} alt="" className="w-6 h-6 object-cover rounded-full border border-line" />
@@ -624,6 +626,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
           <table id="student-table" className="w-full border-collapse text-xs">
             <thead className="border-b border-line bg-canvas">
               <tr>
+                <th className="py-2.5 px-4 text-left font-semibold text-muted-custom w-12">S.No</th>
                 <SortTh col="name">Student</SortTh>
                 <SortTh col="displayId">ID</SortTh>
                 <SortTh col="centreName">Centre</SortTh>
@@ -640,17 +643,18 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-12 text-center text-muted-custom">
+                  <td colSpan={12} className="py-12 text-center text-muted-custom">
                     No students match your filters.
                   </td>
                 </tr>
               ) : (
-                filtered.map(row => (
+                filtered.map((row, idx) => (
                   <tr
                     key={row.id}
                     onClick={() => setSelected(row)}
                     className="border-b border-line hover:bg-canvas/40 transition-colors cursor-pointer"
                   >
+                    <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">{idx + 1}</td>
                     <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap flex items-center gap-2" onClick={e => e.stopPropagation()}>
                       {row.photo_url ? (
                         <img src={row.photo_url} alt="" className="w-6 h-6 object-cover rounded-full border border-line" />

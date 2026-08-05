@@ -451,6 +451,7 @@ export const Explorer: React.FC = () => {
           <table id="explorer-breakdown-table" className="w-full border-collapse text-xs">
             <thead>
               <tr className="border-b border-line text-left text-muted-custom text-[9px] uppercase tracking-wider font-bold">
+                <th className="py-2.5 px-3 w-12">S.No</th>
                 <th className="py-2.5 px-3">
                   {diceBy.replace('By ', '').toUpperCase()}
                 </th>
@@ -471,6 +472,7 @@ export const Explorer: React.FC = () => {
 
                 return (
                   <tr key={idx} className="border-b border-line hover:bg-canvas/30 transition-colors font-medium text-ink">
+                    <td className="py-2.5 px-3 font-mono text-muted-custom w-12">{idx + 1}</td>
                     <td className="py-2.5 px-3 font-bold">{row.key}</td>
                     <td className="py-2.5 px-3 text-right font-mono">AED {row.runRate.toLocaleString()}</td>
                     <td className="py-2.5 px-3 text-right font-mono">{row.students}</td>

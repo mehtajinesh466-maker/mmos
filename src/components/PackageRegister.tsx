@@ -188,6 +188,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
           used,
           balance,
           status: pkg.classes_remaining === 0 ? 'COMPLETED' : 'CURRENT',
+          is_family_shared: pkg.is_family_shared || false,
           dateForSort: pkg.start_date ? new Date(pkg.start_date).getTime() : 0
         });
       });
@@ -440,6 +441,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
           <table id="package-table" className="w-full border-collapse text-xs">
             <thead className="border-b border-line bg-canvas">
               <tr>
+                <th className="py-2.5 px-4 text-left font-bold text-muted-custom uppercase tracking-widest w-12">S.No</th>
                 <SortTh col="studentName">Student</SortTh>
                 <SortTh col="displayId">ID</SortTh>
                 <SortTh col="centreName">Centre</SortTh>
@@ -457,12 +459,12 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="py-12 text-center text-muted-custom text-xs">
+                  <td colSpan={13} className="py-12 text-center text-muted-custom text-xs">
                     No packages match your filters.
                   </td>
                 </tr>
               ) : (
-                filtered.map(row => (
+                filtered.map((row, idx) => (
                   <tr
                     key={row.id}
                     onClick={() => {
@@ -481,6 +483,9 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
                     }}
                     className="border-b border-line hover:bg-canvas/40 transition-colors cursor-pointer"
                   >
+                    {/* S.No */}
+                    <td className="py-3 px-4 font-mono text-muted-custom">{idx + 1}</td>
+
                     {/* Student */}
                     <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       <a href={`/student-dashboard?studentId=${row.studentId}`} className="hover:text-forest hover:underline">
@@ -498,11 +503,16 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
                     <td className="py-3 px-4 font-mono text-ink text-center">{row.pkgNo}</td>
 
                     {/* Type */}
-                    <td className="py-3 px-4 whitespace-nowrap font-medium">
+                    <td className="py-3 px-4 whitespace-nowrap font-medium flex items-center gap-2">
                       {row.type === '>> UNPAID <<' ? (
                         <span className="text-hot-custom font-semibold">{row.type}</span>
                       ) : (
                         row.type
+                      )}
+                      {row.is_family_shared && (
+                        <span className="bg-sky-100 text-sky-800 border border-sky-200 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                          👪 Family Shared
+                        </span>
                       )}
                     </td>
 

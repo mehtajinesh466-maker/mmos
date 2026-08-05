@@ -396,6 +396,7 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="border-b border-line">
+                  <th className="text-left text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-3 w-12">S.No</th>
                   <th className="text-left text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-3">Child / Parent</th>
                   <th className="text-left text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-3">Centre · Source</th>
                   <th className="text-left text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-3">Trial Date</th>
@@ -407,13 +408,14 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
               <tbody>
                 {filteredEnquiries.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center text-muted-custom py-8 text-xs">
+                    <td colSpan={7} className="text-center text-muted-custom py-8 text-xs">
                       No active enquiries in pipeline.
                     </td>
                   </tr>
                 ) : (
-                  filteredEnquiries.map(enq => (
+                  filteredEnquiries.map((enq, idx) => (
                     <tr key={enq.id} className="border-b border-line hover:bg-canvas/50 cursor-pointer" onClick={() => setSelectedEnquiry(enq)}>
+                      <td className="py-3 px-3 font-mono text-muted-custom text-xs w-12">{idx + 1}</td>
                       <td className="py-3 px-3">
                         <div className="font-semibold text-xs text-ink">{enq.child}{enq.age ? <span className="text-muted-custom font-normal ml-1">Age {enq.age}</span> : ''}</div>
                         <div className="text-[10px] text-muted-custom mt-0.5">{enq.parent} · {enq.phone}</div>

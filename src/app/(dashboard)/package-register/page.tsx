@@ -4,10 +4,12 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { PackageRegister } from "../../../components/PackageRegister";
+import { useCentre } from "../../../context/CentreContext";
 
 export default function PackageRegisterPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { activeCentre } = useCentre();
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -20,7 +22,6 @@ export default function PackageRegisterPage() {
   if (status === "loading" || !session) return null;
 
   const currentUser = session.user as any;
-  const activeCentre = currentUser.centre_id || "All";
 
   return <PackageRegister currentUser={currentUser} activeCentre={activeCentre} />;
 }

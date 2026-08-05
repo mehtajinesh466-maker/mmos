@@ -94,7 +94,19 @@ export const ReportsCentre: React.FC<ReportsCentreProps> = ({ currentUser }) => 
 
   const allowedFamilies = families.map(f => {
     if (currentUser?.role === 'front_desk') {
-      if (f.title === 'Finance' || f.title === 'Strategy') return null;
+      if (f.title === 'Strategy') return null;
+      if (f.title === 'Finance') {
+        const allowedReports = f.reports.filter(r => 
+          r.id === 'unbilled-leak' || 
+          r.id === 'collection-list' || 
+          r.id === 'data-reconciliation'
+        );
+        return {
+          ...f,
+          reports: allowedReports,
+          count: `${allowedReports.length} reports`
+        };
+      }
       if (f.title === 'Operations') {
         const filteredOps = f.reports.filter(r => r.id !== 'engagement-report');
         return {

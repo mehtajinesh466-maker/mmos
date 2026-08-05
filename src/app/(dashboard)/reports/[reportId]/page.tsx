@@ -20,9 +20,6 @@ export default function ReportDetailPage() {
     } else if (session?.user?.role === "front_desk") {
       const restrictedReports = [
         'revenue-summary',
-        'unbilled-leak',
-        'data-reconciliation',
-        'collection-list',
         'membership-economics',
         'lifetime-value',
         'rate-card',
