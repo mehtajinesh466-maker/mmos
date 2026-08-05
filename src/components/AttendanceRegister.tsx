@@ -23,6 +23,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
   const [filterSegment, setFilterSegment] = useState<string>('All segments');
   const [filterEngagement, setFilterEngagement] = useState<string>('All engagement');
   const [search, setSearch] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'students' | 'logs'>('students');
 
   const handleResetFilters = () => {
     setFilterCentre('All centres');
@@ -205,6 +206,44 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
     });
   }, [enriched, filterCentre, filterCoach, filterSegment, filterEngagement, search, sortCol, sortAsc]);
 
+  // Memoized consolidated logs list of all days
+  const filteredLogs = useMemo(() => {
+    let rows = attendance.map(log => {
+      const student = students.find(s => s.id === log.student_id);
+      const studentName = student?.name || 'Unknown';
+      
+      const centre = centres.find(c => c.id === student?.centre_id);
+      const centreName = centre?.name || '—';
+      
+      const coach = coaches.find(c => c.id === log.coach_id);
+      const coachName = coach?.name || 'UNASSIGNED';
+
+      return {
+        ...log,
+        studentName,
+        centreName,
+        coachName
+      };
+    });
+
+    if (filterCentre !== 'All centres') {
+      rows = rows.filter(r => r.centreName === filterCentre);
+    }
+    if (filterCoach !== 'All coaches') {
+      rows = rows.filter(r => r.coachName.toUpperCase() === filterCoach.toUpperCase());
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      rows = rows.filter(r => 
+        r.studentName.toLowerCase().includes(q) || 
+        r.topic?.toLowerCase().includes(q)
+      );
+    }
+
+    // Sort by date descending
+    return rows.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [attendance, students, coaches, centres, filterCentre, filterCoach, search]);
+
   const toggleSort = (col: string) => {
     if (sortCol === col) {
       setSortAsc(!sortAsc);
@@ -364,166 +403,282 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
         Attendance register. Class counts per student by period — download for your own attendance checks.
       </p>
 
-      {/* Filter Bar */}
-      <div className="flex flex-wrap items-center gap-2 py-2">
-        <span className="text-[9px] font-bold text-muted-custom uppercase tracking-widest mr-1">Filter</span>
-
-        <select
-          value={filterCentre}
-          onChange={e => setFilterCentre(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All centres</option>
-          {centres.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-        </select>
-
-        <select
-          value={filterCoach}
-          onChange={e => setFilterCoach(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All coaches</option>
-          {uniqueCoaches.map(coach => <option key={coach} value={coach}>{coach}</option>)}
-        </select>
-
-        <select
-          value={filterSegment}
-          onChange={e => setFilterSegment(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All segments</option>
-          {uniqueSegments.map(seg => <option key={seg} value={seg}>{seg}</option>)}
-        </select>
-
-        <select
-          value={filterEngagement}
-          onChange={e => setFilterEngagement(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All engagement</option>
-          {['ENGAGED', 'SLIPPING', 'COLD', 'DORMANT'].map(eng => <option key={eng} value={eng}>{eng}</option>)}
-        </select>
-
-        <input
-          type="text"
-          placeholder="Search..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
-        />
-
-        {(filterCentre !== 'All centres' || filterCoach !== 'All coaches' || filterSegment !== 'All segments' || filterEngagement !== 'All engagement' || search !== '') && (
+      {/* Tab Switcher & Action Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-line pb-1 gap-4">
+        <div className="flex gap-2">
           <button
-            onClick={handleResetFilters}
-            className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[10px] px-2.5 py-1 rounded transition-all cursor-pointer"
+            onClick={() => setActiveTab('students')}
+            className={`py-2 px-3 text-xs font-bold transition-all border-b-2 -mb-[6px] ${
+              activeTab === 'students'
+                ? 'border-forest text-forest font-bold'
+                : 'border-transparent text-muted-custom hover:text-ink'
+            }`}
           >
-            ✕ Reset Filters
+            👤 Student Summary
           </button>
-        )}
+          <button
+            onClick={() => setActiveTab('logs')}
+            className={`py-2 px-3 text-xs font-bold transition-all border-b-2 -mb-[6px] ${
+              activeTab === 'logs'
+                ? 'border-forest text-forest font-bold'
+                : 'border-transparent text-muted-custom hover:text-ink'
+            }`}
+          >
+            📋 Class Logs (All Days)
+          </button>
+        </div>
 
-        <div className="ml-auto flex items-center gap-2 no-print">
-          <span className="text-xs text-muted-custom font-semibold">{filtered.length} rows</span>
-          <button 
-            onClick={() => exportTableToCSV('#attendance-table', 'attendance_register.csv')}
-            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[9px] font-bold text-muted-custom uppercase tracking-widest mr-1">Filter</span>
+
+          <select
+            value={filterCentre}
+            onChange={e => setFilterCentre(e.target.value)}
+            className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
           >
-            ↓ Excel
-          </button>
-          <button 
-            onClick={exportToPDF}
-            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+            <option>All centres</option>
+            {centres.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+
+          <select
+            value={filterCoach}
+            onChange={e => setFilterCoach(e.target.value)}
+            className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
           >
-            ⎙ PDF
-          </button>
+            <option>All coaches</option>
+            {uniqueCoaches.map(coach => <option key={coach} value={coach}>{coach}</option>)}
+          </select>
+
+          {activeTab === 'students' && (
+            <>
+              <select
+                value={filterSegment}
+                onChange={e => setFilterSegment(e.target.value)}
+                className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
+              >
+                <option>All segments</option>
+                {uniqueSegments.map(seg => <option key={seg} value={seg}>{seg}</option>)}
+              </select>
+
+              <select
+                value={filterEngagement}
+                onChange={e => setFilterEngagement(e.target.value)}
+                className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
+              >
+                <option>All engagement</option>
+                {['ENGAGED', 'SLIPPING', 'COLD', 'DORMANT'].map(eng => <option key={eng} value={eng}>{eng}</option>)}
+              </select>
+            </>
+          )}
+
+          <input
+            type="text"
+            placeholder="Search student..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
+          />
+
+          {(filterCentre !== 'All centres' || filterCoach !== 'All coaches' || filterSegment !== 'All segments' || filterEngagement !== 'All engagement' || search !== '') && (
+            <button
+              onClick={handleResetFilters}
+              className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[10px] px-2.5 py-1 rounded transition-all cursor-pointer"
+            >
+              ✕ Reset
+            </button>
+          )}
+
+          <div className="flex items-center gap-2 no-print ml-2">
+            <span className="text-xs text-muted-custom font-semibold">
+              {activeTab === 'students' ? filtered.length : filteredLogs.length} rows
+            </span>
+            <button 
+              onClick={() => exportTableToCSV(activeTab === 'students' ? '#attendance-table' : '#logs-table', 'attendance_register.csv')}
+              className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+            >
+              ↓ Excel
+            </button>
+            <button 
+              onClick={exportToPDF}
+              className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
+            >
+              ⎙ PDF
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Main Table Grid */}
-      <div className="bg-surface border border-line rounded-[14px] shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table id="attendance-table" className="w-full border-collapse text-xs">
-            <thead className="border-b border-line bg-canvas">
-              <tr>
-                <th className="py-2.5 px-4 text-left font-semibold text-muted-custom w-12">S.No</th>
-                <SortTh col="studentName">Student</SortTh>
-                <SortTh col="displayId">ID</SortTh>
-                <SortTh col="centreName">Centre</SortTh>
-                <SortTh col="coachName">Coach</SortTh>
-                <SortTh col="level">Level</SortTh>
-                <SortTh col="cls30d" right>Classes 30D</SortTh>
-                <SortTh col="cls90d" right>Classes 90D</SortTh>
-                <SortTh col="daysSince" right>Days Since Last</SortTh>
-                <SortTh col="lastClass">Last Class</SortTh>
-                <SortTh col="engagement">Engagement</SortTh>
-                <SortTh col="classesLeft" right>Classes Left</SortTh>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
+      {/* Main Table Grid Conditional on Tab */}
+      {activeTab === 'students' ? (
+        <div className="bg-surface border border-line rounded-[14px] shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table id="attendance-table" className="w-full border-collapse text-xs">
+              <thead className="border-b border-line bg-canvas">
                 <tr>
-                  <td colSpan={12} className="py-12 text-center text-muted-custom text-xs">
-                    No records match your filters.
-                  </td>
+                  <th className="py-2.5 px-4 text-left font-semibold text-muted-custom w-12">S.No</th>
+                  <SortTh col="studentName">Student</SortTh>
+                  <SortTh col="displayId">ID</SortTh>
+                  <SortTh col="centreName">Centre</SortTh>
+                  <SortTh col="coachName">Coach</SortTh>
+                  <SortTh col="level">Level</SortTh>
+                  <SortTh col="cls30d" right>Classes 30D</SortTh>
+                  <SortTh col="cls90d" right>Classes 90D</SortTh>
+                  <SortTh col="daysSince" right>Days Since Last</SortTh>
+                  <SortTh col="lastClass">Last Class</SortTh>
+                  <SortTh col="engagement">Engagement</SortTh>
+                  <SortTh col="classesLeft" right>Classes Left</SortTh>
                 </tr>
-              ) : (
-                filtered.map((row, idx) => (
-                  <tr
-                    key={row.id}
-                    onClick={() => setSelectedStudent(row)}
-                    className="border-b border-line hover:bg-canvas/40 transition-colors cursor-pointer"
-                  >
-                    <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">{idx + 1}</td>
-                    {/* Student */}
-                    <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      <a href={`/student-dashboard?studentId=${row.id}`} className="hover:text-forest hover:underline">
-                        {row.studentName}
-                      </a>
-                    </td>
-
-                    {/* ID */}
-                    <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">{row.displayId}</td>
-
-                    {/* Centre */}
-                    <td className="py-3 px-4 text-muted-custom whitespace-nowrap">{row.centreName}</td>
-
-                    {/* Coach */}
-                    <td className="py-3 px-4 text-[10px] font-semibold text-ink/90 whitespace-nowrap uppercase">{row.coachName}</td>
-
-                    {/* Level */}
-                    <td className="py-3 px-4 text-muted-custom whitespace-nowrap">{row.level}</td>
-
-                    {/* Classes 30D */}
-                    <td className="py-3 px-4 text-right font-mono font-bold text-ink">{row.cls30d}</td>
-
-                    {/* Classes 90D */}
-                    <td className="py-3 px-4 text-right font-mono text-ink">{row.cls90d}</td>
-
-                    {/* Days Since Last */}
-                    <td className="py-3 px-4 text-right font-mono text-ink">
-                      {row.daysSince !== null ? row.daysSince : '—'}
-                    </td>
-
-                    {/* Last Class */}
-                    <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">{row.lastClass}</td>
-
-                    {/* Engagement */}
-                    <td className="py-3 px-4">
-                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${engagementBadge(row.engagement)}`}>
-                        {row.engagement}
-                      </span>
-                    </td>
-
-                    {/* Classes Left */}
-                    <td className={`py-3 px-4 text-right font-mono font-bold ${row.classesLeft === 0 ? 'text-hot-custom' : 'text-ink'}`}>
-                      {row.classesLeft}
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={12} className="py-12 text-center text-muted-custom text-xs">
+                      No records match your filters.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  filtered.map((row, idx) => (
+                    <tr
+                      key={row.id}
+                      onClick={() => setSelectedStudent(row)}
+                      className="border-b border-line hover:bg-canvas/40 transition-colors cursor-pointer"
+                    >
+                      <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">{idx + 1}</td>
+                      {/* Student */}
+                      <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <a href={`/student-dashboard?studentId=${row.id}`} className="hover:text-forest hover:underline">
+                          {row.studentName}
+                        </a>
+                      </td>
+
+                      {/* ID */}
+                      <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">{row.displayId}</td>
+
+                      {/* Centre */}
+                      <td className="py-3 px-4 text-muted-custom whitespace-nowrap">{row.centreName}</td>
+
+                      {/* Coach */}
+                      <td className="py-3 px-4 text-[10px] font-semibold text-ink/90 whitespace-nowrap uppercase">{row.coachName}</td>
+
+                      {/* Level */}
+                      <td className="py-3 px-4 text-muted-custom whitespace-nowrap">{row.level}</td>
+
+                      {/* Classes 30D */}
+                      <td className="py-3 px-4 text-right font-mono font-bold text-ink">{row.cls30d}</td>
+
+                      {/* Classes 90D */}
+                      <td className="py-3 px-4 text-right font-mono text-ink">{row.cls90d}</td>
+
+                      {/* Days Since Last */}
+                      <td className="py-3 px-4 text-right font-mono text-ink">
+                        {row.daysSince !== null ? row.daysSince : '—'}
+                      </td>
+
+                      {/* Last Class */}
+                      <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">{row.lastClass}</td>
+
+                      {/* Engagement */}
+                      <td className="py-3 px-4">
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${engagementBadge(row.engagement)}`}>
+                          {row.engagement}
+                        </span>
+                      </td>
+
+                      {/* Classes Left */}
+                      <td className={`py-3 px-4 text-right font-mono font-bold ${row.classesLeft === 0 ? 'text-hot-custom' : 'text-ink'}`}>
+                        {row.classesLeft}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-surface border border-line rounded-[14px] shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table id="logs-table" className="w-full border-collapse text-xs">
+              <thead className="border-b border-line bg-canvas">
+                <tr className="text-left text-muted-custom text-[9px] uppercase tracking-wider font-bold">
+                  <th className="py-2.5 px-4 w-12">S.No</th>
+                  <th className="py-2.5 px-4">Date</th>
+                  <th className="py-2.5 px-4">Student</th>
+                  <th className="py-2.5 px-4">Centre</th>
+                  <th className="py-2.5 px-4">Coach</th>
+                  <th className="py-2.5 px-4">Topic / Lesson</th>
+                  <th className="py-2.5 px-4">Duration</th>
+                  <th className="py-2.5 px-4">Status</th>
+                  <th className="py-2.5 px-4 text-center w-24">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-12 text-center text-muted-custom text-xs">
+                      No attendance logs match your filters.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredLogs.map((log, idx) => (
+                    <tr key={log.id} className="border-b border-line hover:bg-canvas/30 transition-colors font-medium">
+                      <td className="py-3 px-4 font-mono text-muted-custom w-12">{idx + 1}</td>
+                      <td className="py-3 px-4 font-mono text-ink whitespace-nowrap">
+                        {new Date(log.date).toISOString().split('T')[0]}
+                      </td>
+                      <td className="py-3 px-4 font-bold text-ink whitespace-nowrap">
+                        {log.studentName}
+                      </td>
+                      <td className="py-3 px-4 text-muted-custom whitespace-nowrap">
+                        {log.centreName}
+                      </td>
+                      <td className="py-3 px-4 uppercase text-[10px] text-ink whitespace-nowrap">
+                        {log.coachName}
+                      </td>
+                      <td className="py-3 px-4 text-ink max-w-xs truncate">
+                        {log.topic || '—'}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">
+                        {log.duration || 2} hrs
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${
+                          log.status === 'present' 
+                            ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
+                            : log.status === 'absent' 
+                            ? 'bg-red-100 text-red-700 border-red-200' 
+                            : 'bg-amber-100 text-amber-700 border-amber-200'
+                        }`}>
+                          {log.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <select
+                            value={log.status}
+                            onChange={(e) => handleUpdateStatus(log.id, e.target.value)}
+                            className="bg-white border border-line rounded px-1.5 py-0.5 text-xs text-ink outline-none focus:border-forest cursor-pointer"
+                          >
+                            <option value="present">Present</option>
+                            <option value="absent">Absent</option>
+                          </select>
+                          <button
+                            onClick={() => handleDeleteLog(log.id)}
+                            className="w-5 h-5 flex items-center justify-center rounded border border-red-200 text-hot-custom text-xs hover:bg-red-50 cursor-pointer"
+                            title="Delete Attendance Log"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {selectedStudent && (
         <div className="fixed inset-0 z-50 flex justify-end">

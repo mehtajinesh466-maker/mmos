@@ -215,11 +215,9 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
       const pkgs = packages
         .filter(p => p.student_id === s.id && !p.frozen)
         .sort((a, b) => new Date(a.start_date || '').getTime() - new Date(b.start_date || '').getTime());
-      const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
-
-      const classesLeft  = activePkg?.classes_remaining ?? 0;
-      const pkgSize      = activePkg?.classes_total ?? 0;
-      const completed    = pkgSize - classesLeft;
+      const classesLeft  = pkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
+      const pkgSize      = pkgs.reduce((sum, p) => sum + p.classes_total, 0);
+      const completed    = Math.max(0, pkgSize - classesLeft);
 
       // Days since last class
       const daysSince    = s.last_attended
@@ -239,6 +237,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
 
       // Rate per class
       const tiers        = db.get<Tier>('tiers');
+      const activePkg    = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
       const rate         = activePkg ? getPackageRate(activePkg, invoices, tiers) : 125;
       const paidToDate   = completed * rate;
 

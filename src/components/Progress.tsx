@@ -13,6 +13,7 @@ interface ProgressProps {
 export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre }) => {
   const [selectedSlotId, setSelectedSlotId] = useState<string>('');
   const [topicCovered, setTopicCovered] = useState<string>('Rook endgames — technique');
+  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [roster, setRoster] = useState<Array<{
     student: Student;
     mastery: 'Learning' | 'Practising' | 'Mastered';
@@ -52,7 +53,7 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
     }
   }, []);
 
-  // Update roster based on selected slot
+  // Update roster based on selected slot and selected date
   useEffect(() => {
     if (!selectedSlotId) {
       setRoster([]);
@@ -62,30 +63,51 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
     const slot = slots.find(s => s.id === selectedSlotId);
     if (!slot) return;
 
-    // Load active students matching this slot's centre and level
-    const matchedStudents = students.filter(s => 
-      s.centre_id === slot.centre_id && 
-      s.level === slot.level && 
-      s.status === 'active'
-    );
+    // Load active students matching this slot's roster logic (enrollments or fallback to level/centre)
+    const enrollments = db.getEnrollments ? db.getEnrollments() : [];
+    const slotEnrollments = enrollments.filter(e => e.slot_id === slot.id);
+    let matchedStudents;
+    if (slotEnrollments.length > 0) {
+      const enrolledIds = new Set(slotEnrollments.map(e => e.student_id));
+      matchedStudents = students.filter(s => enrolledIds.has(s.id));
+    } else {
+      matchedStudents = students.filter(s => 
+        s.centre_id === slot.centre_id && 
+        s.level === slot.level && 
+        s.status === 'active'
+      );
+    }
 
     const existingLogs = db.getProgressLogs();
+    const targetDateStr = new Date(selectedDate).toISOString().split('T')[0];
+
+    // Try to find if any student in this roster already has a progress log for this date to pre-fill the topic
+    const existingLogForDate = existingLogs.find(l => {
+      const logDateStr = l.date ? new Date(l.date).toISOString().split('T')[0] : '';
+      return logDateStr === targetDateStr && matchedStudents.some(s => s.id === l.student_id);
+    });
+
+    if (existingLogForDate) {
+      setTopicCovered(existingLogForDate.topic || '');
+    } else {
+      setTopicCovered('Rook endgames — technique');
+    }
 
     setRoster(matchedStudents.map(student => {
-      // Find latest progress log for this student
-      const studentLogs = existingLogs
-        .filter(l => l.student_id === student.id)
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      
-      const latestLog = studentLogs[0];
+      // Find progress log specifically for this student on the selected date
+      const logForDate = existingLogs.find(l => {
+        if (l.student_id !== student.id) return false;
+        const logDateStr = l.date ? new Date(l.date).toISOString().split('T')[0] : '';
+        return logDateStr === targetDateStr;
+      });
 
       return {
         student,
-        mastery: latestLog ? latestLog.mastery : 'Learning',
-        note: latestLog ? (latestLog.note || '') : ''
+        mastery: logForDate ? logForDate.mastery : 'Learning',
+        note: logForDate ? (logForDate.note || '') : ''
       };
     }));
-  }, [selectedSlotId]);
+  }, [selectedSlotId, selectedDate]);
 
   const handleMasteryClick = (studentId: string, level: 'Learning' | 'Practising' | 'Mastered') => {
     setRoster(prev => 
@@ -116,21 +138,12 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
           id: 'log-' + crypto.randomUUID(),
           student_id: item.student.id,
           coach_id: coachId,
-          date: new Date().toISOString().split('T')[0],
+          date: selectedDate,
           topic: topicCovered,
           mastery: item.mastery,
           skills: { openings: 3, tactics: 3, endgames: 3, strategy: 3, focus: 3 },
           note: item.note
         });
-
-        // Map mastery read to rating 1-5 for server action
-        const rating = item.mastery === 'Learning' ? 2 : item.mastery === 'Practising' ? 4 : 5;
-        try {
-          await logProgress(item.student.id, coachId, topicCovered, rating, item.note);
-        } catch (serverErr) {
-          // Fallback gracefully if server session/auth isn't active
-          console.warn('Server logProgress skipped:', serverErr);
-        }
         count++;
       }
       
@@ -184,7 +197,18 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
       <form onSubmit={handleSaveLogs} className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-6">
         
         {/* Class Details Input Row */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4 border-b border-line">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pb-4 border-b border-line">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-ink">Date</label>
+            <input 
+              type="date"
+              value={selectedDate}
+              onChange={e => setSelectedDate(e.target.value)}
+              className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
+              required
+            />
+          </div>
+
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-bold text-ink">Class</label>
             <select
@@ -197,7 +221,7 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
                 const coach = coaches.find(c => c.id === s.coach_id);
                 return (
                   <option key={s.id} value={s.id}>
-                    Today {s.time} · {s.level} ({coach?.name || 'Unassigned'})
+                    {s.day} {s.time} · {s.level} ({coach?.name || 'Unassigned'})
                   </option>
                 );
               })}
@@ -210,8 +234,8 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
               type="text"
               value={topicCovered}
               onChange={e => setTopicCovered(e.target.value)}
-              placeholder="Type skills topic covered today..."
-              className="bg-white border border-line rounded-lg px-3 py-2.5 text-xs text-ink outline-none"
+              placeholder="Type skills topic covered..."
+              className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
             />
           </div>
         </div>

@@ -105,6 +105,20 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
   ]);
   const [activeSectionId, setActiveSectionId] = useState<string>('sec-1');
 
+  useEffect(() => {
+    if (activeCentre === 'All') {
+      setFilterCentre('All');
+      setGlobalFilterCentre('All centres');
+    } else if (activeCentre === bayCentreId) {
+      setFilterCentre('Bay Avenue');
+      setGlobalFilterCentre('Bay Avenue');
+    } else if (activeCentre === jltCentreId) {
+      setFilterCentre('JLT');
+      setGlobalFilterCentre('JLT');
+    }
+  }, [activeCentre, bayCentreId, jltCentreId]);
+
+
   const activeSection = useMemo(() => {
     return sections.find(s => s.id === activeSectionId) || sections[0] || null;
   }, [sections, activeSectionId]);
@@ -287,6 +301,8 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
     const activePct = totalSts > 0 ? Math.round((activeSts / totalSts) * 100) : 0;
 
     const studentIdsSet = new Set(filteredSts.map(s => s.id));
+    const filteredPkgs = packages.filter(p => studentIdsSet.has(p.student_id));
+
     const classes30D = attendance.filter(a => {
       if (a.status !== 'present' && a.status !== 'makeup') return false;
       const aDate = new Date(a.date);

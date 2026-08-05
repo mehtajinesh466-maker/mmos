@@ -265,7 +265,7 @@ export async function unenrollStudent(studentId: string, slotId: string) {
   });
 }
 
-export async function logProgress(studentId: string, coachId: string, focusArea: string, evaluation: number, notes: string) {
+export async function logProgress(studentId: string, coachId: string, focusArea: string, evaluation: number, notes: string, dateStr?: string) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach') {
     throw new Error("Unauthorized");
@@ -282,7 +282,8 @@ export async function logProgress(studentId: string, coachId: string, focusArea:
       coach_id: coachId,
       focus_area: focusArea,
       evaluation,
-      notes
+      notes,
+      date: dateStr ? new Date(dateStr) : new Date()
     }
   });
 }

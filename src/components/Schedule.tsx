@@ -35,6 +35,8 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   
   // Drawer state for Roster Enrollment Management
   const [rosterModalSlot, setRosterModalSlot] = useState<ScheduleSlot | null>(null);
+  const [rosterSearch, setRosterSearch] = useState('');
+  const [savingSlotId, setSavingSlotId] = useState<string | null>(null);
 
   // Add Class Slot Modal state
   const [showAddSlotModal, setShowAddSlotModal] = useState(false);
@@ -83,7 +85,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
 
     window.addEventListener('db-synced', loadData);
     return () => window.removeEventListener('db-synced', loadData);
-  }, [selectedCoachId]);
+  }, []);
 
   useEffect(() => {
     if (activeCentre) {
@@ -238,6 +240,32 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     return studentPkgs.every(p => p.classes_remaining === 0);
   };
 
+  // Filter and sort students for the roster modal (enrolled first)
+  const rosterModalStudents = useMemo(() => {
+    if (!rosterModalSlot) return [];
+    
+    // Get all active students for this center
+    const centerStudents = students.filter(s => s.centre_id === rosterModalSlot.centre_id && s.status === 'active');
+    
+    // Map their enrollment status
+    const mapped = centerStudents.map(s => {
+      const isEnrolled = enrollments.some(e => e.slot_id === rosterModalSlot.id && e.student_id === s.id);
+      return { student: s, isEnrolled };
+    });
+
+    // Filter by search query if any
+    const filtered = rosterSearch
+      ? mapped.filter(item => item.student.name.toLowerCase().includes(rosterSearch.toLowerCase()))
+      : mapped;
+
+    // Sort: Enrolled first, then alphabetically by name
+    return filtered.sort((a, b) => {
+      if (a.isEnrolled && !b.isEnrolled) return -1;
+      if (!a.isEnrolled && b.isEnrolled) return 1;
+      return a.student.name.localeCompare(b.student.name);
+    });
+  }, [rosterModalSlot, students, enrollments, rosterSearch]);
+
 
 
   const getCentreName = (centreId: string) => {
@@ -310,16 +338,26 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   };
 
   const handleSaveAttendance = async (slotId: string) => {
+    if (savingSlotId) return;
+    setSavingSlotId(slotId);
     const slotMarkings = Object.keys(markings).filter(key => key.startsWith(slotId));
     if (slotMarkings.length === 0) {
       setSaveStatus('❌ Error: No students marked for this class slot.');
       setTimeout(() => setSaveStatus(''), 4000);
+      setSavingSlotId(null);
       return;
     }
 
     try {
       let savedCount = 0;
       const slot = slots.find(s => s.id === slotId);
+      if (!slot) throw new Error("Slot not found");
+
+      const normDay = normalizeDay(slot.day);
+      const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const dayIndex = dayOrder.indexOf(normDay);
+      const slotDate = weekDates[dayIndex]?.isoDate;
+
       let duration = 2;
       if (slot?.is_summer_camp) {
         const stored = typeof window !== 'undefined' ? localStorage.getItem('mmos_summer_camp_duration') : '2';
@@ -328,7 +366,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       for (const key of slotMarkings) {
         const studentId = key.substring(slotId.length + 1);
         const status = markings[key];
-        await logAttendance(studentId, status, activeCoachId, slotId, duration);
+        await logAttendance(studentId, status, activeCoachId, slotId, duration, slotDate);
         savedCount++;
       }
       const freshData = await syncDatabaseToClient();
@@ -339,6 +377,8 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     } catch (err: any) {
       setSaveStatus(`❌ Error: ${err.message}`);
       setTimeout(() => setSaveStatus(''), 4000);
+    } finally {
+      setSavingSlotId(null);
     }
   };
 
@@ -660,10 +700,13 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                         </select>
 
                         <button
+                          disabled={savingSlotId === slot.id}
                           onClick={() => handleSaveAttendance(slot.id)}
-                          className="bg-[#173F35] hover:bg-[#122f28] text-white font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
+                          className={`bg-[#173F35] hover:bg-[#122f28] text-white font-bold text-xs px-4 py-2 rounded-lg transition-all ${
+                            savingSlotId === slot.id ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                          }`}
                         >
-                          Save attendance
+                          {savingSlotId === slot.id ? 'Saving...' : 'Save attendance'}
                         </button>
 
                         <label className="flex items-center gap-1.5 text-xs font-semibold text-ink cursor-pointer bg-white border border-line px-3 py-2 rounded-lg hover:bg-canvas transition-all select-none">
@@ -815,7 +858,10 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                 </p>
               </div>
               <button
-                onClick={() => setRosterModalSlot(null)}
+                onClick={() => {
+                  setRosterModalSlot(null);
+                  setRosterSearch('');
+                }}
                 className="w-8 h-8 rounded-full bg-canvas border border-line flex items-center justify-center text-ink font-bold hover:bg-line transition-colors"
               >
                 ✕
@@ -826,11 +872,21 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
               <p className="text-xs text-muted-custom leading-relaxed">
                 Check students to enroll them in this explicit class slot. Deselecting all returns slot to level-filtered roster.
               </p>
+              
+              {/* Search Box Input */}
+              <input
+                type="text"
+                placeholder="🔍 Search student by name..."
+                value={rosterSearch}
+                onChange={e => setRosterSearch(e.target.value)}
+                className="w-full bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none mb-2 focus:border-forest"
+              />
+
               <div className="divide-y divide-line border border-line rounded-xl bg-white max-h-[60vh] overflow-y-auto">
-                {students
-                  .filter(s => s.centre_id === rosterModalSlot.centre_id && s.status === 'active')
-                  .map(student => {
-                    const isEnrolled = enrollments.some(e => e.slot_id === rosterModalSlot.id && e.student_id === student.id);
+                {rosterModalStudents.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-muted-custom">No students found</div>
+                ) : (
+                  rosterModalStudents.map(({ student, isEnrolled }) => {
                     return (
                       <label key={student.id} className="flex items-center justify-between p-3.5 hover:bg-canvas/30 cursor-pointer transition-colors">
                         <div className="flex items-center gap-3">
@@ -879,7 +935,8 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                         )}
                       </label>
                     );
-                  })}
+                  })
+                )}
               </div>
             </div>
 
@@ -1009,15 +1066,29 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                   </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className="font-bold text-ink">Seat Capacity</label>
-                  <input
-                    type="number"
-                    value={newSlotCapacity}
-                    onChange={(e) => setNewSlotCapacity(Number(e.target.value))}
-                    min={1}
+                  <label className="font-bold text-ink">Centre *</label>
+                  <select
+                    value={newSlotCentreId || selectedCentre === 'All' ? (centres[0]?.id || '') : selectedCentre}
+                    onChange={(e) => setNewSlotCentreId(e.target.value)}
                     className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
-                  />
+                    required
+                  >
+                    {centres.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
                 </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="font-bold text-ink">Seat Capacity</label>
+                <input
+                  type="number"
+                  value={newSlotCapacity}
+                  onChange={(e) => setNewSlotCapacity(Number(e.target.value))}
+                  min={1}
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
+                />
               </div>
 
               <div className="flex items-center gap-2 py-1">

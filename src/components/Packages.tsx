@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../lib/db';
 import { renewPackage, renewSiblingPackage, syncDatabaseToClient } from '../app/actions';
 import { useSearchParams } from 'next/navigation';
@@ -32,6 +32,9 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
   // Sibling tagging and class/amount split state
   const [siblingAllocations, setSiblingAllocations] = useState<Array<{ studentId: string; classes: number; amount: number }>>([]);
   const [siblingSelectId, setSiblingSelectId] = useState('');
+
+  // Student search filter state
+  const [studentSearchQuery, setStudentSearchQuery] = useState('');
 
   // Fetch active students and tiers on mount
   useEffect(() => {
@@ -69,11 +72,12 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
     if (!selectedStudentId) return;
 
     if (discount === 'Sibling (10%)') {
-      const primary = students.find(s => s.id === selectedStudentId);
+      const allDbStudents = db.getStudents();
+      const primary = allDbStudents.find(s => s.id === selectedStudentId);
       if (!primary) return;
 
       // Find siblings by family_id or parent_name
-      const siblingsInFamily = students.filter(s => 
+      const siblingsInFamily = allDbStudents.filter(s => 
         s.id !== selectedStudentId && 
         ((primary.family_id && s.family_id === primary.family_id) || 
          (primary.parent_name && s.parent_name && s.parent_name.toLowerCase() === primary.parent_name.toLowerCase()))
@@ -204,18 +208,50 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
           .join(', ');
 
         setSaveStatus(`✓ Sibling package created! Split ${calculatedDetails.classes} classes & AED ${Math.round(calculatedDetails.total)} across tagged siblings: ${taggedNames}.`);
+        
+        // Reset form inputs
+        setSelectedStudentId('');
+        setStudentSearchQuery('');
+        setPackageType('Renewal');
+        setPackageSize('12 classes');
+        setRatePerClass('100');
+        setDiscount('None');
+        setPaymentMethod('cash');
+        setPaymentRemarks('');
+        setIsFamilyShared(false);
+        setSiblingAllocations([]);
+
+        // Scroll main panel to top to show success banner
+        document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
         await renewPackage(selectedStudentId, tierId, packageType.toLowerCase() as any, isFamilyShared);
         const freshData = await syncDatabaseToClient();
         db.syncFromNeon(freshData);
         setSaveStatus('✓ Package created and saved to database! Ledger records updated.');
+
+        // Reset form inputs
+        setSelectedStudentId('');
+        setStudentSearchQuery('');
+        setPackageType('Renewal');
+        setPackageSize('12 classes');
+        setRatePerClass('100');
+        setDiscount('None');
+        setPaymentMethod('cash');
+        setPaymentRemarks('');
+        setIsFamilyShared(false);
+        setSiblingAllocations([]);
+
+        // Scroll main panel to top to show success banner
+        document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (error: any) {
       console.error(error);
       setSaveStatus('❌ Error: ' + error.message);
+      document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setIsSubmitting(false);
-      setTimeout(() => setSaveStatus(''), 5000);
     }
   };
 
@@ -259,6 +295,13 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-ink">Primary Student *</label>
+              <input 
+                type="text"
+                placeholder="🔍 Type student name to filter list..."
+                value={studentSearchQuery}
+                onChange={e => setStudentSearchQuery(e.target.value)}
+                className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none mb-1"
+              />
               <select 
                 value={selectedStudentId} 
                 onChange={e => setSelectedStudentId(e.target.value)}
@@ -266,7 +309,9 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
                 className="bg-white border border-line rounded-lg px-3 py-2.5 text-xs text-ink outline-none"
               >
                 <option value="">Select Student...</option>
-                {students.map(s => <option key={s.id} value={s.id}>{s.name.toUpperCase()}</option>)}
+                {students
+                  .filter(s => s.name.toLowerCase().includes(studentSearchQuery.toLowerCase()))
+                  .map(s => <option key={s.id} value={s.id}>{s.name.toUpperCase()}</option>)}
               </select>
             </div>
 
@@ -412,7 +457,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
             {/* Tagged Siblings List */}
             <div className="space-y-3">
               {siblingAllocations.map((alloc) => {
-                const student = students.find(s => s.id === alloc.studentId);
+                const student = db.getStudents().find(s => s.id === alloc.studentId);
                 return (
                   <div key={alloc.studentId} className="flex flex-wrap items-center gap-3 bg-white p-3 rounded-lg border border-line shadow-xs">
                     <div className="flex-1 min-w-[180px]">
@@ -467,7 +512,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
                 className="bg-white border border-line rounded-lg px-3 py-1.5 text-xs text-ink outline-none flex-1 max-w-sm"
               >
                 <option value="">+ Add Sibling Student...</option>
-                {students
+                {db.getStudents()
                   .filter(s => !siblingAllocations.some(a => a.studentId === s.id))
                   .map(s => (
                     <option key={s.id} value={s.id}>

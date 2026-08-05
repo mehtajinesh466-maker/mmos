@@ -1,0 +1,288 @@
+### Sheet: 1. The Brief
+
+| Siblings & Families — data brief for the new system |
+| Master Moves Chess Club  |  prepared 05-Aug-2026  |  source: Zoho exports + acquirer settlement data |
+|  |
+| THE PROBLEM IN ONE LINE |
+| Families are real in the business but do not exist in the data. Parents enrol several children, pay for them on ONE card, and expect one conversation — but every export we have is student-first, with no family, parent or payer entity anywhere in it. |
+|  |
+| HOW BIG IS IT |
+| •  60 families identified, covering 130 students. |
+| •  96 joint payments worth AED 421,641.00 — one card transaction covering 2, 3 or 4 children. |
+| •  Those students hold 271 packages worth AED 541,880.90, which is 24.4% of all package revenue. |
+| •  This is not an edge case. A quarter of the money arrives as a family payment. |
+|  |
+| WHAT BREAKS TODAY BECAUSE THERE IS NO FAMILY ENTITY |
+| •  Reconciliation. One AED 7,875 swipe has to be matched to two package rows of 3,937 and 3,938. Nothing in the data says they belong together, so it can only be inferred by arithmetic. That inference took several passes to get right and still needed the owner to confirm 15 families by hand. |
+| •  Revenue attribution. A sibling discount is applied to the family but recorded as a split across children, so per-student price looks wrong and no two siblings show the same rate. |
+| •  Renewal and outreach. Front office calls the same parent twice, once per child, and cannot see that the family has one balance and one renewal date. |
+| •  Refunds and credits. A credit belongs to the payer, not the child, and there is nowhere to hold it. |
+| •  Attendance economics. Classes are consumed per child but paid per family, so per-child balances drift apart even when the family paid a single amount. |
+|  |
+| WHAT THIS WORKBOOK CONTAINS |
+| •  2. Families — the 60 families we can evidence, with members, centres and value. |
+| •  3. Joint Payments — all 96 payments where one card covered several children, with the exact split. |
+| •  4. In Student Records — the export schema and what is missing for family grouping. |
+| •  5. In Packages — the export schema and every sibling pattern seen in it, with real examples. |
+| •  6. In Attendance — the export schema and what siblings imply for it. |
+| •  7. Family Rollup — how the three sheets have to be added together per family, worked through on real data. |
+| •  8. Proposed Data Model — tables and fields to build. |
+| •  9. Detection Rules — how to infer families from the existing data at migration. |
+| •  10. Test Cases — real families with the expected answer, to test the build against. |
+|  |
+
+
+### Sheet: 2. Families
+
+| Family # | Members | Children | Centre(s) | Packages | Package Value AED | Joint Payments | Joint Value AED | First Payment | Last Payment | Shared surname? | Notes |
+| 1 | Evaana Jamshidzadeh, Kiyaana Jamshidzadeh | 2 | Bay avenue mall | 14 | 33654 | 7 | 33755 | 45358 | 46225 | Yes |
+| 2 | Anika Iyer, Zarah Iyer | 2 | Bay avenue mall | 14 | 27452 | 6 | 23420 | 45457 | 46174 | Yes |
+| 3 | Kiaan Gupta, Miraya Gupta | 2 | Bay avenue mall | 10 | 24764 | 3 | 17075 | 45479 | 46207 | Yes |
+| 4 | Abigail Gonsalves, Avishai Gonsalves | 2 | Bay avenue mall | 8 | 22874 | 4 | 22875 | 45541 | 45990 | Yes |
+| 5 | Nyra Jain, Vihaan Dalvi | 2 | Bay avenue mall | 9 | 21122 | 1 | 4800 | 45355 | 46221 | NO | surnames differ — cannot be grouped by name |
+| 6 | Myra Bhandari, Pranshi Kulshrestha | 2 | Bay avenue mall | 6 | 19380 | 1 | 7500 | 45541 | 46207 | NO | surnames differ — cannot be grouped by name |
+| 7 | Eva Ghannaj, Yana Ghannaj | 2 | Bay avenue mall | 10 | 18900 | 5 | 18900 | 45366 | 45802 | Yes |
+| 8 | Dhanya Garg, Vedant Garg | 2 | Bay avenue mall | 4 | 17474 | 1 | 7875 | 45677 | 46054 | Yes |
+| 9 | Misha Garg, Viha Garg | 2 | Bay avenue mall | 6 | 17474 | 3 | 17475 | 45591 | 46031 | Yes |
+| 10 | Abhijay Singh Matharu, Abhiraj Singh Matharu, Vihaan Singh Matharu | 3 | Bay avenue mall | 9 | 14880 | 3 | 14880 | 45448 | 45731 | Yes | 3 children |
+| 11 | Alena Gordina, Mikhail Gordina | 2 | Bay avenue mall | 6 | 14640 | 3 | 14640 | 45357 | 45903 | Yes |
+| 12 | Aadi Jain, Shrey Jain | 2 | Bay avenue mall | 4 | 12914 | 1 | 7875 | 45667 | 45948 | Yes |
+| 13 | Keyan Kanodia, Mivaan Anuraag Mehta, Namah Chandpara, Tapish Kanodia | 4 | JLT | 6 | 12790 | 1 | 7540 | 45916 | 46045 | Yes | 4 children |
+| 14 | Vince Charlie Peralta, Yohann Charles Peralta | 2 | Bay avenue mall | 4 | 12160 | 2 | 12160 | 45480 | 45812 | Yes |
+| 15 | Avyaan Saraf, Shaarvi Saraf | 2 | Bay avenue mall | 6 | 11340 | 2 | 6300 | 46032 | 46201 | Yes |
+| 16 | Aarya Shah, Darsh Shah | 2 | JLT | 4 | 10754 | 1 | 2880 | 45929 | 46065 | Yes |
+| 17 | Aaryav Rodrigues, Ronav Rodrigues | 2 | Bay avenue mall | 3 | 9600 | 1 | 4800 | 45514 | 45773 | Yes |
+| 18 | Kabir Shrivastava, Shaan Shrivastava | 2 | Bay avenue mall | 6 | 9480 | 2 | 9360 | 45413 | 45696 | Yes |
+| 19 | Kavya Shah, Yuvaan shah | 2 | JLT | 4 | 9072 | 2 | 9072 | 46006 | 46098 | Yes |
+| 20 | Joschua Lemke, Lilah Lemke | 2 | Bay avenue mall | 4 | 8442 | 1 | 5040 | 45957 | 46073 | Yes |
+| 21 | Tiya Mundhra, Yatharth Mundhra | 2 | Bay avenue mall | 2 | 7874 | 1 | 7875 | 45977 | 45977 | Yes |
+| 22 | Aarika, Adheesha | 2 | Bay avenue mall | 4 | 7680 | 2 | 7680 | 45843 | 46168 | NO | surnames differ — cannot be grouped by name |
+| 23 | Asher Ashish, Ashton Ashish | 2 | JLT | 4 | 7516 | 1 | 4636 | 45921 | 45998 | Yes |
+| 24 | Emmanuel kamel, Karas kamel | 2 | Bay avenue mall | 5 | 7440 | 1 | 2520 | 45499 | 45718 | Yes |
+| 25 | Aryaveer Bhagat, Rajveer Bhagat | 2 | Bay avenue mall | 2 | 7350 | 1 | 7350 | 46015 | 46015 | Yes |
+| 26 | Aavya Jain, Advay jain | 2 | Bay avenue mall | 4 | 7308 | 1 | 4158 | 46075 | 46179 | Yes |
+| 27 | Jan Kulczycka, Weronika Kulczycka | 2 | Bay avenue mall | 4 | 7200 | 1 | 3960 | 45409 | 45724 | Yes |
+| 28 | Daniil Apostolov, vadim Apostolov | 2 | JLT | 4 | 7119 | 2 | 7119 | 46050 | 46125 | Yes |
+| 29 | Faras Gherras, Ibrahim Boudenagh, Ilyes Gherras | 3 | Bay avenue mall | 4 | 6903.9 | 1 | 4636 | 45906 | 46061 | Yes | 3 children |
+
+
+### Sheet: 3. Joint Payments
+
+| Payment Date | Channel | Card Amount AED | Children On This Payment | Split In Zoho | Sum Of Splits | Difference | Pattern | Zoho Rows |
+| 45344 | Mashreq Ch1 (POS terminal) | 2880 | Nikita Sheth, Nyra Sheth | 1440.00 + 1440.00 | 2880 | 0 | exact | 456, 474 |
+| 45355 | Mashreq Ch1 (POS terminal) | 4800 | Nyra Jain, Vihaan Dalvi | 2400.00 + 2400.00 | 4800 | 0 | exact | 473, 699 |
+| 45357 | Mashreq Ch1 (POS terminal) | 4800 | Alena Gordina, Mikhail Gordina | 2400.00 + 2400.00 | 4800 | 0 | exact | 85, 411 |
+| 45358 | Mashreq Ch1 (POS terminal) | 2880 | Evaana Jamshidzadeh, Kiyaana Jamshidzadeh | 1440.00 + 1440.00 | 2880 | 0 | exact | 242, 349 |
+| 45360 | Mashreq Ch1 (POS terminal) | 2880 | Vasilisa, Vladimir | 1440.00 + 1440.00 | 2880 | 0 | exact | 681, 722 |
+| 45366 | Mashreq Ch1 (POS terminal) | 4800 | Eva Ghannaj, Yana Ghannaj | 2400.00 + 2400.00 | 4800 | 0 | exact | 234, 730 |
+| 45375 | Mashreq Ch1 (POS terminal) | 4800 | Lara Shembesh, Omar Shembesh | 2400.00 + 2400.00 | 4800 | 0 | exact | 369, 481 |
+| 45385 | Mashreq Ch1 (POS terminal) | 2640 | Isha Sawlani, Rhea Sawlani | 1320.00 + 1320.00 | 2640 | 0 | exact | 275, 540 |
+| 45420 | Mashreq Ch2 (noon - Bay Avenue) | 4800 | Kabir Shrivastava, Shaan Shrivastava | 2400.00 + 2400.00 | 4800 | 0 | exact | 306, 601 |
+| 45431 | Mashreq Ch1 (POS terminal) | 2500 | Evaana Jamshidzadeh, Kiyaana Jamshidzadeh | 1250.00 + 1250.00 | 2500 | 0 | exact | 241, 345 |
+| 45448 | Mashreq Ch1 (POS terminal) | 4800 | Abhijay Singh Matharu, Abhiraj Singh Matharu, Vihaan Singh Matharu | 1200.00 + 1200.00 + 2400.00 | 4800 | 0 | exact; UNEVEN split; 3 children | 41, 44, 710 |
+| 45457 | Mashreq Ch1 (POS terminal) | 3360 | Anika Iyer, Zarah Iyer | 1680.00 + 1680.00 | 3360 | 0 | exact | 112, 745 |
+| 45466 | Mashreq Ch1 (POS terminal) | 2400 | Eva Ghannaj, Yana Ghannaj | 1200.00 + 1200.00 | 2400 | 0 | exact | 230, 728 |
+| 45480 | Mashreq Ch2 (noon - Bay Avenue) | 5760 | Vince Charlie Peralta, Yohann Charles Peralta | 2880.00 + 2880.00 | 5760 | 0 | exact | 712, 737 |
+| 45512 | Mashreq Ch1 (POS terminal) | 4500 | Evaana Jamshidzadeh, Kiyaana Jamshidzadeh | 2250.00 + 2250.00 | 4500 | 0 | exact | 238, 343 |
+| 45514 | Mashreq Ch1 (POS terminal) | 4800 | Aaryav Rodrigues, Ronav Rodrigues | 2400.00 + 2400.00 | 4800 | 0 | exact | 30, 558 |
+| 45517 | Mashreq Ch1 (POS terminal) | 1200 | kian Lyndon, Finn Lyndon | 600.00 + 600.00 | 1200 | 0 | exact; CROSS-CENTRE | 340, 855 |
+| 45531 | Mashreq Ch1 (POS terminal) | 2400 | Eva Ghannaj, Yana Ghannaj | 1200.00 + 1200.00 | 2400 | 0 | exact; Zoho dates differ across the children | 231, 727 |
+| 45540 | Mashreq Ch2 (noon - Bay Avenue) | 5000 | Abigail Gonsalves, Avishai Gonsalves | 2500.00 + 2500.00 | 5000 | 0 | exact | 45, 166 |
+| 45557 | Mashreq Ch2 (noon - Bay Avenue) | 2520 | kian Lyndon, Finn Lyndon | 1260.00 + 1260.00 | 2520 | 0 | exact; CROSS-CENTRE | 339, 854 |
+| 45572 | Magnati POS terminal (Bay Avenue) | 3360 | Anika Iyer, Zarah Iyer | 1680.00 + 1680.00 | 3360 | 0 | exact | 113, 746 |
+| 45579 | Mashreq Ch2 (noon - Bay Avenue) | 3700 | Khalid Alaryan, Yousef Alaryan | 1850.00 + 1850.00 | 3700 | 0 | exact | 329, 738 |
+| 45590 | Mashreq Ch2 (noon - Bay Avenue) | 2520 | Emmanuel kamel, Karas kamel | 1260.00 + 1260.00 | 2520 | 0 | exact; Zoho dates differ across the children | 224, 312 |
+| 45591 | Magnati POS terminal (Bay Avenue) | 4800 | Misha Garg, Viha Garg | 2400.00 + 2400.00 | 4800 | 0 | exact | 420, 698 |
+| 45595 | Magnati POS terminal (Bay Avenue) | 4500 | Evaana Jamshidzadeh, Kiyaana Jamshidzadeh | 2250.00 + 2250.00 | 4500 | 0 | exact | 236, 347 |
+| 45602 | Mashreq Ch2 (noon - Bay Avenue) | 5040 | Alena Gordina, Mikhail Gordina | 2520.00 + 2520.00 | 5040 | 0 | exact | 84, 409 |
+| 45607 | Magnati POS terminal (Bay Avenue) | 4800 | Eva Ghannaj, Yana Ghannaj | 2400.00 + 2400.00 | 4800 | 0 | exact | 233, 731 |
+| 45650 | Mashreq Ch2 (noon - Bay Avenue) | 3000 | Anika Iyer, Zarah Iyer | 1500.00 + 1500.00 | 3000 | 0 | exact | 117, 744 |
+| 45669 | Mashreq Ch2 (noon - Bay Avenue) | 5040 | Abhijay Singh Matharu, Abhiraj Singh Matharu, Vihaan Singh Matharu | 1680.00 + 1680.00 + 1680.00 | 5040 | 0 | exact; 3 children | 39, 42, 709 |
+
+
+### Sheet: 4. In Student Records
+
+| How siblings appear in Student_records |
+|  |
+| One row per student. This is the master roster. There is NO family, parent, payer, household or guardian field of any kind. |
+|  |
+| THE EXPORT SCHEMA |
+| Field | Sibling relevance | What the developer needs to know |
+| Name | THE ONLY LINK | Free text. Siblings usually share a surname, but 11 of our 60 families do not. Case and spacing are inconsistent ("kian Lyndon", "TARA", "Bodhi  Chokdia" with a double space). |
+| Student Id | unusable | Sparsely populated. It is not present at all in the Packages or Attendance exports, so it cannot be used to join. |
+| Mobile/Whatsapp | BEST CANDIDATE | A parent number is normally shared by all their children. This is the strongest field available for inferring a family, but it is not enforced or validated today. |
+| Date Enrolled | supporting | Siblings very often enrol on the same day. Useful as a secondary signal, not on its own. |
+| Assigned center | watch out | Siblings can sit at DIFFERENT centres. We have 2 families split across Bay Avenue and JLT. Do not scope a family to one centre. |
+| Age / Date of birth | supporting | Different per child, obviously, but a shared surname plus close ages plus the same phone number is a strong family signal. |
+| School | supporting | Siblings usually share a school. Another weak signal to stack. |
+| Status | watch out | One child can be Active while a sibling is Inactive. A family must survive its children changing status. |
+| Overdue | recompute | System-calculated and known to drift. Never roll this up to a family; recompute from attendance. |
+| Coaches Details, FIDE ID, Student category, Current Student levels, COUNTRY AS PER FIDE, ET /JLT Resident, Joining Student level, HOW DID YOU HEAR ABOUT US | no bearing | Per-child attributes. Nothing here groups a family. |
+|  |
+| THE GAP |
+| Nothing in this export answers "who paid for this child" or "who else belongs to this family". Every family in tab 2 was reconstructed from PAYMENT behaviour, not from the roster. If the new system captures a payer at enrolment, this whole problem disappears. |
+
+
+### Sheet: 5. In Packages
+
+| How siblings appear in All_Student_Packages |
+|  |
+| One row per package purchased. This is where the damage is done: a single family payment is broken into one row per child, and the link between those rows is never recorded. |
+|  |
+| THE EXPORT SCHEMA |
+| Field | Sibling relevance | What the developer needs to know |
+| Student | the only link | Free text again, and must match Student_records exactly to join. There is no student id on this sheet. |
+| Price | THE SPLIT | This is the child's SHARE of a family payment, not what was charged to the card. AED 7,875 on the card becomes 3,937 + 3,938 in Zoho. Nothing marks these two rows as one payment. |
+| Date of payment | unreliable for grouping | Siblings on ONE card can carry DIFFERENT Zoho dates. We have 9 groups like this — the Bajaj children are dated 12 and 17 Dec against a single swipe on the 17th. |
+| Mode of payment | unreliable | Frequently blank or wrong. Two rows we chased were only resolved when the owner confirmed the mode was never filled in. |
+| Assigned center | watch out | A family payment can cover children at both centres. One AED 5,355 swipe covered two Bay Avenue children and two JLT children. |
+| No of classes | per child | Each child gets their own class count. Siblings on one payment often get DIFFERENT counts, so you cannot derive the split from classes either. |
+| New/Renewal, Class Status | per child | Independent per child. One sibling can be renewing while the other is new. |
+| Completed Classes, Overdue | do not trust | System-calculated and known to drift from actual attendance. Recompute from attendance records. |
+| Student Enroll First | supporting | Siblings usually share an enrolment date. |
+|  |
+| EVERY SPLIT PATTERN WE FOUND, AND HOW OFTEN |
+| Pattern | Groups | What it means for the model |
+| Even split, exact | 84 | The simple case. Card amount equals the sum of the child prices to the fill. |
+| Uneven split | 6 | Children on one payment get DIFFERENT amounts. Do not assume equal shares. |
+| Rounding, off by AED 1-5 | 8 | 3,937 + 3,938 = 7,875. An exact-sum test fails. Allow a small tolerance, or better, stop splitting at all. |
+| Card carries 5% VAT on top | 1 | Zoho 960 x 3 = 2,880 settled as a 3,024 swipe. Store the gross charged AND the net booked. |
+| Zoho dates differ across children | 9 | The payment date on the child row is when it was keyed, not when the card was charged. Store the real transaction datetime. |
+| 3 children on one payment | 6 | Groups are not always pairs. |
+| 4 children on one payment | 3 | Model N children per payment, not two. |
+| Cross-centre family payment | 5 | A family is not owned by a centre. Do not scope the family entity to a branch. |
+| Unexplained variance | 3 | Discount or fee applied at family level and not carried onto the child rows. |
+|  |
+| WORKED EXAMPLE — one card, two rows, no link |
+| Card transaction | 22-Jul-2026 | Mashreq POS terminal | AED 7,875.00 | one swipe |
+
+
+### Sheet: 6. In Attendance
+
+| How siblings appear in All_Attendance_Records |
+|  |
+| One row per class session, per child. Attendance is genuinely individual — this is the one place where per-child data is correct and should stay that way. |
+|  |
+| THE EXPORT SCHEMA |
+| Field | Sibling relevance | What the developer needs to know |
+| Student | the only link | Same free-text join problem. No student id on this sheet either. |
+| Date, Session time | per child | Siblings often attend the SAME session — useful as a family signal, but never merge their attendance. |
+| Attendance | normalise first | Values are inconsistently cased and worded: Present, present, Absent, "Absent but informed". Count a session only on a case-insensitive match to "present". |
+| Assigned center | watch out | A child attends at their own centre even when the family paid through the other one. |
+| Coaches Details, Class duration, Auto sync, ID | no bearing | Per-session attributes. |
+|  |
+| THE RULE THAT MATTERS |
+| •  Attendance stays PER CHILD. Classes are consumed by the child who sat in the room. |
+| •  Money is FAMILY level. Classes are CHILD level. Keep them in separate tables and join them through the child. |
+| •  Do not net a family balance in classes. Two siblings can buy 24 classes each on one payment and burn them at completely different rates — the family owes nothing but one child may be out of classes. |
+| •  Consume attendance against that child's own packages in date order, exactly as the existing overdue logic does. The family payment does not change that; it only changes how the package was funded. |
+
+
+### Sheet: 7. Family Rollup
+
+| Family Rollup — how the three sheets add together |
+|  |
+| What rolls UP to the family, what stays DOWN at the child, and what must never be netted. Get this wrong and either the parent is billed twice or a child attends classes nobody paid for. |
+|  |
+| THE RULE TABLE |
+| Measure | Lives at | Rolls up? | How to compute | Trap |
+| Amount charged | FAMILY / payment | n/a | The gross on the card. One row per real card transaction. | Never reconstruct it by summing child prices — rounding and discounts make that fail. |
+| Allocation to a child | link table | n/a | payment_id -> student_id -> allocated amount. Must sum to the payment gross. | Enforce the sum with a constraint. That single check would have caught every case in tab 3. |
+| Discount | FAMILY | yes | Applied to the payment, then allocated. Store the reason. | Today it is silently buried in the child split, so per-child price looks arbitrary. |
+| Classes purchased | CHILD | no | Per child, on their own package. | Siblings on one payment often buy different class counts. |
+| Classes attended | CHILD | no | Count attendance rows matching "present", case-insensitive. | Never merge siblings' attendance, even when they sit in the same session. |
+| Classes remaining | CHILD | no | Consume that child's attendance against that child's packages in date order. | Do not net across siblings. One child can be out of classes while the family is in credit. |
+| Amount owed / credit | FAMILY | yes | Sum of family payments less the value of what each child has consumed. | A credit belongs to the payer, not the child. It must survive one child leaving. |
+| Renewal due date | FAMILY view, CHILD source | yes | Earliest renewal across the children, surfaced as one family action. | Front office should get ONE call to make, not one per child. |
+| Centre | CHILD | no | Each child sits at their own centre. | A family is not owned by a centre. 2 of our families span both. |
+| Contact / payer | FAMILY | yes | One payer record, one phone, one email. | This is the field that does not exist today and causes everything else. |
+|  |
+| WORKED EXAMPLE — the Bajaj family, 17-Dec-2025 |
+| Step | Source sheet | Value | Note |
+| One card swipe | acquirer settlement | AED 3,024.00 | the only true record of what was charged |
+| Zoho: Rudra Bajaj | Packages | AED 960.00 | dated 17-Dec |
+| Zoho: Shiva Bajaj | Packages | AED 960.00 | dated 12-Dec — five days earlier than the swipe |
+| Zoho: Veer Bajaj | Packages | AED 960.00 | dated 17-Dec |
+| Sum of the three |  | AED 2,880.00 | AED 144 short of the card |
+| Why |  | x 1.05 | the card carried 5% VAT: 2,880 x 1.05 = 3,024 exactly |
+| Family owes |  | nil | one payment, fully allocated |
+| Each child's classes | Attendance | independent | consumed separately, at their own pace |
+
+
+### Sheet: 8. Proposed Data Model
+
+| Proposed data model |
+|  |
+| Five tables. The important move is that a payment is recorded once, at family level, and allocated to children through a link table — rather than being pre-split onto the child rows as it is today. |
+|  |
+| Table | Field | Type / key | Why |
+| family | family_id | PK | One household. |
+|  | display_name | text | e.g. "Bajaj". Free text, for the front office only — never used as a key. |
+|  | primary_payer_id | FK payer | Who normally pays. |
+|  | notes | text |
+| payer | payer_id | PK | A parent or guardian. Separate from family because a family can have two payers, and a payer can pay for more than one family. |
+|  | name, mobile, email | text | Mobile is the field that would have let us group every family in tab 2 automatically. |
+| student | student_id | PK | One child. Keep the existing roster fields. |
+|  | family_id | FK family, NULLABLE | Nullable on purpose — a child with no siblings needs no family, and forcing one creates noise. |
+|  | centre_id | FK | Per child. NOT inherited from the family. |
+| payment | payment_id | PK | ONE row per real card transaction. This is the row that was missing. |
+|  | family_id | FK family | Who the payment is for. |
+|  | payer_id | FK payer | Who actually paid. |
+|  | gross_amount | decimal | What hit the card, VAT included. |
+|  | net_amount | decimal | What settled to the bank after acquirer fees. |
+|  | discount_amount, discount_reason | decimal, text | Family-level. Stop burying it in the child split. |
+|  | channel, terminal_id, acquirer_ref, card_last4 | text | Enough to tie back to the settlement file without guessing. |
+|  | transacted_at | datetime | The REAL card timestamp, not the date somebody keyed the record. |
+| package | package_id | PK | One purchase for one child. |
+|  | student_id | FK student | Per child. |
+|  | classes_purchased, price_allocated | int, decimal | price_allocated is this child's SHARE of the payment. |
+| payment_allocation | payment_id, package_id | composite PK | THE LINK THAT DOES NOT EXIST TODAY. |
+|  | allocated_amount | decimal | CONSTRAINT: sum of allocated_amount per payment_id = payment.gross_amount. This one constraint prevents every problem in tab 3. |
+| attendance | attendance_id, student_id, session_datetime, status |  | Unchanged. Per child, always. |
+
+
+### Sheet: 9. Detection Rules
+
+| Migration — how to infer families from the existing data |
+|  |
+| This is the exact ladder used to build tab 2. Run it in order and stop at the first rule that fires. Anything that reaches the bottom needs a human. |
+|  |
+| Rule | Test | Confidence | Notes |
+| 1 | Two or more packages whose prices sum EXACTLY to one card transaction, within 3 days | CERTAIN | Fired 84 times. This is the backbone. |
+| 2 | Same as rule 1 but allow AED 5 tolerance | CERTAIN | Fired 8 times. Catches the 3,937 + 3,938 = 7,875 split. |
+| 3 | Same as rule 1 but test sum x 1.05 as well | CERTAIN | Fired 0 time. Catches VAT added on the card. |
+| 4 | Widen the date window to 14 days before matching | HIGH | Zoho dates drift from the swipe date on 9 groups. |
+| 5 | The payment reference names two students ("MAYA&LUNA", "AARYA/DARSH") | HIGH | noon references carry names. Free, and independent of the amount. |
+| 6 | Shared surname AND overlapping enrolment | MEDIUM | Fails on the 11 families with different surnames — do not rely on it alone. |
+| 7 | Shared parent mobile number | SHOULD BE HIGHEST | Not usable on the current export, but this is what the new system should capture. It would replace rules 1 to 6. |
+| 8 | Anything left | ASK | 15 families needed the owner to confirm by hand. Budget for a review screen; do not auto-merge on a guess. |
+|  |
+| THINGS THAT WILL BITE YOU |
+| •  Do not merge on surname alone. "Bodhi Chokdia" pays with "Amit Chordia" and "Vanya Chordia" — three different spellings, one payment. |
+| •  Do not assume pairs. 6 groups have 3 children and 3 have 4. |
+| •  Do not assume equal shares. 6 groups are split unevenly. |
+| •  Do not scope a family to a centre. 2 families span both. |
+| •  Names have double spaces, mixed case and misspellings between sheets ("Noan"/"Noah Dukhgan", "Ayub Elmi"/"Ayub Elimi"). Normalise before joining. |
+| •  Exact-duplicate package rows exist. We found Oliver Heebarth entered twice for the same AED 840. De-duplicate before you infer anything. |
+
+
+### Sheet: 10. Test Cases
+
+| Test cases — real families, with the expected answer |
+|  |
+| Run the migration against these and check the output matches. They were chosen to cover every awkward pattern in the data. |
+|  |
+| # | Family | Payment date | Card AED | Children and their Zoho share | Expected result | What it tests |
+| 1 | Rudra Bajaj, Shiva Bajaj, Veer Bajaj | 46008 | 3024 | Rudra 960.00 + Shiva 960.00 + Veer 960.00 | 1 payment of AED 3,024.00 allocated to 3 children; family owes nil; allocation must absorb AED 144.00 (VAT) | one family, three children, VAT added on the card and Zoho dates that disagree |
+| 2 | Evaana Jamshidzadeh, Kiyaana Jamshidzadeh | 46225 | 7875 | Evaana 3836.00 + Kiyaana 3938.00 | 1 payment of AED 7,875.00 allocated to 2 children; family owes nil; allocation must absorb AED 101.00 (discount/rounding) | uneven split that does NOT sum to the card — a family discount recorded nowhere |
+| 3 | Mihail Senguen, Noyan Seuguen, Marah Draidi, Adam Draidi | 46227 | 5355 | Mihail 1338.00 + Noyan 1338.00 + Marah 1500.00 + Adam 1500.00 | 1 payment of AED 5,355.00 allocated to 4 children; family owes nil; allocation must absorb AED 321.00 (discount/rounding) | four children across BOTH centres on one swipe |
+| 4 | Bodhi Chokdia, Amit Chordia, Vanya Chordia | 46174 | 3150 | Bodhi 1050.00 + Amit 1050.00 + Vanya 1050.00 | 1 payment of AED 3,150.00 allocated to 3 children; family owes nil | three children with three different surnames |
+| 5 | Misha Garg, Viha Garg | 46031 | 7875 | Misha 3937.00 + Viha 3937.00 | 1 payment of AED 7,875.00 allocated to 2 children; family owes nil; allocation must absorb AED 1.00 (discount/rounding) | the classic 3,937 + 3,937 = 7,874 one-dirham rounding trap |
+| 6 | Faras Gherras, Ibrahim Boudenagh, Ilyes Gherras | 45906 | 4636 | Faras 1545.30 + Ibrahim 1545.30 + Ilyes 1545.30 | 1 payment of AED 4,636.00 allocated to 3 children; family owes nil; allocation must absorb AED 0.10 (discount/rounding) | three children, two surnames, not actually siblings — friends paying together |
+| 7 | Muhab Yousef, nedal yousef, noor yousef, rova yousef | 46225 | 2520 | Muhab 630.00 + nedal 630.00 + noor 630.00 + rova 630.00 | 1 payment of AED 2,520.00 allocated to 4 children; family owes nil | four children, small even split |
+| 8 | Myra Bhandari, Pranshi Kulshrestha | 45836 | 7500 | Myra 3750.00 + Pranshi 3750.00 | 1 payment of AED 7,500.00 allocated to 2 children; family owes nil | two children, different surnames, JLT |
+|  |
+| ACCEPTANCE TEST |
+| For every payment in tab 3: sum of allocated_amount across its children must equal payment.gross_amount, to the fill. 96 payments, AED 421,641.00. If that holds, the model is right. |
+
+

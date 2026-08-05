@@ -386,7 +386,25 @@ export const db = {
 
   saveProgressLog(log: ProgressLog): void {
     const logs = this.getProgressLogs();
-    logs.push(log);
+    const targetDateStr = log.date ? new Date(log.date).toISOString().split('T')[0] : '';
+    const existingIdx = logs.findIndex(l => {
+      if (l.student_id !== log.student_id) return false;
+      const dStr = l.date ? new Date(l.date).toISOString().split('T')[0] : '';
+      return dStr === targetDateStr;
+    });
+
+    if (existingIdx > -1) {
+      logs[existingIdx] = {
+        ...logs[existingIdx],
+        topic: log.topic,
+        mastery: log.mastery,
+        note: log.note,
+        coach_id: log.coach_id,
+        skills: log.skills
+      };
+    } else {
+      logs.push(log);
+    }
     this.save('progress_logs', logs);
     
     // Update student skills profile
