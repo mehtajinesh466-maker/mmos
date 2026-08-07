@@ -461,14 +461,15 @@ export const db = {
   // Replicates on_attendance_present() trigger in SQL
   processAttendanceRecord(record: Attendance): void {
     const list = this.get<Attendance>('attendance');
-    
-    // Prevent double insertions of same ID
-    if (list.some(a => a.id === record.id)) return;
-    
-    list.push(record);
+    const existingIndex = list.findIndex(a => a.id === record.id);
+    if (existingIndex !== -1) {
+      list[existingIndex] = record;
+    } else {
+      list.push(record);
+    }
     this.save('attendance', list);
 
-    if (record.status === 'present') {
+    if (record.status === 'present' || record.status === 'makeup') {
       const packages = this.get<Package>('packages');
       const students = this.get<Student>('students');
 
@@ -520,6 +521,41 @@ export const db = {
           student.flags.low_package = true;
         } else {
           delete student.flags.low_package;
+        }
+
+        // 3) Recalculate unpaid classes and values
+        const allStudentAtt = list.filter(a => a.student_id === record.student_id && (a.status === 'present' || a.status === 'makeup'));
+        const totalAttended = allStudentAtt.reduce((sum, a) => sum + (a.duration ?? 1), 0);
+
+        const totalPurchased = studentPkgs.reduce((sum, p) => sum + p.classes_total, 0);
+        const unpaidClasses = Math.max(0, totalAttended - totalPurchased);
+
+        // Compute student rate
+        let studentRate = 125;
+        if (studentPkgs.length > 0) {
+          const sorted = [...studentPkgs].sort((a, b) => new Date(b.start_date || 0).getTime() - new Date(a.start_date || 0).getTime());
+          const latestPkg = sorted[0];
+          const invoices = this.get<any>('invoices') || [];
+          const invoice = invoices.find((inv: any) => inv.package_id === latestPkg.id);
+          if (invoice && invoice.amount) {
+            studentRate = Math.round(Number(invoice.amount) / latestPkg.classes_total);
+          } else if (latestPkg.tier_id) {
+            const tiers = this.get<any>('tiers') || [];
+            const tier = tiers.find((t: any) => t.id === latestPkg.tier_id);
+            if (tier && tier.price) {
+              const discount = latestPkg.discount_pct ? Number(latestPkg.discount_pct) : 0;
+              studentRate = Math.round(Number(tier.price) * (1 - discount / 100) / latestPkg.classes_total);
+            }
+          }
+        }
+        const unpaidValue = unpaidClasses * studentRate;
+
+        if (unpaidClasses > 0) {
+          student.flags.unpaid_classes = unpaidClasses;
+          student.flags.unpaid_value = unpaidValue;
+        } else {
+          delete student.flags.unpaid_classes;
+          delete student.flags.unpaid_value;
         }
 
         this.save('students', students);

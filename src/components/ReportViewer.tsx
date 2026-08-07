@@ -2260,17 +2260,15 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           if (coachId === '__unassigned__') {
             // attendance with no coach or whose student has no coach
             const s = students.find(st => st.id === a.student_id);
-            const attCoachId = a.coach_id || s?.coach_id || '__unassigned__';
+            const attCoachId = a.coach_id || '__unassigned__';
             return attCoachId === '__unassigned__' || !coaches.find(c => c.id === attCoachId);
           }
-          // Primary: match by attendance.coach_id; fallback: student.coach_id
-          const attCoachId = a.coach_id || students.find(s => s.id === a.student_id)?.coach_id;
+          const attCoachId = a.coach_id;
           return attCoachId === coachId;
         });
 
-        // Unique students taught by this coach (union of studentIds set + attendance)
+        // Unique students taught by this coach (strictly via attendance)
         const allStudentIdsTaught = new Set<string>([
-          ...studentIdArr,
           ...coachAtts.map(a => a.student_id)
         ]);
         const studentCount = allStudentIdsTaught.size;
@@ -2469,15 +2467,14 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           }
           if (coachId === '__unassigned__') {
             const s = students.find(st => st.id === a.student_id);
-            const aid = a.coach_id || s?.coach_id || '__unassigned__';
+            const aid = a.coach_id || '__unassigned__';
             return aid === '__unassigned__' || !coaches.find(c => c.id === aid);
           }
-          const aid = a.coach_id || students.find(s => s.id === a.student_id)?.coach_id;
+          const aid = a.coach_id;
           return aid === coachId;
         });
 
         const allStudentIds = new Set<string>([
-          ...Array.from(studentIds),
           ...coachAtts.map(a => a.student_id)
         ]);
 

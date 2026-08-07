@@ -128,8 +128,8 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       studentAtts.forEach(a => {
         const attDate = new Date(a.date);
         const diffDays = Math.floor((today.getTime() - attDate.getTime()) / 86400000);
-        if (diffDays >= 0 && diffDays <= 30) cls30d++;
-        if (diffDays >= 0 && diffDays <= 90) cls90d++;
+        if (diffDays >= -1 && diffDays <= 30) cls30d++;
+        if (diffDays >= -1 && diffDays <= 90) cls90d++;
       });
 
       // Classes left across packages

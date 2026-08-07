@@ -124,7 +124,7 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
     sortedPkgs.forEach((pkg, idx) => {
       // Package has classes remaining, and total remaining classes is <= 20% of package size (or totalRemaining <= 3), and is not frozen
       const isThresholdMet = pkg.classes_total > 0 && ((pkg.classes_remaining / pkg.classes_total) <= 0.20 || totalRemaining <= 3);
-      if (pkg.classes_remaining > 0 && isThresholdMet && !pkg.frozen) {
+      if (pkg.classes_remaining >= 0 && isThresholdMet && !pkg.frozen) {
         const rawCoachName = s.coach?.user?.name || 'Unassigned';
         const displayCoachName = rawCoachName === 'Unassigned' ? 'Unassigned' : rawCoachName.split(' ')[0].toUpperCase();
         const pctLeft = pkg.classes_total > 0 ? Math.round((pkg.classes_remaining / pkg.classes_total) * 100) : 0;

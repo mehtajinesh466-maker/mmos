@@ -221,7 +221,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
 
       // Days since last class
       const daysSince    = s.last_attended
-        ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000)
+        ? Math.max(0, Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000))
         : 999;
 
       // 30D / 90D classes calculated from real attendance
@@ -231,8 +231,8 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
       studentAtts.forEach(a => {
         const diffDays = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
         const dur = a.duration ?? 2;
-        if (diffDays >= 0 && diffDays <= 30) cls30d += dur;
-        if (diffDays >= 0 && diffDays <= 90) cls90d += dur;
+        if (diffDays >= -1 && diffDays <= 30) cls30d += dur;
+        if (diffDays >= -1 && diffDays <= 90) cls90d += dur;
       });
 
       // Rate per class

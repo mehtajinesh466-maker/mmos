@@ -200,14 +200,18 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
           }))
         );
 
-        const freshData = await syncDatabaseToClient();
-        db.syncFromNeon(freshData);
+        try {
+          const freshData = await syncDatabaseToClient();
+          db.syncFromNeon(freshData);
+        } catch (syncErr) {
+          console.warn("Sync failed:", syncErr);
+        }
 
         const taggedNames = siblingAllocations
           .map(a => students.find(s => s.id === a.studentId)?.name || 'Student')
           .join(', ');
 
-        setSaveStatus(`✓ Sibling package created! Split ${calculatedDetails.classes} classes & AED ${Math.round(calculatedDetails.total)} across tagged siblings: ${taggedNames}.`);
+        setSaveStatus(`✓ Sibling package created! Split ${calculatedDetails.classes} classes & AED ${Math.round(calculatedDetails.total)} across tagged siblings: ${taggedNames}. (Local database sync will complete on reload).`);
         
         // Reset form inputs
         setSelectedStudentId('');
@@ -226,9 +230,13 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
         await renewPackage(selectedStudentId, tierId, packageType.toLowerCase() as any, isFamilyShared);
-        const freshData = await syncDatabaseToClient();
-        db.syncFromNeon(freshData);
-        setSaveStatus('✓ Package created and saved to database! Ledger records updated.');
+        try {
+          const freshData = await syncDatabaseToClient();
+          db.syncFromNeon(freshData);
+        } catch (syncErr) {
+          console.warn("Sync failed:", syncErr);
+        }
+        setSaveStatus('✓ Package created and saved to database! Ledger records updated. (Local database sync will complete on reload).');
 
         // Reset form inputs
         setSelectedStudentId('');

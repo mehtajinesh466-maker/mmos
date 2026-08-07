@@ -47,9 +47,14 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
     const coas = db.getCoaches();
     if (coas.length > 0 && !selectedCoachId) {
-      const self = coas.find(c => c.user_id === currentUser.id);
-      const james = coas.find(c => c.name.toUpperCase().includes('JAMES'));
-      setSelectedCoachId(self ? self.id : (james ? james.id : coas[0].id));
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('mmos_selected_coach_id') : null;
+      if (stored && coas.some(c => c.id === stored)) {
+        setSelectedCoachId(stored);
+      } else {
+        const self = coas.find(c => c.user_id === currentUser.id);
+        const james = coas.find(c => c.name.toUpperCase().includes('JAMES'));
+        setSelectedCoachId(self ? self.id : (james ? james.id : coas[0].id));
+      }
     }
   };
 
@@ -71,11 +76,17 @@ export const Attendance: React.FC<AttendanceProps> = ({
     const initialMarkings: { [key: string]: 'present' | 'absent' | 'makeup' | null } = {};
     const initialBilledHours: Record<string, number> = {};
     attendance.forEach(a => {
-      const recordDate = typeof a.date === 'string' ? a.date.split('T')[0] : '';
-      if (recordDate === selectedDate && a.slot_id && a.student_id) {
+      if (!a.date || !a.slot_id || !a.student_id) return;
+      const d = new Date(a.date);
+      const isoDate = !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : '';
+      const localDate = !isNaN(d.getTime()) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
+      const isDateMatch = isoDate === selectedDate || localDate === selectedDate || (typeof a.date === 'string' && a.date.includes(selectedDate));
+
+      if (isDateMatch) {
         const key = `${a.slot_id}-${a.student_id}`;
         initialMarkings[key] = a.status as 'present' | 'absent' | 'makeup';
-        initialBilledHours[key] = (a as any).duration ?? 2;
+        const slot = slots.find(s => s.id === a.slot_id);
+        initialBilledHours[key] = (a as any).duration ?? (slot?.is_summer_camp ? 1 : 2);
       }
     });
     setMarkings(initialMarkings);
@@ -173,7 +184,8 @@ export const Attendance: React.FC<AttendanceProps> = ({
     return students.filter(s => 
       s.centre_id === slot.centre_id && 
       s.level === slot.level && 
-      s.status === 'active'
+      s.status === 'active' &&
+      s.coach_id === slot.coach_id
     );
   };
 
@@ -197,10 +209,22 @@ export const Attendance: React.FC<AttendanceProps> = ({
     if (!slot) return;
 
     const slotMarkings = Object.keys(markings).filter(key => key.startsWith(slotId) && markings[key] !== null);
-    if (slotMarkings.length === 0) {
-      setSaveStatus('❌ Error: No students marked for this class slot.');
-      setTimeout(() => setSaveStatus(''), 4000);
-      return;
+    // Date floor validation: ensure attendance date is not prior to student's join date
+    for (const key of slotMarkings) {
+      const studentId = key.substring(slotId.length + 1);
+      const student = students.find(s => s.id === studentId);
+      if (student && student.join_date) {
+        const joinDate = new Date(student.join_date);
+        joinDate.setHours(0, 0, 0, 0);
+        const attDate = new Date(selectedDate);
+        attDate.setHours(0, 0, 0, 0);
+        if (attDate < joinDate) {
+          const dateStr = typeof student.join_date === 'string' ? student.join_date.split('T')[0] : new Date(student.join_date).toISOString().split('T')[0];
+          setSaveStatus(`❌ Error: Cannot back-date class for ${student.name} before their join date (${dateStr}).`);
+          setTimeout(() => setSaveStatus(''), 5000);
+          return;
+        }
+      }
     }
 
     setSaveStatus('Saving attendance...');
@@ -213,10 +237,14 @@ export const Attendance: React.FC<AttendanceProps> = ({
         const status = markings[key];
         if (!status) continue;
 
-        let duration = billedHours[key] ?? 2;
-        if (slot.is_summer_camp) {
-          const stored = typeof window !== 'undefined' ? localStorage.getItem('mmos_summer_camp_duration') : '2';
-          duration = stored === '1' ? 1 : 2;
+        let duration = billedHours[key];
+        if (duration === undefined) {
+          if (slot.is_summer_camp) {
+            const stored = typeof window !== 'undefined' ? (localStorage.getItem('mmos_summer_camp_duration') || '1') : '1';
+            duration = stored === '2' ? 2 : 1;
+          } else {
+            duration = 2;
+          }
         }
         const record: AttendanceType = {
           id: `att-${slot.id}-${studentId}-${selectedDate}`,
@@ -243,9 +271,16 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
       // Sync updated package balances back from Neon
       if (isOnline && savedCount > 0) {
-        const freshData = await syncDatabaseToClient();
-        db.syncFromNeon(freshData);
-        loadData();
+        try {
+          const freshData = await syncDatabaseToClient();
+          db.syncFromNeon(freshData);
+          loadData();
+        } catch (syncErr) {
+          console.warn("Sync failed:", syncErr);
+          setSaveStatus(`✓ Saved to database: ${savedCount} student${savedCount > 1 ? 's' : ''} recorded. (Sync warning: local database will refresh on next reload).`);
+          onQueueChange();
+          return;
+        }
       }
 
       onQueueChange();
@@ -308,12 +343,12 @@ export const Attendance: React.FC<AttendanceProps> = ({
               className="bg-white border border-line rounded-lg px-2 py-1 text-xs text-ink outline-none cursor-pointer"
             />
           </div>
-          {currentUser.role === 'owner' && (
+          {(currentUser.role === 'owner' || currentUser.role === 'front_desk') && (
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-muted-custom uppercase">COACH</span>
               <select 
                 value={selectedCoachId} 
-                onChange={e => setSelectedCoachId(e.target.value)}
+                onChange={e => { setSelectedCoachId(e.target.value); localStorage.setItem('mmos_selected_coach_id', e.target.value); }}
                 className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none w-48 cursor-pointer"
               >
                 {coaches.map(c => (
@@ -453,7 +488,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
                                 </div>
                                 {(currentUser.role === 'owner' || currentUser.role === 'front_desk') && (currentStatus === 'present' || currentStatus === 'makeup') && (
                                   <select
-                                    value={billedHours[key] ?? 2}
+                                    value={billedHours[key] ?? (slot.is_summer_camp ? (typeof window !== 'undefined' ? (Number(localStorage.getItem('mmos_summer_camp_duration')) || 1) : 1) : 2)}
                                     onChange={e => setBilledHours(prev => ({ ...prev, [key]: Number(e.target.value) }))}
                                     className="bg-white border border-line rounded px-1.5 py-0.5 text-[9px] text-ink outline-none cursor-pointer focus:border-forest"
                                   >

@@ -27,7 +27,7 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('mmos_summer_camp_duration');
-      setSummerCampDuration(stored === '1' ? 1 : 2);
+      setSummerCampDuration(stored === '2' ? 2 : 1);
     }
   }, []);
 

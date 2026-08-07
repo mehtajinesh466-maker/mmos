@@ -116,17 +116,17 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
     const owedVal = (activeStudent.flags as any)?.unpaid_value || 0;
 
     const daysSince = activeStudent.last_attended
-      ? Math.floor((today.getTime() - new Date(activeStudent.last_attended).getTime()) / 86400000)
+      ? Math.max(0, Math.floor((today.getTime() - new Date(activeStudent.last_attended).getTime()) / 86400000))
       : 999;
 
     const cls30d = studentAtts.filter(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-      return diff >= 0 && diff <= 30;
+      return diff >= -1 && diff <= 30;
     }).length;
 
     const cls90d = studentAtts.filter(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-      return diff >= 0 && diff <= 90;
+      return diff >= -1 && diff <= 90;
     }).length;
 
     const lifetimePaid = studentInvs

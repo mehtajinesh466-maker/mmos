@@ -222,19 +222,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
 
     // Days since last class
     const daysSince = activeStudent.last_attended
-      ? Math.floor((today.getTime() - new Date(activeStudent.last_attended).getTime()) / 86400000)
+      ? Math.max(0, Math.floor((today.getTime() - new Date(activeStudent.last_attended).getTime()) / 86400000))
       : 999;
 
     // Classes in last 30 days
     const cls30d = studentAtts.filter(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-      return diff >= 0 && diff <= 30;
+      return diff >= -1 && diff <= 30;
     }).length;
 
     // Classes in last 90 days
     const cls90d = studentAtts.filter(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-      return diff >= 0 && diff <= 90;
+      return diff >= -1 && diff <= 90;
     }).length;
 
     // Lifetime paid
@@ -336,8 +336,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
         let p90 = 0;
         pAtts.forEach(a => {
           const diffDays = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-          if (diffDays >= 0 && diffDays <= 30) p30++;
-          if (diffDays >= 0 && diffDays <= 90) p90++;
+          if (diffDays >= -1 && diffDays <= 30) p30++;
+          if (diffDays >= -1 && diffDays <= 90) p90++;
         });
         const pDays = p.last_attended
           ? Math.floor((today.getTime() - new Date(p.last_attended).getTime()) / 86400000)

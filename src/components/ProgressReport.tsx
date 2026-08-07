@@ -120,17 +120,17 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
     const classesLeft = studentPkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
 
     const daysSince = activeStudent.last_attended
-      ? Math.floor((today.getTime() - new Date(activeStudent.last_attended).getTime()) / 86400000)
+      ? Math.max(0, Math.floor((today.getTime() - new Date(activeStudent.last_attended).getTime()) / 86400000))
       : 999;
 
     const cls30d = studentAtts.filter(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-      return diff >= 0 && diff <= 30;
+      return diff >= -1 && diff <= 30;
     }).length;
 
     const cls90d = studentAtts.filter(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-      return diff >= 0 && diff <= 90;
+      return diff >= -1 && diff <= 90;
     }).length;
 
     // Filter logs that are high mastery ratings (4 or 5)

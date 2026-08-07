@@ -17,9 +17,9 @@ export const CentreProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     if (status !== "authenticated" || !session?.user) return;
     const user = session.user as any;
-    if (user.role !== "owner" && user.centre_id) {
+    if (user.role !== "owner" && user.role !== "front_desk" && user.centre_id) {
       setActiveCentre(user.centre_id);
-    } else if (user.role === "owner") {
+    } else {
       setActiveCentre("All");
     }
   }, [status, session]);

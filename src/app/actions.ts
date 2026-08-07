@@ -790,14 +790,22 @@ async function updateStudentFlags(studentId: string, pkgId?: string, updatedRema
       delete flags.unpaid_value;
     }
 
+    const latestAttendance = await prisma.attendance.findFirst({
+      where: { student_id: studentId, status: { in: ['present', 'makeup'] } },
+      orderBy: { date: 'desc' }
+    });
+
     await prisma.student.update({
       where: { id: studentId },
-      data: { flags }
+      data: {
+        flags,
+        last_attended: latestAttendance ? latestAttendance.date : null
+      }
     });
   }
 }
 
-export async function logAttendance(studentId: string, status: string | null, coachId: string, slotId?: string, duration: number = 2, customDateStr?: string) {
+export async function logAttendance(studentId: string, status: string | null, coachId: string, slotId?: string, duration: number = 1, customDateStr?: string) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
@@ -834,7 +842,7 @@ export async function logAttendance(studentId: string, status: string | null, co
   if (existing) {
     if (!status) {
       // Unmarked: delete the record and restore class if it was present
-      if (existing.status === 'present') {
+       if (existing.status === 'present' || existing.status === 'makeup') {
         const pkgs = await prisma.package.findMany({
           where: { student_id: studentId, frozen: false },
           orderBy: { start_date: 'asc' }
@@ -870,7 +878,7 @@ export async function logAttendance(studentId: string, status: string | null, co
       return deletedRecord;
     }
 
-    if (existing.status === status) {
+    if (existing.status === status && existing.duration === duration) {
       return existing;
     }
 
@@ -884,7 +892,7 @@ export async function logAttendance(studentId: string, status: string | null, co
     });
     await logAuditDB(session.user.id, 'UPDATE_ATTENDANCE', 'attendance', { status: oldStatus, duration: oldDuration }, updated);
 
-    if (oldStatus === 'present' && status !== 'present') {
+    if ((oldStatus === 'present' || oldStatus === 'makeup') && (status !== 'present' && status !== 'makeup')) {
       // Restore class
       const pkgs = await prisma.package.findMany({
         where: { student_id: studentId, frozen: false },
@@ -912,7 +920,7 @@ export async function logAttendance(studentId: string, status: string | null, co
         });
         await updateStudentFlags(studentId, pkgToRestore.id, updatedPkg.classes_remaining);
       }
-    } else if (oldStatus !== 'present' && status === 'present') {
+    } else if ((oldStatus !== 'present' && oldStatus !== 'makeup') && (status === 'present' || status === 'makeup')) {
       // Deduct class
       const pkg = await prisma.package.findFirst({
         where: {
@@ -948,7 +956,7 @@ export async function logAttendance(studentId: string, status: string | null, co
         });
         await updateStudentFlags(studentId, targetPkg.id, updatedPkg.classes_remaining);
       }
-    } else if (oldStatus === 'present' && status === 'present' && oldDuration !== duration) {
+    } else if ((oldStatus === 'present' || oldStatus === 'makeup') && (status === 'present' || status === 'makeup') && oldDuration !== duration) {
       // Adjust class deduction difference
       const pkg = await prisma.package.findFirst({
         where: { student_id: studentId, frozen: false },
@@ -1001,7 +1009,7 @@ export async function logAttendance(studentId: string, status: string | null, co
 
   await logAuditDB(session.user.id, 'CREATE_ATTENDANCE', 'attendance', null, newRecord);
 
-  if (status === 'present') {
+  if (status === 'present' || status === 'makeup') {
     const pkg = await prisma.package.findFirst({
       where: {
         student_id: studentId,

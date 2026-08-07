@@ -67,10 +67,14 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     setLoading(false);
 
     if (coas.length > 0 && !selectedCoachId) {
-      // Find current user coach if applicable, else James Estrada, else first coach
-      const self = coas.find(c => c.user_id === currentUser.id);
-      const james = coas.find(c => c.name.toUpperCase().includes('JAMES'));
-      setSelectedCoachId(self ? self.id : (james ? james.id : coas[0].id));
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('mmos_selected_coach_id') : null;
+      if (stored && coas.some(c => c.id === stored)) {
+        setSelectedCoachId(stored);
+      } else {
+        const self = coas.find(c => c.user_id === currentUser.id);
+        const james = coas.find(c => c.name.toUpperCase().includes('JAMES'));
+        setSelectedCoachId(self ? self.id : (james ? james.id : coas[0].id));
+      }
     }
   };
 
@@ -110,11 +114,11 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       const enrolledStudentIds = new Set(slotEnrollments.map(e => e.student_id));
       return students.filter(s => enrolledStudentIds.has(s.id));
     }
-    // Fallback: match by level & centre
     return students.filter(s => 
       s.centre_id === slot.centre_id && 
       s.level === slot.level && 
-      s.status === 'active'
+      s.status === 'active' &&
+      s.coach_id === slot.coach_id
     );
   };
 
@@ -360,8 +364,8 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
 
       let duration = 2;
       if (slot?.is_summer_camp) {
-        const stored = typeof window !== 'undefined' ? localStorage.getItem('mmos_summer_camp_duration') : '2';
-        duration = stored === '1' ? 1 : 2;
+        const stored = typeof window !== 'undefined' ? (localStorage.getItem('mmos_summer_camp_duration') || '1') : '1';
+        duration = stored === '2' ? 2 : 1;
       }
       for (const key of slotMarkings) {
         const studentId = key.substring(slotId.length + 1);
@@ -423,7 +427,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
           ) : (
             <select 
               value={selectedCoachId} 
-              onChange={e => setSelectedCoachId(e.target.value)}
+              onChange={e => { setSelectedCoachId(e.target.value); localStorage.setItem('mmos_selected_coach_id', e.target.value); }}
               className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none w-64 cursor-pointer"
             >
               {coaches.map(c => (
