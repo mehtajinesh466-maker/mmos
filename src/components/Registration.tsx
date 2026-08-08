@@ -56,6 +56,11 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
     consent_media: true
   });
 
+  const [siblingSearchQuery, setSiblingSearchQuery] = useState('');
+  const [siblingSearchResults, setSiblingSearchResults] = useState<any[]>([]);
+  const [selectedFamilyId, setSelectedFamilyId] = useState('');
+  const [selectedSiblingName, setSelectedSiblingName] = useState('');
+
   // Pre-fill form from CRM enquiry parameters
   useEffect(() => {
     const childVal = searchParams.get('child') || searchParams.get('name') || '';
@@ -202,6 +207,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       consent_ops: formData.consent_ops,
       consent_mktg: formData.consent_mktg,
       photo_url: photoUrl,
+      family_id: selectedFamilyId || undefined,
       flags: {
         reg_form_url: regFormUrl,
         emirates_id_url: emiratesIdUrl,
@@ -220,6 +226,8 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       setPhotoUrl('');
       setRegFormUrl('');
       setEmiratesIdUrl('');
+      setSelectedFamilyId('');
+      setSelectedSiblingName('');
       
       // Reset form
       setFormData(prev => ({
@@ -490,14 +498,100 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
               <select 
                 name="sibling" 
                 value={formData.sibling} 
-                onChange={handleChange} 
+                onChange={(e) => {
+                  handleChange(e);
+                  if (e.target.value === 'No') {
+                    setSelectedFamilyId('');
+                    setSelectedSiblingName('');
+                  }
+                }} 
                 className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
               >
                 <option value="No">No</option>
                 <option value="Yes">Yes</option>
               </select>
-              <span className="text-[10px] text-muted-custom">No sibling discount applies. Linked under same family.</span>
+              <span className="text-[10px] text-muted-custom">Linked under the same parent/family.</span>
             </div>
+
+            {formData.sibling === 'Yes' && (
+              <div className="flex flex-col gap-2 p-3 bg-canvas border border-line rounded-lg mt-1 col-span-2">
+                <label className="text-xs font-bold text-ink">Search Sibling / Parent Name or Email</label>
+                <input
+                  type="text"
+                  placeholder="Type name or email to search..."
+                  value={siblingSearchQuery}
+                  onChange={(e) => {
+                    setSiblingSearchQuery(e.target.value);
+                    if (e.target.value.trim().length >= 2) {
+                      const query = e.target.value.toLowerCase();
+                      const matches = db.getStudents().filter(s => 
+                        s.name.toLowerCase().includes(query) || 
+                        (s.parent_name && s.parent_name.toLowerCase().includes(query))
+                      );
+                      // Deduplicate matches by family_id
+                      const uniqueMatches: any[] = [];
+                      const seenFamilies = new Set<string>();
+                      matches.forEach(m => {
+                        if (m.family_id && !seenFamilies.has(m.family_id)) {
+                          seenFamilies.add(m.family_id);
+                          uniqueMatches.push(m);
+                        }
+                      });
+                      setSiblingSearchResults(uniqueMatches);
+                    } else {
+                      setSiblingSearchResults([]);
+                    }
+                  }}
+                  className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
+                />
+                
+                {siblingSearchResults.length > 0 && (
+                  <div className="border border-line rounded-lg bg-white max-h-32 overflow-y-auto divide-y divide-line">
+                    {siblingSearchResults.map(s => (
+                      <div
+                        key={s.id}
+                        onClick={() => {
+                          setSelectedFamilyId(s.family_id || '');
+                          setSelectedSiblingName(`${s.parent_name || '—'} (Sibling: ${s.name})`);
+                          setSiblingSearchQuery('');
+                          setSiblingSearchResults([]);
+                          
+                          // Pre-fill parent's details from sibling
+                          const families = db.get<any>('families') || [];
+                          const matchedFamily = families.find((f: any) => f.id === s.family_id);
+                          
+                          setFormData(prev => ({
+                            ...prev,
+                            parent_name: s.parent_name || prev.parent_name,
+                            phone: matchedFamily?.phone || prev.phone || '',
+                            email: matchedFamily?.email || prev.email || '',
+                          }));
+                        }}
+                        className="p-2 text-xs hover:bg-canvas cursor-pointer text-ink font-medium"
+                      >
+                        {s.name} (Parent: {s.parent_name || '—'})
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedFamilyId && (
+                  <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg p-2 text-xs font-semibold">
+                    <span>Linked to: {selectedSiblingName}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedFamilyId('');
+                        setSelectedSiblingName('');
+                      }}
+                      className="text-red-600 hover:text-red-800 font-bold"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-ink">Emergency contact</label>
