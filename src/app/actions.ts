@@ -1483,18 +1483,7 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
       }
     }).catch(err => console.warn("Auto invoice generation skipped:", err));
 
-    // Clear low_package flag on student
-    const updatedFlags = typeof student.flags === 'object' && student.flags
-      ? { ...(student.flags as any) }
-      : {};
-    delete updatedFlags.low_package;
-
-    await prisma.student.update({
-      where: { id: student.id },
-      data: {
-        flags: updatedFlags
-      }
-    });
+    await updateStudentFlags(student.id);
 
     return { success: true, data: JSON.parse(JSON.stringify(pkg)) };
   } catch (err: any) {
@@ -1545,16 +1534,7 @@ export async function renewSiblingPackage(
         }
       }).catch(err => console.warn("Auto invoice generation skipped:", err));
 
-      // Clear low_package flag on student
-      const updatedFlags = typeof student.flags === 'object' && student.flags
-        ? { ...(student.flags as any) }
-        : {};
-      delete updatedFlags.low_package;
-
-      await prisma.student.update({
-        where: { id: student.id },
-        data: { flags: updatedFlags }
-      });
+      await updateStudentFlags(student.id);
 
       results.push(pkg);
     }
