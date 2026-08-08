@@ -1406,8 +1406,14 @@ export async function registerStudent(data: any) {
       );
 
       // Auto-generate unpaid invoice for billing ledger
-      const tierPrice = Number(tier.price) || 1000;
-      const finalAmount = Math.round(tierPrice * (1 - discount / 100));
+      let finalAmount = 0;
+      if (data.rate_per_class && data.package_size) {
+        finalAmount = (Number(data.package_size) || 12) * (Number(data.rate_per_class) || 100);
+      } else {
+        const tierPrice = Number(tier.price) || 1000;
+        finalAmount = Math.round(tierPrice * (1 - discount / 100));
+      }
+
       await prisma.invoice.create({
         data: {
           student_id: student.id,

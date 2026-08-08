@@ -200,6 +200,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       tier_id: tierId,
       package_size: formData.package_size,
       bonus_classes: formData.bonus_classes,
+      rate_per_class: formData.rate_per_class,
       consent_ops: formData.consent_ops,
       consent_mktg: formData.consent_mktg,
       photo_url: photoUrl,
