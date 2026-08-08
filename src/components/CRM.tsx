@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../lib/db';
 import type { User, Enquiry, Centre, Student } from '../lib/db';
 import { saveEnquiryDB, syncDatabaseToClient, updateEnquiryStageDB } from '../app/actions';
+import { useRouter } from 'next/navigation';
 
 interface CRMProps {
   currentUser: User;
@@ -11,6 +12,7 @@ interface CRMProps {
 }
 
 export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
+  const router = useRouter();
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
   const [centres, setCentres] = useState<Centre[]>([]);
   const [isSaving, setIsSaving] = useState(false);
@@ -446,6 +448,14 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
                         <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${stageBadgeClass(enq.stage)}`}>
                           {enq.stage.replace('_', ' ').toUpperCase()}
                         </span>
+                        {enq.stage === 'converted' && (
+                          <button
+                            onClick={() => router.push(`/registration?child=${encodeURIComponent(enq.child)}&parent=${encodeURIComponent(enq.parent)}&phone=${encodeURIComponent(enq.phone)}&centre_id=${encodeURIComponent(enq.centre_id)}`)}
+                            className="ml-2 bg-forest text-white text-[9px] font-bold px-2 py-0.5 rounded border border-forest hover:bg-forest/90 transition-all cursor-pointer"
+                          >
+                            Register
+                          </button>
+                        )}
                       </td>
                       <td className="py-3 px-3" onClick={e => e.stopPropagation()}>
                         <select 
@@ -597,46 +607,58 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
 
             {/* Panel Footer */}
             <div className="p-6 border-t border-line bg-canvas flex gap-3">
-              <button 
-                onClick={() => {
-                  if (!selectedEnquiry) return;
+              {selectedEnquiry.stage === 'converted' ? (
+                <button
+                  onClick={() => {
+                    router.push(`/registration?child=${encodeURIComponent(selectedEnquiry.child || '')}&parent=${encodeURIComponent(selectedEnquiry.parent || '')}&phone=${encodeURIComponent(selectedEnquiry.phone || '')}&centre_id=${encodeURIComponent(selectedEnquiry.centre_id || '')}`);
+                    setSelectedEnquiry(null);
+                  }}
+                  className="flex-1 bg-forest hover:bg-forest/90 text-white font-bold text-xs py-2.5 rounded-lg transition-all shadow text-center"
+                >
+                  📝 Register Student Profile
+                </button>
+              ) : (
+                <button 
+                  onClick={() => {
+                    if (!selectedEnquiry) return;
 
-                  // 1. Create family
-                  const familyId = 'fam-' + crypto.randomUUID();
-                  
-                  // 2. Create student record from enquiry data
-                  const newStudent: Student = {
-                    id: 'stu-' + crypto.randomUUID(),
-                    family_id: familyId,
-                    centre_id: selectedEnquiry.centre_id || (centres[0]?.id || 'c-1'),
-                    coach_id: selectedEnquiry.coach_id || null,
-                    name: selectedEnquiry.child || 'New Student',
-                    dob: new Date().toISOString().split('T')[0],
-                    gender: 'Boy',
-                    school: 'Primary School',
-                    level: selectedEnquiry.experience === 'Club player' ? 'Intermediate' : selectedEnquiry.experience === 'Tournament player' ? 'Advanced' : 'Beginner',
-                    status: 'active',
-                    join_date: new Date().toISOString().split('T')[0],
-                    last_attended: null,
-                    pace_status: 'New',
-                    pace_reason: null,
-                    flags: {}
-                  };
+                    // 1. Create family
+                    const familyId = 'fam-' + crypto.randomUUID();
+                    
+                    // 2. Create student record from enquiry data
+                    const newStudent: Student = {
+                      id: 'stu-' + crypto.randomUUID(),
+                      family_id: familyId,
+                      centre_id: selectedEnquiry.centre_id || (centres[0]?.id || 'c-1'),
+                      coach_id: selectedEnquiry.coach_id || null,
+                      name: selectedEnquiry.child || 'New Student',
+                      dob: new Date().toISOString().split('T')[0],
+                      gender: 'Boy',
+                      school: 'Primary School',
+                      level: selectedEnquiry.experience === 'Club player' ? 'Intermediate' : selectedEnquiry.experience === 'Tournament player' ? 'Advanced' : 'Beginner',
+                      status: 'active',
+                      join_date: new Date().toISOString().split('T')[0],
+                      last_attended: null,
+                      pace_status: 'New',
+                      pace_reason: null,
+                      flags: {}
+                    };
 
-                  // Save student locally & sync
-                  db.saveStudent(newStudent);
+                    // Save student locally & sync
+                    db.saveStudent(newStudent);
 
-                  // 3. Mark enquiry as converted
-                  handleUpdateStage(selectedEnquiry.id, 'converted');
+                    // 3. Mark enquiry as converted
+                    handleUpdateStage(selectedEnquiry.id, 'converted');
 
-                  setMessage(`✓ ${selectedEnquiry.child} converted to active Enrolment! Student profile created.`);
-                  setSelectedEnquiry(null);
-                  setTimeout(() => setMessage(''), 6000);
-                }}
-                className="flex-1 bg-[#173F35] hover:bg-[#173F35]/90 text-white font-bold text-xs py-2.5 rounded-lg transition-all shadow"
-              >
-                🎓 Convert to Enrolment
-              </button>
+                    setMessage(`✓ ${selectedEnquiry.child} converted to active Enrolment! Student profile created.`);
+                    setSelectedEnquiry(null);
+                    setTimeout(() => setMessage(''), 6000);
+                  }}
+                  className="flex-1 bg-[#173F35] hover:bg-[#173F35]/90 text-white font-bold text-xs py-2.5 rounded-lg transition-all shadow"
+                >
+                  🎓 Convert to Enrolment
+                </button>
+              )}
               <button 
                 onClick={() => setSelectedEnquiry(null)}
                 className="bg-white border border-line text-ink font-bold text-xs px-4 py-2.5 rounded-lg transition-all hover:bg-canvas"

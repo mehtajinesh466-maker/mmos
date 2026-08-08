@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/db';
 import { registerStudent, syncDatabaseToClient } from '../app/actions';
+import { useSearchParams } from 'next/navigation';
 
 interface RegistrationProps {
   currentUser: any;
@@ -12,6 +13,7 @@ interface RegistrationProps {
 export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeCentre }) => {
   const centres = db.getCentres();
   const coaches = db.getCoaches();
+  const searchParams = useSearchParams();
 
   const bayCentre = centres.find(c => c.name === 'Bay Avenue');
   const jltCentre = centres.find(c => c.name === 'JLT');
@@ -53,6 +55,26 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
     consent_mktg: false,
     consent_media: true
   });
+
+  // Pre-fill form from CRM enquiry parameters
+  useEffect(() => {
+    const childVal = searchParams.get('child') || searchParams.get('name') || '';
+    const parentVal = searchParams.get('parent') || searchParams.get('parent_name') || '';
+    const phoneVal = searchParams.get('phone') || '';
+    const emailVal = searchParams.get('email') || '';
+    const centreVal = searchParams.get('centre_id') || '';
+
+    if (childVal || parentVal || phoneVal || emailVal || centreVal) {
+      setFormData(prev => ({
+        ...prev,
+        name: childVal || prev.name,
+        parent_name: parentVal || prev.parent_name,
+        phone: phoneVal || prev.phone,
+        email: emailVal || prev.email,
+        centre_id: centreVal || prev.centre_id
+      }));
+    }
+  }, [searchParams]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
