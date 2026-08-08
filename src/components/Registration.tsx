@@ -18,15 +18,11 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
   const bayCentre = centres.find(c => c.name === 'Bay Avenue');
   const jltCentre = centres.find(c => c.name === 'JLT');
 
-  const visibleCentres = currentUser.role === 'front_desk' && currentUser.centre_id
-    ? centres.filter(c => c.id === currentUser.centre_id)
-    : centres;
+  const visibleCentres = centres;
 
-  const defaultCentreId = currentUser.role === 'front_desk' && currentUser.centre_id
-    ? currentUser.centre_id
-    : (activeCentre === 'All' 
-       ? (bayCentre ? bayCentre.id : (centres[0]?.id || '')) 
-       : activeCentre);
+  const defaultCentreId = activeCentre === 'All' 
+     ? (bayCentre ? bayCentre.id : (centres[0]?.id || '')) 
+     : activeCentre;
 
   const [formData, setFormData] = useState({
     name: '',
