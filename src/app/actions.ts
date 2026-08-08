@@ -1645,15 +1645,6 @@ export async function updatePackageDB(id: string, data: any) {
   if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
   }
-  if (session.user.role === 'front_desk' && session.user.centre_id) {
-    const pkg = await prisma.package.findUnique({
-      where: { id },
-      include: { student: true }
-    });
-    if (pkg?.student.centre_id !== session.user.centre_id) {
-      throw new Error("Unauthorized");
-    }
-  }
   return JSON.parse(JSON.stringify(await prisma.package.update({
     where: { id },
     data: {
@@ -1705,15 +1696,6 @@ export async function updateInvoiceDB(id: string, status: string) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
-  }
-  if (session.user.role === 'front_desk' && session.user.centre_id) {
-    const invoice = await prisma.invoice.findUnique({
-      where: { id },
-      include: { student: true }
-    });
-    if (invoice?.student?.centre_id !== session.user.centre_id) {
-      throw new Error("Unauthorized");
-    }
   }
   return JSON.parse(JSON.stringify(await prisma.invoice.update({
     where: { id },
