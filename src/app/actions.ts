@@ -704,30 +704,46 @@ export async function saveEnquiryDB(data: {
   coach_id?: string;
   notes?: string;
 }) {
-  const session = await verifySession();
-  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
-    throw new Error("Unauthorized");
-  }
-  if (session.user.role === 'front_desk' && session.user.centre_id) {
-    if (data.centre_id && data.centre_id !== session.user.centre_id) {
-      throw new Error("Unauthorized");
+  try {
+    const session = await verifySession();
+    if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+      return { success: false, error: "Unauthorized" };
     }
-  }
-  return await prisma.enquiry.create({
-    data: {
-      child: data.child,
-      age: data.age || null,
-      parent: data.parent,
-      phone: data.phone,
-      source: data.source,
-      stage: data.stage.toLowerCase().replace(' ', '_'),
-      centre_id: data.centre_id || null,
-      experience: data.experience || null,
-      trial_date: data.trial_date ? new Date(data.trial_date) : null,
-      coach_id: data.coach_id || null,
-      notes: data.notes || null,
+    if (session.user.role === 'front_desk' && session.user.centre_id) {
+      if (data.centre_id && data.centre_id !== session.user.centre_id) {
+        return { success: false, error: "Unauthorized" };
+      }
     }
-  });
+    
+    // Validate UUID format for foreign keys to prevent db crash
+    const isValidUUID = (id?: string) => {
+      if (!id) return false;
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    };
+
+    const finalCentreId = isValidUUID(data.centre_id) ? data.centre_id : null;
+    const finalCoachId = isValidUUID(data.coach_id) ? data.coach_id : null;
+
+    const enquiry = await prisma.enquiry.create({
+      data: {
+        child: data.child,
+        age: data.age || null,
+        parent: data.parent,
+        phone: data.phone,
+        source: data.source,
+        stage: data.stage.toLowerCase().replace(' ', '_'),
+        centre_id: finalCentreId,
+        experience: data.experience || null,
+        trial_date: data.trial_date ? new Date(data.trial_date) : null,
+        coach_id: finalCoachId,
+        notes: data.notes || null,
+      }
+    });
+    return { success: true, data: enquiry };
+  } catch (err: any) {
+    console.error("Error saving enquiry:", err);
+    return { success: false, error: err.message || String(err) };
+  }
 }
 
 export async function updateEnquiryStageDB(id: string, stage: string) {

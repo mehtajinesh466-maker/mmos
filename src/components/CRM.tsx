@@ -30,6 +30,13 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
   });
   const [message, setMessage] = useState('');
 
+  const refreshFromLocal = () => {
+    const enqs = db.getEnquiries();
+    const ctrs = db.getCentres();
+    setEnquiries(enqs);
+    setCentres(ctrs);
+  };
+
   const loadData = async () => {
     try {
       const freshData = await syncDatabaseToClient();
@@ -37,16 +44,13 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
     } catch (e) {
       // Fallback to local storage if sync fails
     }
-    const enqs = db.getEnquiries();
-    const ctrs = db.getCentres();
-    setEnquiries(enqs);
-    setCentres(ctrs);
+    refreshFromLocal();
   };
 
   useEffect(() => {
     loadData();
-    window.addEventListener('db-synced', loadData);
-    return () => window.removeEventListener('db-synced', loadData);
+    window.addEventListener('db-synced', refreshFromLocal);
+    return () => window.removeEventListener('db-synced', refreshFromLocal);
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -80,7 +84,7 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
       db.saveEnquiry(newEnq);
 
       // Persist to Neon Postgres in background
-      await saveEnquiryDB({
+      const res = await saveEnquiryDB({
         child: newEnq.child,
         age: newEnq.age,
         parent: newEnq.parent,
@@ -93,6 +97,10 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
         coach_id: newEnq.coach_id,
         notes: newEnq.notes,
       });
+
+      if (res && !res.success) {
+        throw new Error(res.error);
+      }
 
       setMessage('✓ Enquiry saved to database!');
       setFormData({
