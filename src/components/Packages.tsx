@@ -18,7 +18,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
   const [tiers, setTiers] = useState<any[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState(studentIdParam);
   const [packageType, setPackageType] = useState('Renewal');
-  const [packageSize, setPackageSize] = useState('12 classes');
+  const [packageSize, setPackageSize] = useState('12');
   const [ratePerClass, setRatePerClass] = useState('100');
   const [discount, setDiscount] = useState('None');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -217,7 +217,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
         setSelectedStudentId('');
         setStudentSearchQuery('');
         setPackageType('Renewal');
-        setPackageSize('12 classes');
+        setPackageSize('12');
         setRatePerClass('100');
         setDiscount('None');
         setPaymentMethod('cash');
@@ -245,7 +245,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
         setSelectedStudentId('');
         setStudentSearchQuery('');
         setPackageType('Renewal');
-        setPackageSize('12 classes');
+        setPackageSize('12');
         setRatePerClass('100');
         setDiscount('None');
         setPaymentMethod('cash');
@@ -339,16 +339,15 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold text-ink">Package size *</label>
-              <select 
+              <label className="text-xs font-bold text-ink">Package size (Classes) *</label>
+              <input 
+                type="number"
+                min="1"
                 value={packageSize} 
                 onChange={e => setPackageSize(e.target.value)}
+                required
                 className="bg-white border border-line rounded-lg px-3 py-2.5 text-xs text-ink outline-none"
-              >
-                <option value="12 classes">12 classes</option>
-                <option value="8 classes">8 classes</option>
-                <option value="24 classes">24 classes</option>
-              </select>
+              />
             </div>
 
             <div className="flex flex-col gap-1.5">
