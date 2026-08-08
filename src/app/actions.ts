@@ -1404,6 +1404,19 @@ export async function registerStudent(data: any) {
         new Date(),
         bonusClasses
       );
+
+      // Auto-generate unpaid invoice for billing ledger
+      const tierPrice = Number(tier.price) || 1000;
+      const finalAmount = Math.round(tierPrice * (1 - discount / 100));
+      await prisma.invoice.create({
+        data: {
+          student_id: student.id,
+          package_id: packageId,
+          amount: finalAmount,
+          status: 'unpaid',
+          created_at: new Date()
+        }
+      }).catch(err => console.warn("Auto invoice generation skipped:", err));
     }
   }
 
