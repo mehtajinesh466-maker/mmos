@@ -170,8 +170,10 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
       const student = students.find(s => s.id === studentId);
       // Determine existing package tier or default to first/core tier
       const currentTierId = student?.packages?.[0]?.tier_id || tiers[1]?.id || tiers[0]?.id || 't-core-id';
-      
-      await renewPackage(studentId, currentTierId, 'renewal');
+      const res = await renewPackage(studentId, currentTierId, 'renewal');
+      if (res && !res.success) {
+        throw new Error(res.error);
+      }
       setMessage('✓ Invoice generated and package renewed successfully!');
       setTimeout(() => setMessage(''), 4000);
       

@@ -1304,11 +1304,6 @@ export async function registerStudent(data: any) {
   if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
   }
-  if (session.user.role === 'front_desk' && session.user.centre_id) {
-    if (data.centre_id !== session.user.centre_id) {
-      throw new Error("Unauthorized");
-    }
-  }
 
   let familyId = data.family_id;
 
@@ -1433,13 +1428,7 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
   try {
     const session = await verifySession();
     if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
-      throw new Error("Unauthorized");
-    }
-    if (session.user.role === 'front_desk' && session.user.centre_id) {
-      const student = await prisma.student.findUnique({ where: { id: studentId } });
-      if (student?.centre_id !== session.user.centre_id) {
-        throw new Error("Unauthorized student centre access");
-      }
+      return { success: false, error: "Unauthorized" };
     }
 
     const student = await prisma.student.findUnique({
@@ -1447,10 +1436,10 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
       include: { family: true }
     });
 
-    if (!student) throw new Error("Student not found");
+    if (!student) return { success: false, error: "Student not found" };
 
     const tier = await prisma.tier.findUnique({ where: { id: tierId } });
-    if (!tier) throw new Error("Tier not found");
+    if (!tier) return { success: false, error: "Tier not found" };
 
     // Check for sibling discount
     const siblingsCount = student.family_id
@@ -1507,10 +1496,10 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
       }
     });
 
-    return JSON.parse(JSON.stringify(pkg));
+    return { success: true, data: JSON.parse(JSON.stringify(pkg)) };
   } catch (err: any) {
     console.error("[RENEW_PACKAGE_ERROR]", err);
-    throw new Error(err.message || "Failed to renew package");
+    return { success: false, error: err.message || "Failed to renew package" };
   }
 }
 
@@ -1533,12 +1522,6 @@ export async function renewSiblingPackage(
         where: { id: alloc.studentId }
       });
       if (!student) continue;
-
-      if (session.user.role === 'front_desk' && session.user.centre_id) {
-        if (student.centre_id !== session.user.centre_id) {
-          throw new Error("Unauthorized student centre access");
-        }
-      }
 
       const pkg = await prisma.package.create({
         data: {
@@ -1592,7 +1575,7 @@ export async function getReconciliationData() {
     throw new Error("Unauthorized");
   }
 
-  const filter = (role === 'front_desk' && centreId) ? { centre_id: centreId } : {};
+  const filter = {};
 
   const students = await prisma.student.findMany({
     where: filter,

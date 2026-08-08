@@ -229,7 +229,10 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
         document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
-        await renewPackage(selectedStudentId, tierId, packageType.toLowerCase() as any, isFamilyShared);
+        const res = await renewPackage(selectedStudentId, tierId, packageType.toLowerCase() as any, isFamilyShared);
+        if (res && !res.success) {
+          throw new Error(res.error);
+        }
         try {
           const freshData = await syncDatabaseToClient();
           db.syncFromNeon(freshData);
