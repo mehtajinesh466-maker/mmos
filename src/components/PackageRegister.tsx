@@ -142,22 +142,22 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
         const pkgInvoice = invoices.find(inv => inv.package_id === pkg.id);
         const isPaid = pkgInvoice ? pkgInvoice.status === 'paid' : true;
         const paidOnDate = isPaid ? (pkgInvoice?.created_at || pkg.start_date || '2025-01-10') : null;
-        const paidOn = paidOnDate ? new Date(paidOnDate).toISOString().split('T')[0] : 'NaT';
+        const paidOn = paidOnDate ? new Date(paidOnDate).toISOString().split('T')[0] : '-';
 
         // Map attendances to this package
         const pkgAtts = studentAtts.slice(attCursor, attCursor + classesPaid);
         attCursor += classesPaid;
 
-        const firstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : 'NaT');
+        const firstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '-');
 
-        let ended = 'NaT';
+        let ended = '-';
         if (pkg.classes_remaining === 0) {
           if (pkgAtts.length > 0) {
             ended = new Date(pkgAtts[pkgAtts.length - 1].date).toISOString().split('T')[0];
           } else if (pkg.expiry_date) {
             ended = new Date(pkg.expiry_date).toISOString().split('T')[0];
           } else {
-            ended = pkg.start_date ? new Date(new Date(pkg.start_date).getTime() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : 'NaT';
+            ended = pkg.start_date ? new Date(new Date(pkg.start_date).getTime() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : '-';
           }
         }
 

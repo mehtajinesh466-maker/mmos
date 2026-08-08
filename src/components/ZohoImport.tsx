@@ -144,6 +144,11 @@ export const ZohoImport: React.FC = () => {
   };
 
   const handleRunValidation = async () => {
+    if (!fileSelected) {
+      alert("❌ Please choose a Zoho export file before running validation.");
+      setImportStatus("❌ Please choose a Zoho export file before running validation.");
+      return;
+    }
     setIsProcessing(true);
     setImportStatus('Running data migration and validation checks...');
     try {
@@ -152,9 +157,12 @@ export const ZohoImport: React.FC = () => {
       const data = await syncDatabaseToClient();
       db.syncFromNeon(data);
       setResolved(true);
-      setImportStatus(`✓ Validated and imported! ${data.students.length} student profiles and ${data.packages.length} packages processed.`);
+      const successMsg = `✓ Validated and imported! ${data.students.length} student profiles and ${data.packages.length} packages processed.`;
+      setImportStatus(successMsg);
+      alert("✓ Validation and Import Completed successfully!\n" + successMsg);
     } catch (e: any) {
       setImportStatus('❌ Error: ' + e.message);
+      alert('❌ Error running validation: ' + e.message);
     } finally {
       setIsProcessing(false);
     }

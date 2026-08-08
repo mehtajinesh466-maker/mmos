@@ -37,7 +37,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       sections.push({
         title: 'OVERVIEW',
         items: [
-          { id: 'dashboard', path: '/analytics', label: 'Dashboard', glyph: '♦' },
+          { id: 'dashboard', path: '/dashboard', label: 'Dashboard', glyph: '♦' },
           { id: 'executive', path: '/executive', label: 'Executive', glyph: '♛' }
         ]
       });

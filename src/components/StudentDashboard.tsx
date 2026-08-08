@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Chart, registerables } from 'chart.js';
 import { db } from '../lib/db';
 import type { User, Student, Package, Attendance, ProgressLog, Invoice } from '../lib/db';
-import { sendProgressReport, syncDatabaseToClient } from '../app/actions';
+import { sendProgressReport, syncDatabaseToClient, saveStudentDB } from '../app/actions';
 
 Chart.register(...registerables);
 
@@ -126,6 +126,13 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
         lichess_username: editLichess || null
       };
       db.saveStudent(updated as any);
+      await saveStudentDB(updated);
+      try {
+        const freshData = await syncDatabaseToClient();
+        db.syncFromNeon(freshData);
+      } catch (syncErr) {
+        console.warn("Post-update sync failed:", syncErr);
+      }
       loadData();
       setShowEditModal(false);
       setStatusMessage('✓ Student chess accounts updated successfully.');
@@ -452,15 +459,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
       const pkgInvoice = invoices.find(inv => inv.package_id === pkg.id);
       const isPaid = pkgInvoice ? pkgInvoice.status === 'paid' : true;
       const paidOnDate = isPaid ? (pkgInvoice?.created_at || pkg.start_date) : null;
-      const paidOn = paidOnDate ? new Date(paidOnDate).toISOString().split('T')[0] : 'NaT';
+      const paidOn = paidOnDate ? new Date(paidOnDate).toISOString().split('T')[0] : '-';
 
       // Map attendances
       const pkgAtts = studentAtts.slice(attCursor, attCursor + classesPaid);
       attCursor += classesPaid;
 
-      const firstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : 'NaT');
+      const firstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '-');
 
-      let ended = 'NaT';
+      let ended = '-';
       if (pkg.classes_remaining === 0) {
         if (pkgAtts.length > 0) {
           ended = new Date(pkgAtts[pkgAtts.length - 1].date).toISOString().split('T')[0];
@@ -583,11 +590,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
                   onChange={async (e) => {
                     const newLevel = e.target.value as any;
                     try {
-                      const updatedStudent = {
-                        ...activeStudent,
-                        level: newLevel
-                      };
+                      const updatedStudent = { ...activeStudent, level: newLevel };
                       db.saveStudent(updatedStudent);
+                      await saveStudentDB(updatedStudent);
+                      try {
+                        const freshData = await syncDatabaseToClient();
+                        db.syncFromNeon(freshData);
+                      } catch (syncErr) {
+                        console.warn("Post-update sync failed:", syncErr);
+                      }
                       loadData();
                       setStatusMessage(`✓ Chess level updated to ${newLevel}`);
                       setTimeout(() => setStatusMessage(''), 3000);

@@ -141,16 +141,19 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
     return c ? c.name : 'Bay Avenue';
   };
 
-  const totalLeads = enquiries.length;
-  const newLeads = enquiries.filter(e => e.stage === 'new').length;
-  const contacted = enquiries.filter(e => e.stage === 'contacted').length;
-  const trials = enquiries.filter(e => e.stage === 'trial_booked' || e.stage === 'trial_done').length;
-  const converted = enquiries.filter(e => e.stage === 'converted').length;
-
   const filteredEnquiries = enquiries.filter(e => {
     if (activeCentre !== 'All' && e.centre_id !== activeCentre) return false;
     return true;
   });
+
+  const totalLeads = filteredEnquiries.length;
+  const newLeads = filteredEnquiries.filter(e => e.stage?.toLowerCase() === 'new').length;
+  const contacted = filteredEnquiries.filter(e => e.stage?.toLowerCase() === 'contacted').length;
+  const trials = filteredEnquiries.filter(e => {
+    const s = e.stage?.toLowerCase();
+    return s === 'trial_booked' || s === 'trial_done' || s === 'trial booked' || s === 'trial done';
+  }).length;
+  const converted = filteredEnquiries.filter(e => e.stage?.toLowerCase() === 'converted').length;
 
   const getCoachName = (coachId?: string) => {
     if (!coachId) return 'Unassigned';

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { db } from '../lib/db';
 import type { User, Student, ProgressLog } from '../lib/db';
 import { logProgress, syncDatabaseToClient } from '../app/actions';
@@ -11,6 +12,7 @@ interface ProgressProps {
 }
 
 export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre }) => {
+  const router = useRouter();
   const [selectedSlotId, setSelectedSlotId] = useState<string>('');
   const [topicCovered, setTopicCovered] = useState<string>('Rook endgames — technique');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -217,7 +219,15 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
               className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
             >
               <option value="">Select slot...</option>
-              {filteredSlots.map(s => {
+              {(() => {
+                const seen = new Set<string>();
+                return filteredSlots.filter(s => {
+                  const key = `${s.day}-${s.time}-${s.level}-${s.coach_id}`;
+                  if (seen.has(key)) return false;
+                  seen.add(key);
+                  return true;
+                });
+              })().map(s => {
                 const coach = coaches.find(c => c.id === s.coach_id);
                 return (
                   <option key={s.id} value={s.id}>
@@ -321,6 +331,7 @@ export const Progress: React.FC<ProgressProps> = ({ currentUser, activeCentre })
           <button 
             type="button"
             disabled={isSaving}
+            onClick={() => router.push('/progress-report')}
             className="bg-white border border-line hover:bg-canvas text-ink font-semibold text-xs px-5 py-2.5 rounded-lg transition-all disabled:opacity-60"
           >
             Preview a report

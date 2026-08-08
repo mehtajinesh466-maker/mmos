@@ -122,12 +122,19 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
     const sortedPkgs = [...studentPkgs].sort((a, b) => new Date(a.start_date || '').getTime() - new Date(b.start_date || '').getTime());
     
     sortedPkgs.forEach((pkg, idx) => {
-      // Package has classes remaining, and total remaining classes is <= 20% of package size (or totalRemaining <= 3), and is not frozen
-      const isThresholdMet = pkg.classes_total > 0 && ((pkg.classes_remaining / pkg.classes_total) <= 0.20 || totalRemaining <= 3);
-      if (pkg.classes_remaining >= 0 && isThresholdMet && !pkg.frozen) {
+      const isLatest = idx === sortedPkgs.length - 1;
+      const pctLeft = pkg.classes_total > 0 ? Math.round((pkg.classes_remaining / pkg.classes_total) * 100) : 0;
+      
+      let shouldInclude = false;
+      if (pkg.classes_remaining > 0) {
+        shouldInclude = (pctLeft <= 20 || totalRemaining <= 3);
+      } else if (pkg.classes_remaining === 0 && isLatest && totalRemaining === 0) {
+        shouldInclude = true;
+      }
+
+      if (shouldInclude && !pkg.frozen) {
         const rawCoachName = s.coach?.user?.name || 'Unassigned';
         const displayCoachName = rawCoachName === 'Unassigned' ? 'Unassigned' : rawCoachName.split(' ')[0].toUpperCase();
-        const pctLeft = pkg.classes_total > 0 ? Math.round((pkg.classes_remaining / pkg.classes_total) * 100) : 0;
         expiringPackages.push({
           id: pkg.id,
           studentId: s.id,

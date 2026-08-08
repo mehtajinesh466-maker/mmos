@@ -16,6 +16,12 @@ export const Attendance: React.FC<AttendanceProps> = ({
   activeCentre,
   onQueueChange,
 }) => {
+  const getDefaultDuration = (slot: ScheduleSlot) => {
+    if (slot.is_summer_camp) return 1;
+    const isWeekend = slot.day === 'Sat' || slot.day === 'Sun';
+    return isWeekend ? 2 : 1;
+  };
+
   const [selectedDate, setSelectedDate] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
@@ -86,7 +92,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
         const key = `${a.slot_id}-${a.student_id}`;
         initialMarkings[key] = a.status as 'present' | 'absent' | 'makeup';
         const slot = slots.find(s => s.id === a.slot_id);
-        initialBilledHours[key] = (a as any).duration ?? (slot?.is_summer_camp ? 1 : 2);
+        initialBilledHours[key] = (a as any).duration ?? (slot ? getDefaultDuration(slot) : 1);
       }
     });
     setMarkings(initialMarkings);
@@ -202,6 +208,14 @@ export const Attendance: React.FC<AttendanceProps> = ({
       ...prev,
       [key]: newStatus
     }));
+
+    if (newStatus === null || newStatus === 'absent') {
+      setBilledHours(prev => {
+        const copy = { ...prev };
+        delete copy[key];
+        return copy;
+      });
+    }
   };
 
   const handleSaveAttendance = async (slotId: string) => {
@@ -237,15 +251,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
         const status = markings[key];
         if (!status) continue;
 
-        let duration = billedHours[key];
-        if (duration === undefined) {
-          if (slot.is_summer_camp) {
-            const stored = typeof window !== 'undefined' ? (localStorage.getItem('mmos_summer_camp_duration') || '1') : '1';
-            duration = stored === '2' ? 2 : 1;
-          } else {
-            duration = 2;
-          }
-        }
+        const duration = billedHours[key] ?? getDefaultDuration(slot);
         const record: AttendanceType = {
           id: `att-${slot.id}-${studentId}-${selectedDate}`,
           student_id: studentId,
@@ -488,12 +494,12 @@ export const Attendance: React.FC<AttendanceProps> = ({
                                 </div>
                                 {(currentUser.role === 'owner' || currentUser.role === 'front_desk') && (currentStatus === 'present' || currentStatus === 'makeup') && (
                                   <select
-                                    value={billedHours[key] ?? (slot.is_summer_camp ? (typeof window !== 'undefined' ? (Number(localStorage.getItem('mmos_summer_camp_duration')) || 1) : 1) : 2)}
+                                    value={billedHours[key] ?? getDefaultDuration(slot)}
                                     onChange={e => setBilledHours(prev => ({ ...prev, [key]: Number(e.target.value) }))}
                                     className="bg-white border border-line rounded px-1.5 py-0.5 text-[9px] text-ink outline-none cursor-pointer focus:border-forest"
                                   >
-                                    <option value={1}>1 Class (Camp)</option>
-                                    <option value={2}>2 Classes (Regular)</option>
+                                    <option value={1}>1 Class (Regular / Camp Promo)</option>
+                                    <option value={2}>2 Classes (Boot Camp)</option>
                                   </select>
                                 )}
                               </div>

@@ -217,14 +217,14 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
       const pkgInvoice = invoices.find(inv => inv.package_id === pkg.id);
       const isPaid = pkgInvoice ? pkgInvoice.status === 'paid' : true;
       const paidOnDate = isPaid ? (pkgInvoice?.created_at || pkg.start_date) : null;
-      const paidOn = paidOnDate ? new Date(paidOnDate).toISOString().split('T')[0] : 'NaT';
+      const paidOn = paidOnDate ? new Date(paidOnDate).toISOString().split('T')[0] : '-';
 
       const pkgAtts = studentAtts.slice(attCursor, attCursor + classesPaid);
       attCursor += classesPaid;
 
-      const firstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : 'NaT');
+      const firstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '-');
 
-      let ended = 'NaT';
+      let ended = '-';
       if (pkg.classes_remaining === 0) {
         if (pkgAtts.length > 0) {
           ended = new Date(pkgAtts[pkgAtts.length - 1].date).toISOString().split('T')[0];

@@ -10,6 +10,7 @@ export default withAuth(
     // Define role-based routing access rules
     const routeAccess: Record<string, string[]> = {
       "/analytics": ["owner", "front_desk"],
+      "/dashboard": ["owner", "front_desk", "coach", "parent"],
       "/executive": ["owner"],
       "/registration": ["owner", "front_desk"],
       "/packages": ["owner", "front_desk"],

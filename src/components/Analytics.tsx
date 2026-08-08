@@ -557,99 +557,151 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
     });
   };
 
+  const filteredStudents = useMemo(() => {
+    return students.filter(s => {
+      if (filterCentre !== 'All' && s.centre_id !== (filterCentre === 'JLT' ? jltCentreId : bayCentreId)) return false;
+      
+      // Filter level
+      if (filterLevel !== 'All') {
+        if (filterLevel === 'Not assigned') {
+          if (s.level && s.level !== 'Not assigned') return false;
+        } else {
+          if (s.level !== filterLevel) return false;
+        }
+      }
+      
+      // Filter segment
+      if (filterSegment !== 'All') {
+        const pkgs = packages.filter(p => p.student_id === s.id && !p.frozen);
+        const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
+        const classesLeft = activePkg?.classes_remaining ?? 0;
+        const pkgSize = activePkg?.classes_total ?? 0;
+
+        let seg = 'HEALTHY';
+        if (pkgSize === 0 || classesLeft === 0) seg = 'COLD';
+        else if (classesLeft <= 2) seg = 'HOT';
+        else if (classesLeft <= 4) seg = 'WARM';
+
+        if (seg !== filterSegment) return false;
+      }
+      
+      // Filter engagement
+      if (filterEngagement !== 'All') {
+        const today = new Date();
+        const daysSince = s.last_attended ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000) : 999;
+        let eng = 'Dormant';
+        if (daysSince === 999) eng = 'Never attended';
+        else if (daysSince <= 14) eng = 'Engaged';
+        else if (daysSince <= 30) eng = 'Slipping';
+        else if (daysSince <= 60) eng = 'Cold';
+
+        if (eng !== filterEngagement) return false;
+      }
+      return true;
+    });
+  }, [students, filterCentre, filterSegment, filterEngagement, filterLevel, packages]);
+
+  const isFiltered = useMemo(() => {
+    return filterCentre !== 'All' || filterSegment !== 'All' || filterEngagement !== 'All' || filterLevel !== 'All';
+  }, [filterCentre, filterSegment, filterEngagement, filterLevel]);
+
+  const dicedData = useMemo(() => {
+    let labels: string[] = [];
+    let data: number[] = [];
+    let backgroundColors: string[] | string = '#286957';
+
+    if (diceBy === 'By Centre') {
+      labels = ['Bay Avenue', 'JLT'];
+      data = [
+        filteredStudents.filter(s => s.centre_id === bayCentreId).length,
+        filteredStudents.filter(s => s.centre_id === jltCentreId).length
+      ];
+      backgroundColors = ['#286957', '#C4A249'];
+    } else if (diceBy === 'By Coach') {
+      const coachCounts: Record<string, number> = {};
+      filteredStudents.forEach(s => {
+        const coachName = coaches.find(c => c.id === s.coach_id)?.name || 'Unassigned';
+        coachCounts[coachName] = (coachCounts[coachName] || 0) + 1;
+      });
+      labels = Object.keys(coachCounts);
+      data = Object.values(coachCounts);
+      backgroundColors = '#286957';
+    } else if (diceBy === 'By Engagement') {
+      const today = anchorDate;
+      const counts = { Engaged: 0, Slipping: 0, Cold: 0, Dormant: 0, 'Never attended': 0 };
+      filteredStudents.forEach(s => {
+        const daysSince = s.last_attended ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000) : 999;
+        if (daysSince === 999) counts['Never attended']++;
+        else if (daysSince <= 14) counts.Engaged++;
+        else if (daysSince <= 30) counts.Slipping++;
+        else if (daysSince <= 60) counts.Cold++;
+        else counts.Dormant++;
+      });
+      labels = Object.keys(counts);
+      data = Object.values(counts);
+      backgroundColors = ['#286957', '#C4A249', '#9DDDCB', '#E4DFD2', '#173F35'];
+    } else if (diceBy === 'By Segment') {
+      const counts = { HOT: 0, WARM: 0, COLD: 0, HEALTHY: 0 };
+      filteredStudents.forEach(s => {
+        const pkgs = packages.filter(p => p.student_id === s.id && !p.frozen);
+        const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
+        const classesLeft = activePkg?.classes_remaining ?? 0;
+        const pkgSize = activePkg?.classes_total ?? 0;
+
+        let seg = 'HEALTHY';
+        if (pkgSize === 0 || classesLeft === 0) seg = 'COLD';
+        else if (classesLeft <= 2) seg = 'HOT';
+        else if (classesLeft <= 4) seg = 'WARM';
+
+        counts[seg]++;
+      });
+      labels = Object.keys(counts);
+      data = Object.values(counts);
+      backgroundColors = ['#E11D48', '#F59E0B', '#6B7280', '#10B981'];
+    } else if (diceBy === 'By Level') {
+      const levelCounts: Record<string, number> = {};
+      filteredStudents.forEach(s => {
+        const lvl = s.level || 'Not assigned';
+        levelCounts[lvl] = (levelCounts[lvl] || 0) + 1;
+      });
+      labels = Object.keys(levelCounts);
+      data = Object.values(levelCounts);
+      backgroundColors = '#286957';
+    } else if (diceBy === 'By Rate band') {
+      const counts = { '< 100 AED': 0, '100 - 150 AED': 0, '> 150 AED': 0 };
+      const invoicesList = db.get<any>('invoices') || [];
+      const tiersList = db.get<any>('tiers') || [];
+      filteredStudents.forEach(s => {
+        const pkgs = packages.filter(p => p.student_id === s.id && !p.frozen);
+        const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
+        const rate = activePkg ? getPackageRate(activePkg, invoicesList, tiersList) : 125;
+        if (rate < 100) counts['< 100 AED']++;
+        else if (rate <= 150) counts['100 - 150 AED']++;
+        else counts['> 150 AED']++;
+      });
+      labels = Object.keys(counts);
+      data = Object.values(counts);
+      backgroundColors = ['#9DDDCB', '#286957', '#C4A249'];
+    }
+
+    return { labels, data, backgroundColors };
+  }, [diceBy, filteredStudents, bayCentreId, jltCentreId, coaches, packages, anchorDate]);
+
   const drawDashboardCharts = () => {
     if (loading) return;
 
     // 1. Dynamic Dice Chart
     if (studentsChartRef.current) {
-      let labels: string[] = [];
-      let data: number[] = [];
-      let backgroundColors: string[] | string = '#286957';
-
-      if (diceBy === 'By Centre') {
-        labels = ['Bay Avenue', 'JLT'];
-        data = [
-          filteredStudents.filter(s => s.centre_id === bayCentreId).length,
-          filteredStudents.filter(s => s.centre_id === jltCentreId).length
-        ];
-        backgroundColors = ['#286957', '#C4A249'];
-      } else if (diceBy === 'By Coach') {
-        const coachCounts: Record<string, number> = {};
-        filteredStudents.forEach(s => {
-          const coachName = coaches.find(c => c.id === s.coach_id)?.name || 'Unassigned';
-          coachCounts[coachName] = (coachCounts[coachName] || 0) + 1;
-        });
-        labels = Object.keys(coachCounts);
-        data = Object.values(coachCounts);
-        backgroundColors = '#286957';
-      } else if (diceBy === 'By Engagement') {
-        const today = new Date();
-        const counts = { Engaged: 0, Slipping: 0, Cold: 0, Dormant: 0, 'Never attended': 0 };
-        filteredStudents.forEach(s => {
-          const daysSince = s.last_attended ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000) : 999;
-          if (daysSince === 999) counts['Never attended']++;
-          else if (daysSince <= 14) counts.Engaged++;
-          else if (daysSince <= 30) counts.Slipping++;
-          else if (daysSince <= 60) counts.Cold++;
-          else counts.Dormant++;
-        });
-        labels = Object.keys(counts);
-        data = Object.values(counts);
-        backgroundColors = ['#286957', '#C4A249', '#9DDDCB', '#E4DFD2', '#173F35'];
-      } else if (diceBy === 'By Segment') {
-        const counts = { HOT: 0, WARM: 0, COLD: 0, HEALTHY: 0 };
-        filteredStudents.forEach(s => {
-          const pkgs = packages.filter(p => p.student_id === s.id && !p.frozen);
-          const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
-          const classesLeft = activePkg?.classes_remaining ?? 0;
-          const pkgSize = activePkg?.classes_total ?? 0;
-
-          let seg = 'HEALTHY';
-          if (pkgSize === 0 || classesLeft === 0) seg = 'COLD';
-          else if (classesLeft <= 2) seg = 'HOT';
-          else if (classesLeft <= 4) seg = 'WARM';
-
-          counts[seg]++;
-        });
-        labels = Object.keys(counts);
-        data = Object.values(counts);
-        backgroundColors = ['#E11D48', '#F59E0B', '#6B7280', '#10B981'];
-      } else if (diceBy === 'By Level') {
-        const levelCounts: Record<string, number> = {};
-        filteredStudents.forEach(s => {
-          const lvl = s.level || 'Not assigned';
-          levelCounts[lvl] = (levelCounts[lvl] || 0) + 1;
-        });
-        labels = Object.keys(levelCounts);
-        data = Object.values(levelCounts);
-        backgroundColors = '#286957';
-      } else if (diceBy === 'By Rate band') {
-        const counts = { '< 100 AED': 0, '100 - 150 AED': 0, '> 150 AED': 0 };
-        const invoices = db.get<any>('invoices');
-        const tiers = db.get<any>('tiers');
-        filteredStudents.forEach(s => {
-          const pkgs = packages.filter(p => p.student_id === s.id && !p.frozen);
-          const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
-          const rate = activePkg ? getPackageRate(activePkg, invoices, tiers) : 125;
-          if (rate < 100) counts['< 100 AED']++;
-          else if (rate <= 150) counts['100 - 150 AED']++;
-          else counts['> 150 AED']++;
-        });
-        labels = Object.keys(counts);
-        data = Object.values(counts);
-        backgroundColors = ['#9DDDCB', '#286957', '#C4A249'];
-      }
-
       const activeChartType = chartType === 'table' ? 'bar' : chartType === 'donut' ? 'doughnut' : chartType;
 
       chartInstances.current.students = new Chart(studentsChartRef.current, {
         type: activeChartType,
         data: {
-          labels,
+          labels: dicedData.labels,
           datasets: [{
             label: diceBy,
-            data,
-            backgroundColor: backgroundColors,
+            data: dicedData.data,
+            backgroundColor: dicedData.backgroundColors,
             borderWidth: 0
           }]
         },
@@ -664,7 +716,6 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
         }
       });
     }
-
     // 2. Enrolments per month Chart
     if (enrolmentsChartRef.current) {
       const monthsLabels = ['2025-08', '2025-09', '2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'];
@@ -799,53 +850,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
     return () => destroyCharts();
   }, [activeTab, filterCentre, filterSegment, filterEngagement, filterLevel, diceBy, chartType, sections, globalFilterCentre, loading]);
 
-  const filteredStudents = useMemo(() => {
-    return students.filter(s => {
-      if (filterCentre !== 'All' && s.centre_id !== (filterCentre === 'JLT' ? jltCentreId : bayCentreId)) return false;
-      
-      // Filter level
-      if (filterLevel !== 'All') {
-        if (filterLevel === 'Not assigned') {
-          if (s.level && s.level !== 'Not assigned') return false;
-        } else {
-          if (s.level !== filterLevel) return false;
-        }
-      }
-      
-      // Filter segment
-      if (filterSegment !== 'All') {
-        const pkgs = packages.filter(p => p.student_id === s.id && !p.frozen);
-        const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
-        const classesLeft = activePkg?.classes_remaining ?? 0;
-        const pkgSize = activePkg?.classes_total ?? 0;
 
-        let seg = 'HEALTHY';
-        if (pkgSize === 0 || classesLeft === 0) seg = 'COLD';
-        else if (classesLeft <= 2) seg = 'HOT';
-        else if (classesLeft <= 4) seg = 'WARM';
-
-        if (seg !== filterSegment) return false;
-      }
-      
-      // Filter engagement
-      if (filterEngagement !== 'All') {
-        const today = new Date();
-        const daysSince = s.last_attended ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000) : 999;
-        let eng = 'Dormant';
-        if (daysSince === 999) eng = 'Never attended';
-        else if (daysSince <= 14) eng = 'Engaged';
-        else if (daysSince <= 30) eng = 'Slipping';
-        else if (daysSince <= 60) eng = 'Cold';
-
-        if (eng !== filterEngagement) return false;
-      }
-      return true;
-    });
-  }, [students, filterCentre, filterSegment, filterEngagement, filterLevel, packages]);
-
-  const isFiltered = useMemo(() => {
-    return filterCentre !== 'All' || filterSegment !== 'All' || filterEngagement !== 'All' || filterLevel !== 'All';
-  }, [filterCentre, filterSegment, filterEngagement, filterLevel]);
 
   // Variables calculated from database
   const totalStudents = students.length;
@@ -1056,7 +1061,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
                 ))}
               </div>
 
-              <button onClick={() => { setFilterCentre('All'); setFilterSegment('All'); setFilterEngagement('All'); setFilterLevel('All'); }} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">Reset</button>
+              <button onClick={() => { setFilterCentre('All'); setFilterSegment('All'); setFilterEngagement('All'); setFilterLevel('All'); setDiceBy('By Centre'); setChartType('bar'); }} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">Reset</button>
               <button onClick={exportDashboardExcel} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">↓ Excel</button>
               <button onClick={() => window.print()} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">PDF</button>
             </div>
@@ -1228,7 +1233,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
             <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-4">
               <div className="flex justify-between items-center">
                 <div>
-                  <h3 className="text-lg font-bold font-display text-ink">Students by Centre</h3>
+                  <h3 className="text-lg font-bold font-display text-ink">Students {diceBy}</h3>
                   <p className="text-xs text-muted-custom">Dice this with the bar above · All data</p>
                 </div>
                 <div className="flex gap-2">
@@ -1236,7 +1241,34 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
                   <button className="bg-white border border-line hover:bg-canvas text-ink text-[11px] font-bold px-2.5 py-1 rounded transition-all cursor-pointer">PDF</button>
                 </div>
               </div>
-              <div className="h-60"><canvas ref={studentsChartRef}></canvas></div>
+              <div className="h-60 overflow-y-auto">
+                {chartType === 'table' ? (
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-line text-muted-custom font-bold">
+                        <th className="text-left py-2">{diceBy.replace('By ', '')}</th>
+                        <th className="text-right py-2">Students</th>
+                        <th className="text-right py-2">Percentage</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dicedData.labels.map((label, idx) => {
+                        const count = dicedData.data[idx] || 0;
+                        const pct = scopeTotalStudents > 0 ? Math.round((count / scopeTotalStudents) * 100) : 0;
+                        return (
+                          <tr key={idx} className="border-b border-line hover:bg-canvas/30 text-ink">
+                            <td className="py-2.5 font-semibold">{label}</td>
+                            <td className="py-2.5 text-right font-mono">{count}</td>
+                            <td className="py-2.5 text-right font-mono">{pct}%</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ) : (
+                  <canvas ref={studentsChartRef}></canvas>
+                )}
+              </div>
             </div>
 
             <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-4">

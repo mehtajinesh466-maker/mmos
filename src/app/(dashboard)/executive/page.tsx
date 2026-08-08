@@ -16,6 +16,7 @@ export default function ExecutivePage() {
   const [packages, setPackages] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [centres, setCentres] = useState<any[]>([]);
+  const [coaches, setCoaches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = () => {
@@ -23,6 +24,7 @@ export default function ExecutivePage() {
     setAttendance(db.getAttendance());
     setPackages(db.getPackages());
     setCentres(db.getCentres());
+    setCoaches(db.getCoaches());
     setInvoices(db.get<any>('invoices') || []);
     setLoading(false);
   };
@@ -268,45 +270,42 @@ export default function ExecutivePage() {
 
       // 2. Students by Centre Donut Chart
       if (donutChartRef.current) {
-        const bayCentreId = centres.find(c => c.name === 'Bay Avenue')?.id || 'c-1';
-        const jltCentreId = centres.find(c => c.name === 'JLT')?.id || 'c-2';
-        const bayCount = filteredStudents.filter(s => s.centre_id === bayCentreId).length;
-        const jltCount = filteredStudents.filter(s => s.centre_id === jltCentreId).length;
+        const activeChartType = chartType === 'table' ? 'bar' : chartType === 'donut' ? 'doughnut' : chartType;
 
         chartInstances.current.donut = new Chart(donutChartRef.current, {
-          type: 'doughnut',
+          type: activeChartType,
           data: {
-            labels: ['Bay Avenue', 'JLT'],
+            labels: dicedData.labels,
             datasets: [{
-              data: [bayCount, jltCount],
-              backgroundColor: ['#286957', '#C4A249'],
-              borderWidth: 2,
-              borderColor: '#ffffff'
+              label: diceBy,
+              data: dicedData.data,
+              backgroundColor: dicedData.backgroundColors,
+              borderWidth: activeChartType === 'doughnut' ? 2 : 0,
+              borderColor: activeChartType === 'doughnut' ? '#ffffff' : undefined
             }]
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: true, position: 'right' } }
+            plugins: { legend: { display: activeChartType === 'doughnut', position: 'right' } },
+            scales: activeChartType === 'doughnut' ? undefined : {
+              y: { beginAtZero: true, grid: { color: '#E4DFD2' } },
+              x: { grid: { display: false } }
+            }
           }
         });
       }
     } else if (viewMode === 'unbilled') {
       // 3. Unbilled (ledger) by Centre Chart
       if (unbilledChartRef.current) {
-        const bayCentreId = centres.find(c => c.name === 'Bay Avenue')?.id || 'c-1';
-        const jltCentreId = centres.find(c => c.name === 'JLT')?.id || 'c-2';
-        const bayUnbilled = filteredStudents.filter(s => s.centre_id === bayCentreId).reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
-        const jltUnbilled = filteredStudents.filter(s => s.centre_id === jltCentreId).reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
-
         chartInstances.current.unbilled = new Chart(unbilledChartRef.current, {
           type: 'bar',
           data: {
-            labels: ['Bay Avenue', 'JLT'],
+            labels: dicedUnbilledData.labels,
             datasets: [{
               label: 'Unbilled Value (AED)',
-              data: [bayUnbilled, jltUnbilled],
-              backgroundColor: ['#286957', '#C4A249'],
+              data: dicedUnbilledData.data,
+              backgroundColor: dicedUnbilledData.backgroundColors,
               borderWidth: 0
             }]
           },
@@ -331,14 +330,6 @@ export default function ExecutivePage() {
   // Variables computed from database
   const totalStudentsCount = filteredStudents.length;
   
-  const activeStudentsCount = filteredStudents.filter(s => {
-    if (!s.last_attended) return false;
-    const diff = Math.floor((new Date().getTime() - new Date(s.last_attended).getTime()) / 86400000);
-    return diff >= 0 && diff <= 30 && s.status === 'active';
-  }).length;
-  
-  const activePercentage = totalStudentsCount > 0 ? Math.round((activeStudentsCount / totalStudentsCount) * 100) : 0;
-
   const maxAttDateStr = useMemo(() => {
     if (attendance.length === 0) return "2026-07-27";
     return attendance.reduce((max, att) => {
@@ -349,6 +340,14 @@ export default function ExecutivePage() {
   }, [attendance]);
   const anchorDate = new Date(maxAttDateStr);
   const thirtyDaysAgo = new Date(anchorDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const activeStudentsCount = filteredStudents.filter(s => {
+    if (!s.last_attended) return false;
+    const diff = Math.floor((anchorDate.getTime() - new Date(s.last_attended).getTime()) / 86400000);
+    return diff >= 0 && diff <= 30 && s.status === 'active';
+  }).length;
+  
+  const activePercentage = totalStudentsCount > 0 ? Math.round((activeStudentsCount / totalStudentsCount) * 100) : 0;
 
   const studentRateMap = useMemo(() => {
     const rateMap = new Map<string, number>();
@@ -420,6 +419,197 @@ export default function ExecutivePage() {
   const hotStudentsCount = segmentsStats.hot;
   const coldStudentsCount = segmentsStats.cold;
   const healthyStudentsCount = segmentsStats.healthy;
+  const dicedData = useMemo(() => {
+    let labels: string[] = [];
+    let data: number[] = [];
+    let backgroundColors: string[] | string = '#286957';
+
+    if (diceBy === 'By Centre') {
+      labels = ['Bay Avenue', 'JLT'];
+      const bayCentreId = centres.find(c => c.name === 'Bay Avenue')?.id || 'c-1';
+      const jltCentreId = centres.find(c => c.name === 'JLT')?.id || 'c-2';
+      data = [
+        filteredStudents.filter(s => s.centre_id === bayCentreId).length,
+        filteredStudents.filter(s => s.centre_id === jltCentreId).length
+      ];
+      backgroundColors = ['#286957', '#C4A249'];
+    } else if (diceBy === 'By Coach') {
+      const coachCounts: Record<string, number> = {};
+      filteredStudents.forEach(s => {
+        const coachName = coaches.find(c => c.id === s.coach_id)?.name || 'Unassigned';
+        coachCounts[coachName] = (coachCounts[coachName] || 0) + 1;
+      });
+      labels = Object.keys(coachCounts);
+      data = Object.values(coachCounts);
+      backgroundColors = '#286957';
+    } else if (diceBy === 'By Engagement') {
+      const today = anchorDate;
+      const counts = { Engaged: 0, Slipping: 0, Cold: 0, Dormant: 0, 'Never attended': 0 };
+      filteredStudents.forEach(s => {
+        const daysSince = s.last_attended ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000) : 999;
+        if (daysSince === 999) counts['Never attended']++;
+        else if (daysSince <= 14) counts.Engaged++;
+        else if (daysSince <= 30) counts.Slipping++;
+        else if (daysSince <= 60) counts.Cold++;
+        else counts.Dormant++;
+      });
+      labels = Object.keys(counts);
+      data = Object.values(counts);
+      backgroundColors = ['#286957', '#C4A249', '#9DDDCB', '#E4DFD2', '#173F35'];
+    } else if (diceBy === 'By Segment') {
+      const counts = { HOT: 0, WARM: 0, COLD: 0, HEALTHY: 0 };
+      filteredStudents.forEach(s => {
+        const pkgs = packages.filter(p => p.student_id === s.id && !p.frozen);
+        const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
+        const classesLeft = activePkg?.classes_remaining ?? 0;
+        const pkgSize = activePkg?.classes_total ?? 0;
+
+        let seg = 'HEALTHY';
+        if (pkgSize === 0 || classesLeft === 0) seg = 'COLD';
+        else if (classesLeft <= 2) seg = 'HOT';
+        else if (classesLeft <= 4) seg = 'WARM';
+
+        counts[seg]++;
+      });
+      labels = Object.keys(counts);
+      data = Object.values(counts);
+      backgroundColors = ['#E11D48', '#F59E0B', '#6B7280', '#10B981'];
+    } else if (diceBy === 'By Level') {
+      const levelCounts: Record<string, number> = {};
+      filteredStudents.forEach(s => {
+        const lvl = s.level || 'Not assigned';
+        levelCounts[lvl] = (levelCounts[lvl] || 0) + 1;
+      });
+      labels = Object.keys(levelCounts);
+      data = Object.values(levelCounts);
+      backgroundColors = '#286957';
+    } else if (diceBy === 'By Rate band') {
+      const counts = { '< 100 AED': 0, '100 - 150 AED': 0, '> 150 AED': 0 };
+      filteredStudents.forEach(s => {
+        const rate = studentRateMap.get(s.id) ?? 125;
+        if (rate < 100) counts['< 100 AED']++;
+        else if (rate <= 150) counts['100 - 150 AED']++;
+        else counts['> 150 AED']++;
+      });
+      labels = Object.keys(counts);
+      data = Object.values(counts);
+      backgroundColors = ['#9DDDCB', '#286957', '#C4A249'];
+    }
+
+    return { labels, data, backgroundColors };
+  }, [diceBy, filteredStudents, centres, coaches, packages, studentRateMap, anchorDate]);
+
+  const dicedUnbilledData = useMemo(() => {
+    let labels: string[] = [];
+    let data: number[] = [];
+    let classes: number[] = [];
+    let studentsCount: number[] = [];
+    let backgroundColors: string[] | string = '#286957';
+
+    if (diceBy === 'By Centre') {
+      labels = ['Bay Avenue', 'JLT'];
+      const bayCentreId = centres.find(c => c.name === 'Bay Avenue')?.id || 'c-1';
+      const jltCentreId = centres.find(c => c.name === 'JLT')?.id || 'c-2';
+      
+      const bayStudents = filteredStudents.filter(s => s.centre_id === bayCentreId);
+      const jltStudents = filteredStudents.filter(s => s.centre_id === jltCentreId);
+
+      data = [
+        bayStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0),
+        jltStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0)
+      ];
+      classes = [
+        bayStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_classes || 0), 0),
+        jltStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_classes || 0), 0)
+      ];
+      studentsCount = [
+        bayStudents.filter(s => ((s.flags as any)?.unpaid_classes || 0) > 0).length,
+        jltStudents.filter(s => ((s.flags as any)?.unpaid_classes || 0) > 0).length
+      ];
+      backgroundColors = ['#286957', '#C4A249'];
+    } else if (diceBy === 'By Coach') {
+      const coachGroups: Record<string, { value: number; classes: number; students: Set<string> }> = {};
+      filteredStudents.forEach(s => {
+        const coachName = coaches.find(c => c.id === s.coach_id)?.name || 'Unassigned';
+        if (!coachGroups[coachName]) {
+          coachGroups[coachName] = { value: 0, classes: 0, students: new Set() };
+        }
+        const val = (s.flags as any)?.unpaid_value || 0;
+        const cls = (s.flags as any)?.unpaid_classes || 0;
+        coachGroups[coachName].value += val;
+        coachGroups[coachName].classes += cls;
+        if (cls > 0) coachGroups[coachName].students.add(s.id);
+      });
+      labels = Object.keys(coachGroups);
+      data = Object.values(coachGroups).map(g => g.value);
+      classes = Object.values(coachGroups).map(g => g.classes);
+      studentsCount = Object.values(coachGroups).map(g => g.students.size);
+      backgroundColors = '#286957';
+    } else if (diceBy === 'By Level') {
+      const levelGroups: Record<string, { value: number; classes: number; students: Set<string> }> = {};
+      filteredStudents.forEach(s => {
+        const lvl = s.level || 'Not assigned';
+        if (!levelGroups[lvl]) {
+          levelGroups[lvl] = { value: 0, classes: 0, students: new Set() };
+        }
+        const val = (s.flags as any)?.unpaid_value || 0;
+        const cls = (s.flags as any)?.unpaid_classes || 0;
+        levelGroups[lvl].value += val;
+        levelGroups[lvl].classes += cls;
+        if (cls > 0) levelGroups[lvl].students.add(s.id);
+      });
+      labels = Object.keys(levelGroups);
+      data = Object.values(levelGroups).map(g => g.value);
+      classes = Object.values(levelGroups).map(g => g.classes);
+      studentsCount = Object.values(levelGroups).map(g => g.students.size);
+      backgroundColors = '#286957';
+    } else {
+      const groups: Record<string, { value: number; classes: number; students: Set<string> }> = {};
+      filteredStudents.forEach(s => {
+        let groupName = 'Other';
+        if (diceBy === 'By Engagement') {
+          const today = anchorDate;
+          const daysSince = s.last_attended ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000) : 999;
+          if (daysSince === 999) groupName = 'Never attended';
+          else if (daysSince <= 14) groupName = 'Engaged';
+          else if (daysSince <= 30) groupName = 'Slipping';
+          else if (daysSince <= 60) groupName = 'Cold';
+          else groupName = 'Dormant';
+        } else if (diceBy === 'By Segment') {
+          const pkgs = packages.filter(p => p.student_id === s.id && !p.frozen);
+          const activePkg = pkgs.find(p => p.classes_remaining > 0) || pkgs[0] || null;
+          const classesLeft = activePkg?.classes_remaining ?? 0;
+          const pkgSize = activePkg?.classes_total ?? 0;
+
+          groupName = 'HEALTHY';
+          if (pkgSize === 0 || classesLeft === 0) groupName = 'COLD';
+          else if (classesLeft <= 2) groupName = 'HOT';
+          else if (classesLeft <= 4) groupName = 'WARM';
+        } else if (diceBy === 'By Rate band') {
+          const rate = studentRateMap.get(s.id) ?? 125;
+          if (rate < 100) groupName = '< 100 AED';
+          else if (rate <= 150) groupName = '100 - 150 AED';
+          else groupName = '> 150 AED';
+        }
+
+        if (!groups[groupName]) {
+          groups[groupName] = { value: 0, classes: 0, students: new Set() };
+        }
+        const val = (s.flags as any)?.unpaid_value || 0;
+        const cls = (s.flags as any)?.unpaid_classes || 0;
+        groups[groupName].value += val;
+        groups[groupName].classes += cls;
+        if (cls > 0) groups[groupName].students.add(s.id);
+      });
+      labels = Object.keys(groups);
+      data = Object.values(groups).map(g => g.value);
+      classes = Object.values(groups).map(g => g.classes);
+      studentsCount = Object.values(groups).map(g => g.students.size);
+      backgroundColors = ['#286957', '#C4A249', '#9DDDCB', '#E4DFD2', '#173F35'];
+    }
+
+    return { labels, data, classes, studentsCount, backgroundColors };
+  }, [diceBy, filteredStudents, centres, coaches, packages, studentRateMap, anchorDate]);
 
   const totalCollected = invoices.filter(i => i.status === 'paid' && filteredStudents.some(s => s.id === i.student_id)).reduce((sum, i) => sum + Number(i.amount), 0);
   const totalCollectedM = (totalCollected / 1000000).toFixed(2);
@@ -482,7 +672,7 @@ export default function ExecutivePage() {
               <div className="text-[10px] font-bold tracking-widest text-[#C4A249] uppercase">REPORT · FINANCE</div>
               <h1 className="text-3xl font-bold font-display text-ink mt-0.5">Unbilled / Leak</h1>
               <p className="text-xs text-muted-custom mt-1">
-                Unbilled / Leak — All data. Slice by any dimension, dice by any grouping, then export.
+                Unbilled / Leak — {isFiltered ? 'Filtered view' : 'All data'}. Slice by any dimension, dice by any grouping, then export.
               </p>
             </>
           )}
@@ -491,7 +681,7 @@ export default function ExecutivePage() {
               <div className="text-[10px] font-bold tracking-widest text-[#C4A249] uppercase">REPORT · FINANCE</div>
               <h1 className="text-3xl font-bold font-display text-ink mt-0.5">Data Reconciliation</h1>
               <p className="text-xs text-muted-custom mt-1">
-                Data Reconciliation — All data. Which unbilled number is defensible, and why.
+                Data Reconciliation — {isFiltered ? 'Filtered view' : 'All data'}. Which unbilled number is defensible, and why.
               </p>
             </>
           )}
@@ -642,7 +832,7 @@ export default function ExecutivePage() {
             ))}
           </div>
 
-          <button onClick={() => { setFilterCentre('All'); setFilterSegment('All'); setFilterEngagement('All'); setFilterLevel('All'); }} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">Reset</button>
+          <button onClick={() => { setFilterCentre('All'); setFilterSegment('All'); setFilterEngagement('All'); setFilterLevel('All'); setDiceBy('By Centre'); setChartType('bar'); }} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">Reset</button>
           <button onClick={exportDashboardExcel} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">↓ Excel</button>
           <button onClick={() => window.print()} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">PDF</button>
         </div>
@@ -704,9 +894,9 @@ export default function ExecutivePage() {
       {viewMode === 'unbilled' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
-            { label: 'UNBILLED (LEDGER)', value: `AED ${unbilledK}K`, desc: 'All data' },
-            { label: 'CLASSES OWED', value: `${unbilledClasses}`, desc: 'All data' },
-            { label: 'STUDENTS OWING', value: `${unbilledStudentsCount}`, desc: 'All data' }
+            { label: 'UNBILLED (LEDGER)', value: `AED ${unbilledK}K`, desc: isFiltered ? 'Filtered view' : 'All data' },
+            { label: 'CLASSES OWED', value: `${unbilledClasses}`, desc: isFiltered ? 'Filtered view' : 'All data' },
+            { label: 'STUDENTS OWING', value: `${unbilledStudentsCount}`, desc: isFiltered ? 'Filtered view' : 'All data' }
           ].map((kpi, idx) => (
             <div key={idx} className="bg-surface border border-line rounded-[14px] p-5 shadow-sm space-y-1">
               <div className="text-[9px] font-bold text-muted-custom tracking-wider uppercase">{kpi.label}</div>
@@ -768,29 +958,30 @@ export default function ExecutivePage() {
           </div>
 
           <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-2">
-            <h3 className="text-base font-bold font-display text-ink">Students by Centre</h3>
+            <h3 className="text-base font-bold font-display text-ink">Students {diceBy}</h3>
             <p className="text-xs text-muted-custom">Dice this with the bar above.</p>
             <div className="h-60 overflow-y-auto">
               {chartType === 'table' ? (
                 <table className="w-full border-collapse text-xs">
                   <thead>
                     <tr className="border-b border-line text-muted-custom font-bold">
-                      <th className="text-left py-2">Centre</th>
+                      <th className="text-left py-2">{diceBy.replace('By ', '')}</th>
                       <th className="text-right py-2">Students</th>
                       <th className="text-right py-2">Percentage</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr className="border-b border-line hover:bg-canvas/30 text-ink">
-                      <td className="py-2.5 font-semibold">Bay Avenue</td>
-                      <td className="py-2.5 text-right font-mono">{bayStudents.length}</td>
-                      <td className="py-2.5 text-right font-mono">{totalStudentsCount > 0 ? Math.round((bayStudents.length / totalStudentsCount) * 100) : 0}%</td>
-                    </tr>
-                    <tr className="border-b border-line hover:bg-canvas/30 text-ink">
-                      <td className="py-2.5 font-semibold">JLT</td>
-                      <td className="py-2.5 text-right font-mono">{jltStudents.length}</td>
-                      <td className="py-2.5 text-right font-mono">{totalStudentsCount > 0 ? Math.round((jltStudents.length / totalStudentsCount) * 100) : 0}%</td>
-                    </tr>
+                    {dicedData.labels.map((label, idx) => {
+                      const count = dicedData.data[idx] || 0;
+                      const pct = totalStudentsCount > 0 ? Math.round((count / totalStudentsCount) * 100) : 0;
+                      return (
+                        <tr key={idx} className="border-b border-line hover:bg-canvas/30 text-ink">
+                          <td className="py-2.5 font-semibold">{label}</td>
+                          <td className="py-2.5 text-right font-mono">{count}</td>
+                          <td className="py-2.5 text-right font-mono">{pct}%</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               ) : (
@@ -870,8 +1061,8 @@ export default function ExecutivePage() {
         <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-4">
           <div className="flex justify-between items-center">
             <div>
-              <h3 className="text-lg font-bold font-display text-ink font-serif">Unbilled (ledger) by Centre</h3>
-              <p className="text-xs text-muted-custom font-sans">All data · {filteredStudents.length} students in scope</p>
+              <h3 className="text-lg font-bold font-display text-ink font-serif">Unbilled (ledger) {diceBy}</h3>
+              <p className="text-xs text-muted-custom font-sans">{isFiltered ? 'Filtered view' : 'All data'} · {filteredStudents.length} students in scope</p>
             </div>
             <div className="flex gap-2">
               <button className="bg-white border border-line hover:bg-canvas text-ink text-[11px] font-bold px-2.5 py-1 rounded transition-all">↓ Excel</button>
@@ -883,19 +1074,20 @@ export default function ExecutivePage() {
               <table className="w-full border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-line text-muted-custom font-bold">
-                    <th className="text-left py-2">Centre</th>
+                    <th className="text-left py-2">{diceBy.replace('By ', '')}</th>
                     <th className="text-right py-2">Unbilled Value</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr className="border-b border-line hover:bg-canvas/30 text-ink">
-                    <td className="py-2.5 font-semibold">Bay Avenue</td>
-                    <td className="py-2.5 text-right font-mono">AED {bayUnbilled.toLocaleString()}</td>
-                  </tr>
-                  <tr className="border-b border-line hover:bg-canvas/30 text-ink">
-                    <td className="py-2.5 font-semibold">JLT</td>
-                    <td className="py-2.5 text-right font-mono">AED {jltUnbilled.toLocaleString()}</td>
-                  </tr>
+                  {dicedUnbilledData.labels.map((label, idx) => {
+                    const val = dicedUnbilledData.data[idx] || 0;
+                    return (
+                      <tr key={idx} className="border-b border-line hover:bg-canvas/30 text-ink">
+                        <td className="py-2.5 font-semibold">{label}</td>
+                        <td className="py-2.5 text-right font-mono">AED {val.toLocaleString()}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             ) : (
@@ -1156,7 +1348,7 @@ export default function ExecutivePage() {
           <div className="flex justify-between items-center">
             <div>
               <h3 className="text-lg font-bold font-display text-ink flex items-center gap-2 font-serif">
-                <span>▤</span> Breakdown by Centre
+                <span>▤</span> Breakdown {diceBy}
               </h3>
               <p className="text-xs text-muted-custom mt-1">Every measure, grouped.</p>
             </div>
@@ -1170,7 +1362,7 @@ export default function ExecutivePage() {
             <table className="w-full border-collapse text-xs">
               <thead>
                 <tr className="border-b border-line text-muted-custom font-bold">
-                  <th className="text-left py-2">Centre</th>
+                  <th className="text-left py-2">{diceBy.replace('By ', '')}</th>
                   <th className="text-right py-2">Unbilled (Ledger)</th>
                   <th className="text-right py-2">Classes Owed</th>
                   <th className="text-right py-2">Students Owing</th>
@@ -1178,19 +1370,28 @@ export default function ExecutivePage() {
                 </tr>
               </thead>
               <tbody>
-                {[
-                  { name: 'Bay Avenue', unbilled: bayUnbilled, classes: bayOwingClasses, studentsCount: bayOwingStudents, share: `${bayShare}%` },
-                  { name: 'JLT', unbilled: jltUnbilled, classes: jltOwingClasses, studentsCount: jltOwingStudents, share: `${jltShare}%` },
-                  { name: 'Total', unbilled: totalUnbilled, classes: unbilledClasses, studentsCount: unbilledStudentsCount, share: '100%', isTotal: true }
-                ].map((row, idx) => (
-                  <tr key={idx} className={`border-b border-line hover:bg-canvas/30 text-ink ${row.isTotal ? 'font-bold bg-canvas/40' : ''}`}>
-                    <td className="py-2.5 font-semibold">{row.name}</td>
-                    <td className="py-2.5 text-right font-mono">AED {row.unbilled.toLocaleString()}</td>
-                    <td className="py-2.5 text-right font-mono">{row.classes}</td>
-                    <td className="py-2.5 text-right font-mono">{row.studentsCount}</td>
-                    <td className="py-2.5 text-right font-mono">{row.share}</td>
-                  </tr>
-                ))}
+                {dicedUnbilledData.labels.map((label, idx) => {
+                  const unbilled = dicedUnbilledData.data[idx] || 0;
+                  const classesOwed = dicedUnbilledData.classes[idx] || 0;
+                  const studentsOwing = dicedUnbilledData.studentsCount[idx] || 0;
+                  const share = totalUnbilled > 0 ? Math.round((unbilled / totalUnbilled) * 100) : 0;
+                  return (
+                    <tr key={idx} className="border-b border-line hover:bg-canvas/30 text-ink">
+                      <td className="py-2.5 font-semibold">{label}</td>
+                      <td className="py-2.5 text-right font-mono">AED {unbilled.toLocaleString()}</td>
+                      <td className="py-2.5 text-right font-mono">{classesOwed}</td>
+                      <td className="py-2.5 text-right font-mono">{studentsOwing}</td>
+                      <td className="py-2.5 text-right font-mono">{share}%</td>
+                    </tr>
+                  );
+                })}
+                <tr className="border-b border-line hover:bg-canvas/30 text-ink font-bold bg-canvas/40">
+                  <td className="py-2.5 font-bold">Total</td>
+                  <td className="py-2.5 text-right font-mono">AED {totalUnbilled.toLocaleString()}</td>
+                  <td className="py-2.5 text-right font-mono">{unbilledClasses}</td>
+                  <td className="py-2.5 text-right font-mono">{unbilledStudentsCount}</td>
+                  <td className="py-2.5 text-right font-mono">100%</td>
+                </tr>
               </tbody>
             </table>
           </div>

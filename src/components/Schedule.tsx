@@ -362,11 +362,26 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       const dayIndex = dayOrder.indexOf(normDay);
       const slotDate = weekDates[dayIndex]?.isoDate;
 
-      let duration = 2;
-      if (slot?.is_summer_camp) {
-        const stored = typeof window !== 'undefined' ? (localStorage.getItem('mmos_summer_camp_duration') || '1') : '1';
-        duration = stored === '2' ? 2 : 1;
+      // Date floor validation: ensure attendance date is not prior to student's join date
+      for (const key of slotMarkings) {
+        const studentId = key.substring(slotId.length + 1);
+        const student = students.find(s => s.id === studentId);
+        if (student && student.join_date && slotDate) {
+          const joinDate = new Date(student.join_date);
+          joinDate.setHours(0, 0, 0, 0);
+          const attDate = new Date(slotDate);
+          attDate.setHours(0, 0, 0, 0);
+          if (attDate < joinDate) {
+            const dateStr = typeof student.join_date === 'string' ? student.join_date.split('T')[0] : new Date(student.join_date).toISOString().split('T')[0];
+            setSaveStatus(`❌ Error: Cannot back-date class for ${student.name} before their join date (${dateStr}).`);
+            setTimeout(() => setSaveStatus(''), 5000);
+            setSavingSlotId(null);
+            return;
+          }
+        }
       }
+
+      const duration = slot.is_summer_camp ? 1 : ((slot.day === 'Sat' || slot.day === 'Sun') ? 2 : 1);
       for (const key of slotMarkings) {
         const studentId = key.substring(slotId.length + 1);
         const status = markings[key];
