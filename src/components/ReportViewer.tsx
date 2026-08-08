@@ -1318,27 +1318,13 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       let totalUnpaidValue = 0;
 
       filteredStudents.forEach(s => {
-        const sPkgs = packages.filter(p => p.student_id === s.id);
-        const totalPaidClasses = sPkgs.reduce((sum, p) => sum + p.classes_total, 0);
-        
-        // Count present/makeup attendances
-        const presentAtts = attendance.filter(a => a.student_id === s.id && (a.status === 'present' || a.status === 'makeup'));
-        const totalUsedClasses = presentAtts.length;
-
-        const unpaidClasses = totalUsedClasses > totalPaidClasses ? totalUsedClasses - totalPaidClasses : 0;
+        const unpaidClasses = (s.flags as any)?.unpaid_classes || 0;
+        const unpaidValue = (s.flags as any)?.unpaid_value || 0;
         
         if (unpaidClasses > 0) {
-          // Calculate value of unpaid classes using student's rate
-          let rate = 125;
-          const activePkg = sPkgs.find(p => p.classes_remaining > 0) || sPkgs[sPkgs.length - 1];
-          if (activePkg) {
-            const tier = db.getTiers().find(t => t.id === activePkg.tier_id);
-            const price = tier ? Number(tier.price) : 1000;
-            const discount = activePkg.discount_pct ? Number(activePkg.discount_pct) : 0;
-            const totalClasses = activePkg.classes_total || 8;
-            rate = (price * (1 - discount / 100)) / totalClasses;
-          }
-          const unpaidValue = Math.round(unpaidClasses * rate);
+          const sPkgs = packages.filter(p => p.student_id === s.id);
+          const totalPaidClasses = sPkgs.reduce((sum, p) => sum + p.classes_total, 0);
+          const presentAtts = attendance.filter(a => a.student_id === s.id && (a.status === 'present' || a.status === 'makeup'));
 
           // Find oldest unpaid class date:
           // The oldest unpaid class would be the index totalPaidClasses in presentAtts sorted chronologically!
