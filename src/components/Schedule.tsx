@@ -251,9 +251,10 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     // Get all active students for this center
     const centerStudents = students.filter(s => s.centre_id === rosterModalSlot.centre_id && s.status === 'active');
     
-    // Map their enrollment status
+    // Map their enrollment status based on getSlotRoster to correctly identify previously present students
+    const slotRoster = getSlotRoster(rosterModalSlot);
     const mapped = centerStudents.map(s => {
-      const isEnrolled = enrollments.some(e => e.slot_id === rosterModalSlot.id && e.student_id === s.id);
+      const isEnrolled = slotRoster.some(rs => rs.id === s.id);
       return { student: s, isEnrolled };
     });
 
@@ -915,19 +916,44 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                              onChange={async (e) => {
                                const checked = e.target.checked;
                                try {
-                                 if (checked) {
-                                   db.saveEnrollment({
-                                     id: `enr-${crypto.randomUUID()}`,
-                                     student_id: student.id,
-                                     slot_id: rosterModalSlot.id,
-                                     enrolled_at: new Date().toISOString()
-                                   });
-                                   setEnrollments(db.getEnrollments());
-                                   await enrollStudent(student.id, rosterModalSlot.id);
+                                 const slotEnrollments = enrollments.filter(ev => ev.slot_id === rosterModalSlot.id);
+                                 const hasExplicitEnrollments = slotEnrollments.length > 0;
+
+                                 if (!hasExplicitEnrollments) {
+                                   // Transition slot from level-filtered fallback to explicit roster
+                                   const fallbackStudents = students.filter(s => 
+                                     s.centre_id === rosterModalSlot.centre_id && 
+                                     s.status === 'active' && 
+                                     (s.level === rosterModalSlot.level || (rosterModalSlot.level === 'Beginner' && !s.level))
+                                   );
+
+                                   for (const fs of fallbackStudents) {
+                                     const shouldEnroll = (fs.id === student.id) ? checked : true;
+                                     if (shouldEnroll) {
+                                       db.saveEnrollment({
+                                         id: `enr-${crypto.randomUUID()}`,
+                                         student_id: fs.id,
+                                         slot_id: rosterModalSlot.id,
+                                         enrolled_at: new Date().toISOString()
+                                       });
+                                       await enrollStudent(fs.id, rosterModalSlot.id);
+                                     }
+                                   }
                                  } else {
-                                   db.removeEnrollment(student.id, rosterModalSlot.id);
-                                   setEnrollments(db.getEnrollments());
-                                   await unenrollStudent(student.id, rosterModalSlot.id);
+                                   if (checked) {
+                                     db.saveEnrollment({
+                                       id: `enr-${crypto.randomUUID()}`,
+                                       student_id: student.id,
+                                       slot_id: rosterModalSlot.id,
+                                       enrolled_at: new Date().toISOString()
+                                     });
+                                     setEnrollments(db.getEnrollments());
+                                     await enrollStudent(student.id, rosterModalSlot.id);
+                                   } else {
+                                     db.removeEnrollment(student.id, rosterModalSlot.id);
+                                     setEnrollments(db.getEnrollments());
+                                     await unenrollStudent(student.id, rosterModalSlot.id);
+                                   }
                                  }
                                  const freshData = await syncDatabaseToClient();
                                  db.syncFromNeon(freshData);

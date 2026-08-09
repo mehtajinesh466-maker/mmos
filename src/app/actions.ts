@@ -245,7 +245,7 @@ export async function toggleSummerCampSlot(slotId: string, isSummerCamp: boolean
 
 export async function enrollStudent(studentId: string, slotId: string) {
   const session = await verifySession();
-  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk' && session.user.role !== 'coach') {
     throw new Error("Unauthorized");
   }
   if (session.user.role === 'front_desk' && session.user.centre_id) {
@@ -254,6 +254,18 @@ export async function enrollStudent(studentId: string, slotId: string) {
       throw new Error("Unauthorized");
     }
   }
+  
+  // Check if enrollment already exists to prevent duplicate key errors
+  const existing = await prisma.enrollment.findFirst({
+    where: {
+      student_id: studentId,
+      slot_id: slotId
+    }
+  });
+  if (existing) {
+    return existing;
+  }
+
   return await prisma.enrollment.create({
     data: {
       student_id: studentId,
@@ -264,7 +276,7 @@ export async function enrollStudent(studentId: string, slotId: string) {
 
 export async function unenrollStudent(studentId: string, slotId: string) {
   const session = await verifySession();
-  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk' && session.user.role !== 'coach') {
     throw new Error("Unauthorized");
   }
   if (session.user.role === 'front_desk' && session.user.centre_id) {
