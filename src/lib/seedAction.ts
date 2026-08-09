@@ -292,7 +292,10 @@ export async function runSeed() {
       const centreId = getCentreId(String(row['Centre']))
       const coachId = findCoach(String(row['Coach']))
       const dob = parseExcelDate(rosterInfo?.['Date of birth'])
-      const joinDate = parseExcelDate(rosterInfo?.['Date Enrolled']) || new Date()
+      let joinDate = parseExcelDate(rosterInfo?.['Date Enrolled']) || new Date('2026-08-01')
+      if (joinDate.getTime() >= new Date('2026-08-04').getTime()) {
+        joinDate = new Date('2026-08-01')
+      }
       const level = row['Level'] || rosterInfo?.['Current Student levels'] || rosterInfo?.['Joining Student level'] || 'Beginner'
       
       const activity = String(row['Activity'] || '').trim()

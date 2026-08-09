@@ -513,16 +513,13 @@ export const Attendance: React.FC<AttendanceProps> = ({
                     {/* Action Bar below student list */}
                     {roster.length > 0 && (
                       <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-line mt-3">
-                        <select
+                        <input
+                          type="text"
                           value={classTopic}
                           onChange={e => setClassTopic(e.target.value)}
-                          className="bg-white border border-line rounded-lg px-3 py-1.5 text-xs text-ink outline-none cursor-pointer"
-                        >
-                          <option value="Opening principles">Topic — Opening principles</option>
-                          <option value="Rook endgames — technique">Topic — Rook endgames — technique</option>
-                          <option value="Back-rank patterns">Topic — Back-rank patterns</option>
-                          <option value="Knight outposts">Topic — Knight outposts</option>
-                        </select>
+                          placeholder="Type class topic..."
+                          className="bg-white border border-line rounded-lg px-3 py-1.5 text-xs text-ink outline-none"
+                        />
 
                         <button
                           onClick={() => handleSaveAttendance(slot.id)}

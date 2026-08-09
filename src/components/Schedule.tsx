@@ -708,16 +708,13 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                     {/* Action Bar below student list */}
                     {roster.length > 0 && (
                       <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-line mt-3">
-                        <select
+                        <input
+                          type="text"
                           value={classTopic}
                           onChange={e => setClassTopic(e.target.value)}
-                          className="bg-white border border-line rounded-lg px-3 py-1.5 text-xs text-ink outline-none cursor-pointer"
-                        >
-                          <option value="Rook endgames — technique">Rook endgames — technique</option>
-                          <option value="Back-rank patterns">Back-rank patterns</option>
-                          <option value="Knight outposts">Knight outposts</option>
-                          <option value="Opening principles">Opening principles</option>
-                        </select>
+                          placeholder="Type class topic..."
+                          className="bg-white border border-line rounded-lg px-3 py-1.5 text-xs text-ink outline-none"
+                        />
 
                         <button
                           disabled={savingSlotId === slot.id}

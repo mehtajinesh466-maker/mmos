@@ -1381,7 +1381,7 @@ export async function registerStudent(data: any) {
       category: data.category || null,
       status: 'active',
       fide_id: data.fide_id,
-      join_date: new Date(),
+      join_date: new Date('2026-08-01'),
       photo_url: data.photo_url,
       flags: data.flags || {},
     }
