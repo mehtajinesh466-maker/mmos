@@ -155,7 +155,7 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
     destroyCharts();
 
     // 1. Line spline chart
-    const months = ['Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26', 'Jul-26'];
+    const months = ['Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26', 'Jul-26', 'Aug-26'];
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const getMonthLabel = (dateStr: string) => {
       const d = new Date(dateStr);

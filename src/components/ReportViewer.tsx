@@ -1398,7 +1398,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
     }
 
     if (reportId === 'growth-trajectory') {
-      const months = ['Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26'];
+      const months = ['Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26', 'Jul-26', 'Aug-26'];
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       
       const getMonthLabel = (dateStr: string) => {
@@ -1537,7 +1537,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       const coachesJlt = new Set(activeJltStudents.map(s => s.coach_id)).size;
 
       // Group trajectories for line chart (last 12 months)
-      const months = ['Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26'];
+      const months = ['Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26', 'Jul-26', 'Aug-26'];
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       
       const getMonthLabel = (dateStr: string) => {
@@ -1675,7 +1675,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       const lifetimeCollected = filteredStudents.reduce((sum, s) => sum + (s.total_paid || 0), 0);
 
       // Trajectory data for stacked bar chart
-      const months = ['Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26'];
+      const months = ['Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26', 'Jul-26', 'Aug-26'];
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       
       const getMonthLabel = (dateStr: string) => {
@@ -1747,7 +1747,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
     if (reportId === 'new-centre-model') {
       const studentCount = filteredStudents.length;
 
-      const jltMonths = ['Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26'];
+      const jltMonths = ['Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26', 'Jul-26', 'Aug-26'];
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       
       const getMonthLabel = (dateStr: string) => {

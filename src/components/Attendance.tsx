@@ -99,6 +99,26 @@ export const Attendance: React.FC<AttendanceProps> = ({
     setBilledHours(initialBilledHours);
   }, [selectedDate, attendance]);
 
+  // Pre-fill class topic from existing attendance record when selected date or expanded slot changes
+  useEffect(() => {
+    const activeSlotId = Object.keys(expandedSlots).find(id => expandedSlots[id]);
+    if (!activeSlotId) return;
+
+    const existingAtt = attendance.find(a => {
+      if (a.slot_id !== activeSlotId) return false;
+      const d = new Date(a.date);
+      const isoDate = !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : '';
+      const localDate = !isNaN(d.getTime()) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
+      return isoDate === selectedDate || localDate === selectedDate || (typeof a.date === 'string' && a.date.includes(selectedDate));
+    });
+
+    if (existingAtt && existingAtt.topic) {
+      setClassTopic(existingAtt.topic);
+    } else {
+      setClassTopic('Opening principles');
+    }
+  }, [expandedSlots, selectedDate, attendance]);
+
   useEffect(() => {
     if (activeCentre) {
       setSelectedCentre(activeCentre);

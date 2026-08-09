@@ -174,6 +174,33 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     setMarkings(newMarkings);
   }, [attendance, slots, weekDates]);
 
+  // Pre-fill class topic from existing attendance record when expanded slot changes
+  useEffect(() => {
+    const activeSlotId = Object.keys(expandedSlots).find(id => expandedSlots[id]);
+    if (!activeSlotId) return;
+
+    const slot = slots.find(s => s.id === activeSlotId);
+    if (!slot) return;
+
+    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const normDay = normalizeDay(slot.day);
+    const dayIndex = dayOrder.indexOf(normDay);
+    const weekDate = weekDates[dayIndex];
+    const slotDate = weekDate ? weekDate.isoDate : '';
+
+    const existingAtt = attendance.find(a => {
+      if (a.slot_id !== activeSlotId) return false;
+      const recordDate = typeof a.date === 'string' ? a.date.split('T')[0] : '';
+      return recordDate === slotDate;
+    });
+
+    if (existingAtt && existingAtt.topic) {
+      setClassTopic(existingAtt.topic);
+    } else {
+      setClassTopic('Rook endgames — technique');
+    }
+  }, [expandedSlots, attendance, slots, weekDates]);
+
   const getDayLabel = (dayName: string) => {
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     const dayIndex = days.indexOf(dayName);
