@@ -335,6 +335,16 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
           >
             <option>All coaches</option>
           </select>
+
+          <button
+            onClick={() => {
+              setFilterCentre('All centres');
+              setFilterCoach('All coaches');
+            }}
+            className="text-xs font-semibold text-muted-custom hover:text-ink px-2 py-1 transition-colors cursor-pointer"
+          >
+            Reset
+          </button>
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
