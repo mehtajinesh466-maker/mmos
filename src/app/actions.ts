@@ -849,7 +849,7 @@ async function updateStudentFlags(studentId: string, pkgId?: string, updatedRema
   }
 }
 
-export async function logAttendance(studentId: string, status: string | null, coachId: string, slotId?: string, duration: number = 1, customDateStr?: string) {
+export async function logAttendance(studentId: string, status: string | null, coachId: string, slotId?: string, duration: number = 1, customDateStr?: string, topic?: string) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
@@ -932,7 +932,7 @@ export async function logAttendance(studentId: string, status: string | null, co
     // Update attendance record status and duration
     const updated = await prisma.attendance.update({
       where: { id: existing.id },
-      data: { status, duration }
+      data: { status, duration, topic: topic !== undefined ? topic : existing.topic }
     });
     await logAuditDB(session.user.id, 'UPDATE_ATTENDANCE', 'attendance', { status: oldStatus, duration: oldDuration }, updated);
 
@@ -1047,7 +1047,8 @@ export async function logAttendance(studentId: string, status: string | null, co
       coach_id: coachId,
       slot_id: slotId || null,
       date: targetDate,
-      duration: duration
+      duration: duration,
+      topic: topic || null
     }
   });
 
@@ -1303,7 +1304,7 @@ export async function syncOfflineQueueDB(records: any[]) {
   }
   // Batch insert
   for (const record of records) {
-    await logAttendance(record.student_id, record.status, record.coach_id);
+    await logAttendance(record.student_id, record.status, record.coach_id, record.slot_id || undefined, record.duration, record.date, record.topic);
   }
 }
 

@@ -267,7 +267,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
         if (isOnline) {
           db.processAttendanceRecord(record);
-          await logAttendance(record.student_id, record.status, record.coach_id, record.slot_id || undefined, duration, selectedDate);
+          await logAttendance(record.student_id, record.status, record.coach_id, record.slot_id || undefined, duration, selectedDate, classTopic);
           savedCount++;
         } else {
           db.addToOfflineQueue(record);

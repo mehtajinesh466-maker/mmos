@@ -386,7 +386,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       for (const key of slotMarkings) {
         const studentId = key.substring(slotId.length + 1);
         const status = markings[key];
-        await logAttendance(studentId, status, activeCoachId, slotId, duration, slotDate);
+        await logAttendance(studentId, status, activeCoachId, slotId, duration, slotDate, classTopic);
         savedCount++;
       }
       const freshData = await syncDatabaseToClient();
