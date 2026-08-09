@@ -922,7 +922,7 @@ export async function logAttendance(studentId: string, status: string | null, co
       return deletedRecord;
     }
 
-    if (existing.status === status && existing.duration === duration) {
+    if (existing.status === status && existing.duration === duration && (topic === undefined || existing.topic === topic)) {
       return existing;
     }
 
