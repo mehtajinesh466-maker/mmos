@@ -260,6 +260,7 @@ export const db = {
   setCurrentUser(userId: string): void {
     if (typeof window === 'undefined') return;
     localStorage.setItem('mmos_active_user_id', userId);
+    document.cookie = `mmos_active_user_id=${userId}; path=/; max-age=31536000; SameSite=Lax`;
     window.dispatchEvent(new Event('auth-change'));
   },
 

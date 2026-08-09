@@ -40,8 +40,8 @@ model Coach {
   user_id      String?        @db.Uuid
   centre_id    String?        @db.Uuid
   title        String?
-  centre_ids   Json?          @default("[]")
   active       Boolean        @default(true)
+  centre_ids   Json?          @default("[]")
   attendance   Attendance[]
   centre       Centre?        @relation(fields: [centre_id], references: [id])
   user         User?          @relation(fields: [user_id], references: [id])
@@ -83,16 +83,16 @@ model Student {
   pace_reason        String?
   flags              Json?              @default("{}")
   chess_com_username String?
-  lichess_username   String?
   fide_rating        Int?
-  fide_country       String?
-  parent_name        String?
-  alternate_centre   String?
-  resident_status    String?
+  lichess_username   String?
   address            String?
+  alternate_centre   String?
   category           String?
+  fide_country       String?
   notes              String?
+  parent_name        String?
   referral_source    String?
+  resident_status    String?
   attendance         Attendance[]
   enrollments        Enrollment[]
   fideRatings        FideRating[]
@@ -102,14 +102,13 @@ model Student {
   progressLogs       ProgressLog[]
   reports            Report[]
   skills             StudentSkill[]
-  tournamentReports  TournamentReport[]
   centre             Centre             @relation(fields: [centre_id], references: [id])
   coach              Coach?             @relation(fields: [coach_id], references: [id])
   family             Family?            @relation(fields: [family_id], references: [id])
+  tournamentReports  TournamentReport[]
 
   @@map("students")
 }
-
 
 model Tier {
   id         String    @id @default(uuid()) @db.Uuid
@@ -131,10 +130,10 @@ model Package {
   classes_remaining Int
   discount_pct      Decimal?  @default(0) @db.Decimal(5, 2)
   frozen            Boolean?  @default(false)
-  is_family_shared  Boolean   @default(false)
   start_date        DateTime? @default(now()) @db.Date
   expiry_date       DateTime? @db.Date
   bonus_classes     Int?      @default(0)
+  is_family_shared  Boolean   @default(false)
   invoices          Invoice[]
   student           Student   @relation(fields: [student_id], references: [id])
   tier              Tier?     @relation(fields: [tier_id], references: [id])
@@ -179,8 +178,8 @@ model Attendance {
   status     String
   topic      String?
   note       String?
-  duration   Int           @default(2)
   created_at DateTime?     @default(now()) @db.Timestamptz(6)
+  duration   Int           @default(2)
   coach      Coach         @relation(fields: [coach_id], references: [id])
   slot       ScheduleSlot? @relation(fields: [slot_id], references: [id])
   student    Student       @relation(fields: [student_id], references: [id])
@@ -308,4 +307,3 @@ model TournamentReport {
 
   @@map("tournament_reports")
 }
-

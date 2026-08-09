@@ -616,9 +616,30 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
       {/* ── USER ACCOUNTS TAB ─────────────────────────────────────────────── */}
       {tab === 'users' && (
         <div className="space-y-6">
-          <div className="p-4 rounded-[10px] bg-emerald-50 border border-emerald-200 border-l-4 border-l-forest text-xs text-ink/90">
-            <div className="font-bold text-forest mb-0.5">👤 User Account &amp; Credential Management</div>
-            Parent user accounts are automatically created for every student family. You can view, update emails, and reset passwords below.
+          <div className="p-4 rounded-[10px] bg-emerald-50 border border-emerald-200 border-l-4 border-l-forest text-xs text-ink/90 flex justify-between items-center">
+            <div>
+              <div className="font-bold text-forest mb-0.5">👤 User Account &amp; Credential Management</div>
+              Generate separate login accounts for every student. You can view, update emails, and reset passwords below.
+            </div>
+            <button
+              onClick={async () => {
+                setIsSaving(true);
+                try {
+                  const res = await backfillParentUsersDB();
+                  const fresh = await syncDatabaseToClient();
+                  db.syncFromNeon(fresh);
+                  toast(`✓ Generated ${res.createdCount} student user accounts!`);
+                } catch (err: any) {
+                  toast('❌ ' + err.message);
+                } finally {
+                  setIsSaving(false);
+                }
+              }}
+              disabled={isSaving}
+              className="bg-forest hover:bg-forest-light text-white font-bold text-xs px-4 py-2 rounded-lg transition-all ml-4 disabled:opacity-50"
+            >
+              Generate Student Accounts
+            </button>
           </div>
 
           {/* Create User Form */}

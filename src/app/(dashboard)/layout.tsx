@@ -20,6 +20,12 @@ export default function DashboardLayout({
   useEffect(() => {
     if (status !== "authenticated" || !session?.user) return;
 
+    const userId = (session.user as any).id;
+    if (userId) {
+      localStorage.setItem('mmos_active_user_id', userId);
+      document.cookie = `mmos_active_user_id=${userId}; path=/; max-age=31536000; SameSite=Lax`;
+    }
+
     // Render immediately using local cached data
     setIsReady(true);
 

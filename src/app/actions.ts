@@ -5,8 +5,32 @@ import bcrypt from 'bcrypt';
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../lib/auth";
 import { unstable_noStore as noStore } from 'next/cache';
+import { cookies } from 'next/headers';
 
 async function verifySession() {
+  try {
+    const cookieStore = await cookies();
+    const cookieUserId = cookieStore.get('mmos_active_user_id')?.value;
+    if (cookieUserId) {
+      const user = await prisma.user.findUnique({
+        where: { id: cookieUserId }
+      });
+      if (user) {
+        return {
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            centre_id: user.centre_id
+          }
+        } as any;
+      }
+    }
+  } catch (err) {
+    console.warn("Could not read mmos_active_user_id from cookies:", err);
+  }
+
   const session = await getServerSession(authOptions);
   if (!session || !session.user) {
     if (process.env.NODE_ENV === 'development') {
@@ -1368,6 +1392,25 @@ export async function registerStudent(data: any) {
     }
   }
 
+  // 2b. Automatically create student User account
+  const studentEmail = `${data.name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@mastermoves.ae`;
+  const existingStudentUser = await prisma.user.findUnique({
+    where: { email: studentEmail }
+  });
+  if (!existingStudentUser) {
+    const rawPassword = generateRandomPassword();
+    const hashedPassword = await bcrypt.hash(rawPassword, 10);
+    await prisma.user.create({
+      data: {
+        name: data.name,
+        email: studentEmail,
+        password: hashedPassword,
+        role: 'parent',
+        centre_id: data.centre_id || null
+      }
+    }).catch(err => console.warn("Student user auto-creation skipped:", err));
+  }
+
   // 2. Create the student
   const student = await prisma.student.create({
     data: {
@@ -1750,14 +1793,14 @@ export async function backfillParentUsersDB() {
     throw new Error("Unauthorized");
   }
 
-  const families = await prisma.family.findMany({
-    where: { email: { not: null } }
-  });
+  const students = await prisma.student.findMany();
 
   let createdCount = 0;
-  for (const fam of families) {
-    if (!fam.email || !fam.email.trim()) continue;
-    const cleanEmail = fam.email.toLowerCase().trim();
+  for (const student of students) {
+    const cleanName = student.name.trim();
+    const emailPrefix = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '.');
+    const cleanEmail = `${emailPrefix}@mastermoves.ae`;
+
     const existing = await prisma.user.findUnique({
       where: { email: cleanEmail }
     });
@@ -1767,13 +1810,13 @@ export async function backfillParentUsersDB() {
       const hashedPassword = await bcrypt.hash(rawPassword, 10);
       await prisma.user.create({
         data: {
-          name: fam.primary_name || 'Parent',
+          name: cleanName,
           email: cleanEmail,
           password: hashedPassword,
           role: 'parent',
-          centre_id: null
+          centre_id: student.centre_id
         }
-      }).catch(err => console.warn("Backfill parent user error:", err));
+      }).catch(err => console.warn("Backfill student user error:", err));
       createdCount++;
     }
   }
