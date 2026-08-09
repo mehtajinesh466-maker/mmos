@@ -408,7 +408,17 @@ export const Explorer: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 ml-auto">
-            <button onClick={() => { setFilterCentre('All'); setFilterCoach('All'); setFilterSegment('All'); setFilterEngagement('All'); setFilterLevel('All'); }} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">Reset</button>
+            <button onClick={() => { 
+              setFilterCentre('All'); 
+              setFilterCoach('All'); 
+              setFilterSegment('All'); 
+              setFilterEngagement('All'); 
+              setFilterLevel('All'); 
+              setSelectedCentre('All');
+              setSelectedMeasure('Run-rate / month');
+              setDiceBy('By Centre');
+              setChartType('bar');
+            }} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">Reset</button>
             <button onClick={exportExplorerExcel} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer font-bold">↓ Excel</button>
             <button onClick={() => window.print()} className="bg-white border border-line hover:bg-canvas text-ink text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer font-bold">PDF</button>
           </div>
