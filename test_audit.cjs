@@ -1,0 +1,1 @@
+const { PrismaClient } = require('@prisma/client'); const prisma = new PrismaClient(); prisma.auditLog.findMany({ take: 5, orderBy: { at: 'desc' }, include: { actor: true } }).then(logs => { console.log(JSON.stringify(logs, null, 2)); }).catch(console.error).finally(() => prisma.$disconnect());

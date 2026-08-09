@@ -13,8 +13,17 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ currentUser }) => {
   const [filter, setFilter] = useState<string>('');
   const [isBackingUp, setIsBackingUp] = useState<boolean>(false);
   const [backupMsg, setBackupMsg] = useState<string>('');
+  const [logs, setLogs] = React.useState<any[]>([]);
 
-  const logs = db.getAuditLog();
+  const refreshLogs = React.useCallback(() => {
+    setLogs(db.getAuditLog());
+  }, []);
+
+  React.useEffect(() => {
+    refreshLogs();
+    window.addEventListener('db-synced', refreshLogs);
+    return () => window.removeEventListener('db-synced', refreshLogs);
+  }, [refreshLogs]);
 
   const filteredLogs = logs.filter(log => {
     if (!filter) return true;
