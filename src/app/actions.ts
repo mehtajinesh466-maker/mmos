@@ -112,10 +112,12 @@ export async function updateUserCredentialsDB(userId: string, data: { name?: str
     updateData.password = await bcrypt.hash(data.password.trim(), 10);
   }
 
-  return await prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: userId },
     data: updateData
   });
+  await logAuditDB(session.user.id, 'UPDATE_USER_CREDENTIALS', 'users', { id: userId }, { name: updated.name, email: updated.email, role: updated.role });
+  return updated;
 }
 
 // -------------------------------------------------------------
@@ -151,6 +153,7 @@ export async function addCoachDB(name: string, centreId: string, centreIds: stri
     }
   });
 
+  await logAuditDB(session.user.id, 'ADD_COACH', 'coaches', null, { id: coach.id, name, email });
   return { ...coach, email, generatedPassword: rawPassword };
 }
 
@@ -163,13 +166,15 @@ export async function updateCoachDB(coachId: string, name: string, centreId: str
   if (coach?.user_id) {
     await prisma.user.update({ where: { id: coach.user_id }, data: { name, centre_id: centreId || null } });
   }
-  return await prisma.coach.update({
+  const updated = await prisma.coach.update({
     where: { id: coachId },
     data: { 
       centre_id: centreId || null,
       centre_ids: centreIds
     }
   });
+  await logAuditDB(session.user.id, 'UPDATE_COACH', 'coaches', { id: coachId }, { name, centreId, centreIds });
+  return updated;
 }
 
 export async function reassignCoachDB(fromCoachId: string, toCoachId: string) {
@@ -178,10 +183,12 @@ export async function reassignCoachDB(fromCoachId: string, toCoachId: string) {
     throw new Error("Unauthorized");
   }
   // Move all students from one coach to another
-  return await prisma.student.updateMany({
+  const res = await prisma.student.updateMany({
     where: { coach_id: fromCoachId },
     data: { coach_id: toCoachId || null }
   });
+  await logAuditDB(session.user.id, 'REASSIGN_COACH_STUDENTS', 'students', { fromCoachId }, { toCoachId });
+  return res;
 }
 
 export async function deleteCoachDB(coachId: string) {
@@ -189,10 +196,12 @@ export async function deleteCoachDB(coachId: string) {
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
   }
-  return await prisma.coach.update({
+  const res = await prisma.coach.update({
     where: { id: coachId },
     data: { active: false }
   });
+  await logAuditDB(session.user.id, 'DELETE_COACH', 'coaches', { id: coachId }, { active: false });
+  return res;
 }
 
 export async function saveCentreDB(data: { name: string; status: string }) {
@@ -200,9 +209,11 @@ export async function saveCentreDB(data: { name: string; status: string }) {
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
   }
-  return await prisma.centre.create({
+  const res = await prisma.centre.create({
     data: { name: data.name, status: data.status }
   });
+  await logAuditDB(session.user.id, 'CREATE_CENTRE', 'centres', null, data);
+  return res;
 }
 
 export async function updateCentreStatusDB(centreId: string, status: string) {
@@ -210,10 +221,12 @@ export async function updateCentreStatusDB(centreId: string, status: string) {
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
   }
-  return await prisma.centre.update({
+  const res = await prisma.centre.update({
     where: { id: centreId },
     data: { status }
   });
+  await logAuditDB(session.user.id, 'UPDATE_CENTRE_STATUS', 'centres', { id: centreId }, { status });
+  return res;
 }
 
 export async function deleteCentreDB(centreId: string) {
@@ -221,10 +234,12 @@ export async function deleteCentreDB(centreId: string) {
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
   }
-  return await prisma.centre.update({
+  const res = await prisma.centre.update({
     where: { id: centreId },
     data: { status: 'inactive' }
   });
+  await logAuditDB(session.user.id, 'DELETE_CENTRE', 'centres', { id: centreId }, { status: 'inactive' });
+  return res;
 }
 
 
@@ -1202,7 +1217,7 @@ export async function saveStudentDB(studentData: any) {
       }
     }
 
-    await prisma.student.update({
+    const updated = await prisma.student.update({
       where: { id: studentData.id },
       data: {
         name: studentData.name,
@@ -1231,6 +1246,7 @@ export async function saveStudentDB(studentData: any) {
         referral_source: studentData.referral_source || null
       }
     });
+    await logAuditDB(session.user.id, 'UPDATE_STUDENT', 'students', existing, updated);
   } else {
     // New student
     if (targetStatus === 'inactive') {
@@ -1272,6 +1288,7 @@ export async function saveStudentDB(studentData: any) {
     if (targetStatus === 'inactive' && session.user.role === 'owner') {
       await closeStudentPackagesAndClasses(createdStudent.id);
     }
+    await logAuditDB(session.user.id, 'CREATE_STUDENT', 'students', null, createdStudent);
   }
 }
 

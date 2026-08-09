@@ -216,6 +216,7 @@ export const db = {
     if (data.enrollments) this.save('enrollments', data.enrollments);
     if (data.notifications) this.save('notifications', data.notifications);
     if (data.tournamentReports) this.save('tournament_reports', data.tournamentReports);
+    if (data.auditLogs) this.save('audit_log', data.auditLogs);
     window.dispatchEvent(new Event('db-synced'));
   },
   // Helper loaders & savers
