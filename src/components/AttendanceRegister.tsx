@@ -117,7 +117,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
 
       // Days since last class
       const daysSince = s.last_attended
-        ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000)
+        ? Math.max(0, Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000))
         : 999;
 
       // Calculate 30D and 90D attendance metrics from real records
@@ -128,8 +128,9 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       studentAtts.forEach(a => {
         const attDate = new Date(a.date);
         const diffDays = Math.floor((today.getTime() - attDate.getTime()) / 86400000);
-        if (diffDays >= -1 && diffDays <= 30) cls30d++;
-        if (diffDays >= -1 && diffDays <= 90) cls90d++;
+        const dur = a.duration ?? 2;
+        if (diffDays >= -1 && diffDays <= 30) cls30d += dur;
+        if (diffDays >= -1 && diffDays <= 90) cls90d += dur;
       });
 
       // Classes left across packages
@@ -264,6 +265,8 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
 
   const engagementBadge = (eng: string) => {
     switch (eng) {
+      case 'NEW':
+        return 'bg-violet-100 text-violet-700 border-violet-200';
       case 'ENGAGED':
         return 'bg-emerald-100 text-emerald-700 border-emerald-200';
       case 'SLIPPING':
@@ -360,7 +363,9 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
                           log.status === 'present' 
                             ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
                             : log.status === 'absent' 
-                            ? 'bg-red-100 text-red-700 border-red-200' 
+                            ? 'bg-red-100 text-red-700 border-red-200'
+                            : log.status === 'informed'
+                            ? 'bg-blue-100 text-blue-700 border-blue-200'
                             : 'bg-amber-100 text-amber-700 border-amber-200'
                         }`}>
                           {log.status}
@@ -592,6 +597,30 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
                   ))
                 )}
               </tbody>
+              {filtered.length > 0 && (
+                <tfoot className="border-t-2 border-line bg-canvas font-bold text-ink">
+                  <tr>
+                    <td className="py-3 px-4 font-mono text-muted-custom">Total</td>
+                    <td className="py-3 px-4">—</td>
+                    <td className="py-3 px-4 font-mono text-muted-custom">—</td>
+                    <td className="py-3 px-4 text-muted-custom">—</td>
+                    <td className="py-3 px-4 text-[10px] font-semibold text-ink/90 uppercase">—</td>
+                    <td className="py-3 px-4 text-muted-custom">—</td>
+                    <td className="py-3 px-4 text-right font-mono font-bold text-ink">
+                      {filtered.reduce((sum, row) => sum + row.cls30d, 0)}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-ink">
+                      {filtered.reduce((sum, row) => sum + row.cls90d, 0)}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-ink">—</td>
+                    <td className="py-3 px-4 font-mono text-muted-custom">—</td>
+                    <td className="py-3 px-4">—</td>
+                    <td className="py-3 px-4 text-right font-mono font-bold text-ink">
+                      {filtered.reduce((sum, row) => sum + row.classesLeft, 0)}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         </div>
@@ -646,7 +675,9 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
                           log.status === 'present' 
                             ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
                             : log.status === 'absent' 
-                            ? 'bg-red-100 text-red-700 border-red-200' 
+                            ? 'bg-red-100 text-red-700 border-red-200'
+                            : log.status === 'informed'
+                            ? 'bg-blue-100 text-blue-700 border-blue-200'
                             : 'bg-amber-100 text-amber-700 border-amber-200'
                         }`}>
                           {log.status}
@@ -661,6 +692,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
                           >
                             <option value="present">Present</option>
                             <option value="absent">Absent</option>
+                            <option value="informed">Informed</option>
                           </select>
                           <button
                             onClick={() => handleDeleteLog(log.id)}
@@ -719,6 +751,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
                           >
                             <option value="present">Present</option>
                             <option value="absent">Absent</option>
+                            <option value="informed">Informed</option>
                           </select>
                           <button
                             onClick={() => handleDeleteLog(log.id)}

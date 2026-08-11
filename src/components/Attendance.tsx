@@ -194,9 +194,10 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
   // Check if a student is zero-balance
   const isZeroBalance = (studentId: string) => {
-    const studentPkgs = packages.filter(p => p.student_id === studentId);
+    const studentPkgs = packages.filter(p => p.student_id === studentId && !p.frozen);
     if (studentPkgs.length === 0) return true;
-    return studentPkgs.every(p => p.classes_remaining === 0);
+    const activePkgs = studentPkgs.filter(p => p.classes_remaining > 0 && p.kind !== 'unbilled' && p.kind !== 'settled');
+    return activePkgs.length === 0;
   };
 
   // Roster logic per slot: uses explicit enrollments if present, else level filter
@@ -220,7 +221,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
     return match ? match.name : (centreId === 'c-2' || centreId === 'JLT' ? 'JLT' : 'Bay Avenue');
   };
 
-  const handleMarkStatus = (slotId: string, studentId: string, status: 'present' | 'absent' | 'makeup') => {
+  const handleMarkStatus = (slotId: string, studentId: string, status: 'present' | 'absent' | 'makeup' | 'informed') => {
     const key = `${slotId}-${studentId}`;
     const newStatus = markings[key] === status ? null : status;
     
@@ -229,7 +230,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
       [key]: newStatus
     }));
 
-    if (newStatus === null || newStatus === 'absent') {
+    if (newStatus === null || newStatus === 'absent' || newStatus === 'informed') {
       setBilledHours(prev => {
         const copy = { ...prev };
         delete copy[key];
@@ -242,18 +243,40 @@ export const Attendance: React.FC<AttendanceProps> = ({
     const slot = slots.find(s => s.id === slotId);
     if (!slot) return;
 
-    const slotMarkings = Object.keys(markings).filter(key => key.startsWith(slotId) && markings[key] !== null);
+    const rosterStudentIds = new Set(getSlotRoster(slot).map(s => s.id));
+    const slotMarkings = Object.keys(markings).filter(key =>
+      key.startsWith(slotId) && markings[key] !== null && rosterStudentIds.has(key.substring(slotId.length + 1))
+    );
+    // Ensure the attendance date is not in the future compared to today's local date
+    if (selectedDate) {
+      const today = new Date();
+      const [ty, tm, td] = [today.getFullYear(), today.getMonth() + 1, today.getDate()];
+      const [ay, am, ad] = selectedDate.split('-').map(Number);
+      const todayVal = ty * 10000 + tm * 100 + td;
+      const attVal  = ay * 10000 + am * 100 + ad;
+      if (attVal > todayVal) {
+        setSaveStatus(`❌ Error: Cannot log attendance for a future date (${selectedDate}).`);
+        setTimeout(() => setSaveStatus(''), 5000);
+        return;
+      }
+    }
+
     // Date floor validation: ensure attendance date is not prior to student's join date
     for (const key of slotMarkings) {
       const studentId = key.substring(slotId.length + 1);
       const student = students.find(s => s.id === studentId);
-      if (student && student.join_date) {
-        const joinDate = new Date(student.join_date);
-        joinDate.setHours(0, 0, 0, 0);
-        const attDate = new Date(selectedDate);
-        attDate.setHours(0, 0, 0, 0);
-        if (attDate < joinDate) {
-          const dateStr = typeof student.join_date === 'string' ? student.join_date.split('T')[0] : new Date(student.join_date).toISOString().split('T')[0];
+      if (!student) continue; // skip stale markings for removed students
+      if (student.join_date) {
+        // Parse as YYYY-MM-DD local date to avoid UTC midnight vs IST offset issues
+        const [jy, jm, jd] = (typeof student.join_date === 'string'
+          ? student.join_date.split('T')[0]
+          : new Date(student.join_date).toISOString().split('T')[0]
+        ).split('-').map(Number);
+        const [ay, am, ad] = selectedDate.split('-').map(Number);
+        const joinVal = jy * 10000 + jm * 100 + jd;
+        const attVal  = ay * 10000 + am * 100 + ad;
+        if (attVal < joinVal) {
+          const dateStr = `${jy}-${String(jm).padStart(2, '0')}-${String(jd).padStart(2, '0')}`;
           setSaveStatus(`❌ Error: Cannot back-date class for ${student.name} before their join date (${dateStr}).`);
           setTimeout(() => setSaveStatus(''), 5000);
           return;
@@ -476,25 +499,40 @@ export const Attendance: React.FC<AttendanceProps> = ({
                                   <h5 className="font-bold text-ink text-xs">
                                     {student.name}
                                   </h5>
-                                  {isZero ? (
-                                    <p className="text-[9px] text-hot-custom font-semibold mt-0.5">
-                                      ⚠ No classes left — front desk will be notified
-                                    </p>
-                                  ) : (
-                                    <p className="text-[9px] text-muted-custom mt-0.5">
-                                      Active package
-                                    </p>
-                                  )}
+                                  {(() => {
+                                    const unpaidClasses = (student.flags as any)?.unpaid_classes || 0;
+                                    const unpaidValue = (student.flags as any)?.unpaid_value || 0;
+                                    if (unpaidClasses > 0) {
+                                      return (
+                                        <p className="text-[9px] text-hot-custom font-bold mt-0.5">
+                                          ⚠ {unpaidClasses} {unpaidClasses === 1 ? 'class' : 'classes'} unbilled — AED {unpaidValue} owed
+                                        </p>
+                                      );
+                                    }
+                                    if (isZero) {
+                                      return (
+                                        <p className="text-[9px] text-hot-custom font-semibold mt-0.5">
+                                          ⚠ No classes left — front desk will be notified
+                                        </p>
+                                      );
+                                    }
+                                    return (
+                                      <p className="text-[9px] text-muted-custom mt-0.5">
+                                        Active package
+                                      </p>
+                                    );
+                                  })()}
                                 </div>
                               </div>
 
                               <div className="flex items-center gap-2.5">
                                 <div className="flex gap-1.5">
-                                  {(['present', 'absent', 'makeup'] as const).map(st => {
+                                  {(['present', 'absent', 'informed', 'makeup'] as const).map(st => {
                                     const isMarked = currentStatus === st;
                                     const colors = {
                                       present: 'bg-emerald-700 text-white border-emerald-700',
                                       absent: 'bg-red-700 text-white border-red-700',
+                                      informed: 'bg-blue-600 text-white border-blue-600',
                                       makeup: 'bg-amber-600 text-white border-amber-600'
                                     };
                                     return (

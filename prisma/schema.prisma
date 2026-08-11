@@ -132,6 +132,7 @@ model Package {
   frozen            Boolean?  @default(false)
   start_date        DateTime? @default(now()) @db.Date
   expiry_date       DateTime? @db.Date
+  ended_at          DateTime? @db.Timestamptz
   bonus_classes     Int?      @default(0)
   is_family_shared  Boolean   @default(false)
   invoices          Invoice[]

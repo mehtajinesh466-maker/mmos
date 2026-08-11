@@ -104,7 +104,7 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
     return students.map(s => {
       // Days since last class
       const daysSince = s.last_attended
-        ? Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000)
+        ? Math.max(0, Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000))
         : 999;
 
       // Calculate 30D and 90D attendance metrics from real records
@@ -115,8 +115,9 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
       studentAtts.forEach(a => {
         const attDate = new Date(a.date);
         const diffDays = Math.floor((today.getTime() - attDate.getTime()) / 86400000);
-        if (diffDays >= 0 && diffDays <= 30) cls30d++;
-        if (diffDays >= 0 && diffDays <= 90) cls90d++;
+        const dur = a.duration ?? 2;
+        if (diffDays >= -1 && diffDays <= 30) cls30d += dur;
+        if (diffDays >= -1 && diffDays <= 90) cls90d += dur;
       });
 
       // Overdue value and classes

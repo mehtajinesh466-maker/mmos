@@ -74,7 +74,7 @@ export interface Package {
   id: string;
   student_id: string;
   tier_id: string;
-  kind: 'new' | 'renewal' | 'tournament';
+  kind: 'new' | 'renewal' | 'tournament' | 'unbilled' | 'settled' | 'completed';
   classes_total: number;
   classes_remaining: number;
   discount_pct: number;
@@ -82,6 +82,8 @@ export interface Package {
   is_family_shared?: boolean;
   start_date: string;
   expiry_date?: string;
+  ended_at?: string | null;
+  bonus_classes?: number;
 }
 
 export interface Enrollment {
@@ -108,7 +110,7 @@ export interface Attendance {
   slot_id: string | null;
   coach_id: string;
   date: string;
-  status: 'present' | 'absent' | 'makeup';
+  status: 'present' | 'absent' | 'makeup' | 'informed';
   topic?: string;
   note?: string;
   duration: number;

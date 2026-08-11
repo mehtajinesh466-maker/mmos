@@ -125,9 +125,9 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
         .filter(a => a.student_id === s.id && a.status === 'present')
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-      // Get all student's packages sorted by start_date asc
+      // Get all student's packages sorted by start_date asc (exclude unbilled and settled)
       const studentPkgs = packages
-        .filter(p => p.student_id === s.id)
+        .filter(p => p.student_id === s.id && p.kind !== 'unbilled' && p.kind !== 'settled')
         .sort((a, b) => new Date(a.start_date || '').getTime() - new Date(b.start_date || '').getTime());
 
       let attCursor = 0;
@@ -151,14 +151,15 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
         const firstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '-');
 
         let ended = '-';
-        if (pkg.classes_remaining === 0) {
+        if (pkg.ended_at) {
+          ended = new Date(pkg.ended_at).toISOString().split('T')[0];
+        } else if (pkg.classes_remaining === 0) {
           if (pkgAtts.length > 0) {
             ended = new Date(pkgAtts[pkgAtts.length - 1].date).toISOString().split('T')[0];
           } else if (pkg.expiry_date) {
             ended = new Date(pkg.expiry_date).toISOString().split('T')[0];
-          } else {
-            ended = pkg.start_date ? new Date(new Date(pkg.start_date).getTime() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : '-';
           }
+          // No fallback — show '-' if we genuinely don't know the end date
         }
 
         // Segment calculation
@@ -192,44 +193,6 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
           dateForSort: pkg.start_date ? new Date(pkg.start_date).getTime() : 0
         });
       });
-
-      // Synthesize unpaid package if student has unpaid classes
-      const unpaidClassesCount = (s.flags as any)?.unpaid_classes || 0;
-      if (unpaidClassesCount > 0) {
-        const pkgNo = studentPkgs.length + 1;
-        const unpaidAtts = studentAtts.slice(attCursor);
-        const firstClass = unpaidAtts.length > 0 ? new Date(unpaidAtts[0].date).toISOString().split('T')[0] : (s.last_attended ? new Date(s.last_attended).toISOString().split('T')[0] : 'NaT');
-
-        // Segment calculation
-        const segment = s.level === 'Pro-Track' ? 'Pro-Track'
-          : s.level === 'Advanced' ? 'Juniors-Advanced'
-          : s.level === 'Intermediate' ? 'Juniors-Intermediate B'
-          : 'Early Starters-Beginner 2';
-
-        // Engagement calculation
-        const engagement = s.pace_status === 'Slow' ? 'SLIPPING' : s.pace_status === 'Stalled' ? 'COLD' : 'ENGAGED';
-
-        list.push({
-          id: `unpaid-${s.id}`,
-          studentName: s.name,
-          studentId: s.id,
-          displayId,
-          centreName,
-          coachName,
-          segment,
-          engagement,
-          pkgNo,
-          type: '>> UNPAID <<',
-          paidOn: 'NaT',
-          firstClass,
-          ended: 'NaT',
-          classesPaid: 0,
-          used: unpaidClassesCount,
-          balance: -unpaidClassesCount,
-          status: 'UNBILLED',
-          dateForSort: s.last_attended ? new Date(s.last_attended).getTime() : Date.now()
-        });
-      }
     });
 
     return list;
@@ -299,7 +262,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
   const statusBadge = (status: string) => {
     switch (status) {
       case 'COMPLETED':
-        return 'bg-slate-100 text-slate-500 border-slate-200';
+        return 'bg-teal-100 text-teal-700 border-teal-200';
       case 'CURRENT':
         return 'bg-emerald-100 text-emerald-700 border-emerald-200';
       case 'UNBILLED':

@@ -548,7 +548,7 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
                   </div>
                   <div className="flex justify-between py-2.5">
                     <span className="text-muted-custom">Last class</span>
-                    <span className="font-mono text-ink">{activeStudent.last_attended ? new Date(activeStudent.last_attended).toISOString().split('T')[0] : '2026-06-25'}</span>
+                    <span className="font-mono text-ink">{activeStudent.last_attended ? new Date(activeStudent.last_attended).toISOString().split('T')[0] : '—'}</span>
                   </div>
                 </div>
 

@@ -44,6 +44,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
     rate_per_class: '100',
     start_date: '',
     payment_method: 'cash',
+    payment_status: 'paid',
     payment_remarks: '',
     acquisition_source: 'Instagram',
     fide_id: '',
@@ -205,21 +206,35 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       consent_mktg: formData.consent_mktg,
       photo_url: photoUrl,
       family_id: selectedFamilyId || undefined,
+      payment_method: formData.payment_method,
+      payment_status: formData.payment_status || 'paid',
+      payment_remarks: formData.payment_remarks,
       flags: {
         reg_form_url: regFormUrl,
         emirates_id_url: emiratesIdUrl,
         payment_method: formData.payment_method,
+        payment_status: formData.payment_status || 'paid',
         payment_remarks: formData.payment_remarks
       }
     };
 
     try {
-      await registerStudent(payload);
+      const savedStudent = await registerStudent(payload);
       
       const freshData = await syncDatabaseToClient();
       db.syncFromNeon(freshData);
-      
-      setSaveStatus('✓ Student registered and package created successfully!');
+
+      // T4: compute display ID (centre prefix + fide_id or id numeric part)
+      const allCentres = db.getCentres();
+      const centre = allCentres.find((c: any) => c.id === formData.centre_id);
+      const prefix = (centre?.name || 'BAY').slice(0, 3).toUpperCase();
+      const numPart = savedStudent.fide_id || savedStudent.id.replace(/\D/g, '').slice(0, 4) || '0000';
+      const displayId = savedStudent.fide_id ? savedStudent.fide_id : `${prefix}-${numPart}`;
+
+      // T5: confirmation message includes student name and ID
+      setSaveStatus(`✓ ${savedStudent.name} registered successfully! ID: ${displayId}`);
+      // T4: reflect the real ID on the form header
+      setStudentIdAuto(displayId);
       setPhotoUrl('');
       setRegFormUrl('');
       setEmiratesIdUrl('');
@@ -246,7 +261,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       setSaveStatus('❌ Error: ' + error.message);
     } finally {
       setIsSubmitting(false);
-      setTimeout(() => setSaveStatus(''), 5000);
+      setTimeout(() => setSaveStatus(''), 8000);
     }
   };
 
@@ -686,6 +701,19 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
                 <option value="center(POS)">Center(POS)</option>
                 <option value="tabby">Tabby</option>
                 <option value="others">Others</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-ink">Payment Status *</label>
+              <select 
+                name="payment_status" 
+                value={formData.payment_status || 'paid'} 
+                onChange={handleChange} 
+                className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none"
+              >
+                <option value="paid">Paid</option>
+                <option value="unpaid">Unpaid</option>
               </select>
             </div>
 

@@ -128,7 +128,7 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
       let shouldInclude = false;
       if (pkg.classes_remaining > 0) {
         shouldInclude = (pctLeft <= 20 || totalRemaining <= 3);
-      } else if (pkg.classes_remaining === 0 && isLatest && totalRemaining === 0) {
+      } else if (pkg.classes_remaining === 0 && isLatest && totalRemaining === 0 && pkg.kind !== 'completed') {
         shouldInclude = true;
       }
 

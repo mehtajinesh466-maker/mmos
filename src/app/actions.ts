@@ -31,7 +31,13 @@ async function verifySession() {
     console.warn("Could not read mmos_active_user_id from cookies:", err);
   }
 
-  const session = await getServerSession(authOptions);
+  let session = null;
+  try {
+    session = await getServerSession(authOptions);
+  } catch (err) {
+    console.warn("Could not retrieve session via next-auth:", err);
+  }
+
   if (!session || !session.user) {
     if (process.env.NODE_ENV === 'development') {
       const defaultUser = await prisma.user.findFirst({
@@ -168,7 +174,7 @@ export async function updateCoachDB(coachId: string, name: string, centreId: str
   }
   const updated = await prisma.coach.update({
     where: { id: coachId },
-    data: { 
+    data: {
       centre_id: centreId || null,
       centre_ids: centreIds
     }
@@ -293,7 +299,7 @@ export async function enrollStudent(studentId: string, slotId: string) {
       throw new Error("Unauthorized");
     }
   }
-  
+
   // Check if enrollment already exists to prevent duplicate key errors
   const existing = await prisma.enrollment.findFirst({
     where: {
@@ -765,7 +771,7 @@ export async function saveEnquiryDB(data: {
         return { success: false, error: "Unauthorized" };
       }
     }
-    
+
     // Validate UUID format for foreign keys to prevent db crash
     const isValidUUID = (id?: string) => {
       if (!id) return false;
@@ -815,76 +821,222 @@ export async function updateEnquiryStageDB(id: string, stage: string) {
     data: { stage: stage.toLowerCase().replace(' ', '_') }
   });
 }
-async function updateStudentFlags(studentId: string, pkgId?: string, updatedRemaining?: number) {
+export async function updateStudentFlags(studentId: string, pkgId?: string, updatedRemaining?: number, skipSiblings = false) {
+  // 1. Fetch all non-frozen, non-unbilled packages for the student or family siblings if family shared
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    include: { family: { include: { students: true } } }
+  });
+  if (!student) return;
+
+  // Find all sibling student IDs if family exists
+  const studentIds = student.family ? student.family.students.map(s => s.id) : [studentId];
+
+  // Retrieve packages:
+  // - Packages owned directly by this student
+  // - OR family shared packages owned by siblings
   const allPkgs = await prisma.package.findMany({
+    where: {
+      OR: [
+        { student_id: studentId },
+        { student_id: { in: studentIds }, is_family_shared: true }
+      ],
+      frozen: false
+    },
+    orderBy: { start_date: 'asc' }
+  });
+
+  // Separate packages:
+  // - Paid packages (new, renewal, tournament, completed)
+  // - Unbilled and Settled packages (arrears tracking)
+  const paidPkgs = allPkgs.filter(p => p.kind !== 'unbilled' && p.kind !== 'settled');
+  const unbilledPkgs = allPkgs.filter(p => p.kind === 'unbilled');
+
+  // Sort paidPkgs by start_date asc, and break ties using lifecycle kind precedence:
+  // 'new' -> 'settled' -> 'renewal' -> 'tournament'
+  const kindOrder: Record<string, number> = { 'new': 1, 'settled': 2, 'renewal': 3, 'tournament': 4 };
+  paidPkgs.sort((a, b) => {
+    const dateA = a.start_date ? new Date(a.start_date).getTime() : 0;
+    const dateB = b.start_date ? new Date(b.start_date).getTime() : 0;
+    if (dateA !== dateB) {
+      return dateA - dateB;
+    }
+    const orderA = kindOrder[a.kind || ''] || 99;
+    const orderB = kindOrder[b.kind || ''] || 99;
+    return orderA - orderB;
+  });
+
+  // Reset paid packages to their full initial entitlement
+  for (const p of paidPkgs) {
+    const initialEntitlement = p.classes_total + (p.bonus_classes || 0);
+    p.classes_remaining = initialEntitlement;
+  }
+
+  // 2. Fetch all attendance logs for the student AND all siblings
+  const siblingAtts = await prisma.attendance.findMany({
+    where: {
+      student_id: { in: studentIds },
+      status: { in: ['present', 'absent', 'makeup'] }
+    },
+    orderBy: { date: 'asc' }
+  });
+
+  // Chronologically consume from packages:
+  // For each attendance record, find the oldest eligible package with classes remaining and deduct from it.
+  let primaryDeficit = 0;
+
+  for (const att of siblingAtts) {
+    let amountToDeduct = att.duration || 1;
+    const isPrimary = att.student_id === studentId;
+
+    // Try to deduct from eligible packages
+    for (const p of paidPkgs) {
+      if (amountToDeduct <= 0) break;
+      if (p.classes_remaining <= 0) continue;
+
+      // Eligibility check:
+      // - Primary student can deduct from any package they have access to (both private and shared)
+      // - Sibling can ONLY deduct from shared packages
+      const isEligible = isPrimary || p.is_family_shared;
+
+      if (isEligible) {
+        const deduct = Math.min(p.classes_remaining, amountToDeduct);
+        p.classes_remaining -= deduct;
+        amountToDeduct -= deduct;
+      }
+    }
+
+    // If there is still a deduction left, it becomes an unbilled deficit
+    if (amountToDeduct > 0 && isPrimary) {
+      primaryDeficit += amountToDeduct;
+    }
+  }
+
+  // 4. Update the paid packages in the database
+  // If a package hits exactly 0, flip it to 'completed' and stamp ended_at
+  // Note: ended_at is set via raw SQL because the Prisma client may not have been regenerated yet.
+  const now = new Date();
+  for (const p of paidPkgs) {
+    const isNowComplete = p.classes_remaining === 0 && p.kind !== 'completed';
+    await prisma.package.update({
+      where: { id: p.id },
+      data: {
+        classes_remaining: p.classes_remaining,
+        ...(isNowComplete ? { kind: 'completed' } : {})
+      }
+    });
+    // Set ended_at via raw SQL (column exists in DB; client may be stale)
+    if (isNowComplete) {
+      await prisma.$executeRaw`UPDATE packages SET ended_at = ${now} WHERE id = ${p.id}::uuid`;
+    }
+  }
+
+  // 5. Handle unbilled overflow for the primary student
+  if (primaryDeficit > 0) {
+    const existingUnbilled = unbilledPkgs[0];
+    if (existingUnbilled) {
+      await prisma.package.update({
+        where: { id: existingUnbilled.id },
+        data: { classes_remaining: -primaryDeficit }
+      });
+    } else {
+      await prisma.package.create({
+        data: {
+          student_id: studentId,
+          classes_total: 0,
+          classes_remaining: -primaryDeficit,
+          kind: 'unbilled',
+          start_date: new Date()
+        }
+      });
+    }
+  } else {
+    for (const up of unbilledPkgs) {
+      await prisma.package.update({
+        where: { id: up.id },
+        data: { classes_remaining: 0 }
+      });
+    }
+  }
+
+  // 6. Update student flags and metrics
+  const updatedPkgs = await prisma.package.findMany({
     where: { student_id: studentId, frozen: false }
   });
-  const totalRemaining = allPkgs.reduce((sum, p) => {
-    const rem = (pkgId && p.id === pkgId && updatedRemaining !== undefined) ? updatedRemaining : p.classes_remaining;
-    return sum + rem;
-  }, 0);
 
-  // Sum up duration for present/makeup attendance
-  const attendedSum = await prisma.attendance.aggregate({
-    _sum: { duration: true },
-    where: {
-      student_id: studentId,
-      status: { in: ['present', 'makeup'] }
-    }
-  });
-  const totalAttended = attendedSum._sum.duration || 0;
+  const activePaidPkgs = updatedPkgs.filter(p => p.kind !== 'unbilled' && p.kind !== 'settled');
+  const totalRemaining = activePaidPkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
 
-  // Sum total classes purchased
-  const totalPurchased = allPkgs.reduce((sum, p) => sum + p.classes_total, 0);
-  const unpaidClasses = Math.max(0, totalAttended - totalPurchased);
+  const unpaidClasses = primaryDeficit;
 
   // Compute student rate
   let studentRate = 125;
-  if (allPkgs.length > 0) {
-    const sorted = [...allPkgs].sort((a, b) => new Date(b.start_date || 0).getTime() - new Date(a.start_date || 0).getTime());
-    const latestPkg = sorted[0];
-    const invoice = await prisma.invoice.findFirst({ where: { package_id: latestPkg.id } });
+  const lastPkg = activePaidPkgs[activePaidPkgs.length - 1];
+  if (lastPkg) {
+    const invoice = await prisma.invoice.findFirst({ where: { package_id: lastPkg.id } });
+    const totalClasses = lastPkg.classes_total + (lastPkg.bonus_classes || 0);
     if (invoice && invoice.amount) {
-      studentRate = Math.round(Number(invoice.amount) / latestPkg.classes_total);
-    } else if (latestPkg.tier_id) {
-      const tier = await prisma.tier.findUnique({ where: { id: latestPkg.tier_id } });
+      studentRate = Math.round(Number(invoice.amount) / totalClasses);
+    } else if (lastPkg.tier_id) {
+      const tier = await prisma.tier.findUnique({ where: { id: lastPkg.tier_id } });
       if (tier && tier.price) {
-        const discount = latestPkg.discount_pct ? Number(latestPkg.discount_pct) : 0;
-        studentRate = Math.round(Number(tier.price) * (1 - discount / 100) / latestPkg.classes_total);
+        const discount = lastPkg.discount_pct ? Number(lastPkg.discount_pct) : 0;
+        studentRate = Math.round(Number(tier.price) * (1 - discount / 100) / totalClasses);
       }
     }
   }
   const unpaidValue = unpaidClasses * studentRate;
 
-  const student = await prisma.student.findUnique({ where: { id: studentId } });
-  if (student) {
-    const flags = typeof student.flags === 'object' && student.flags ? { ...(student.flags as any) } : {};
-    if (totalRemaining <= 2) {
-      flags.low_package = true;
-    } else {
-      delete flags.low_package;
-    }
-
-    if (unpaidClasses > 0) {
-      flags.unpaid_classes = unpaidClasses;
-      flags.unpaid_value = unpaidValue;
-    } else {
-      delete flags.unpaid_classes;
-      delete flags.unpaid_value;
-    }
-
-    const latestAttendance = await prisma.attendance.findFirst({
-      where: { student_id: studentId, status: { in: ['present', 'makeup'] } },
-      orderBy: { date: 'desc' }
-    });
-
-    await prisma.student.update({
-      where: { id: studentId },
-      data: {
-        flags,
-        last_attended: latestAttendance ? latestAttendance.date : null
+  const flags = typeof student.flags === 'object' && student.flags ? { ...(student.flags as any) } : {};
+  let hasLowPackage = false;
+  if (totalRemaining <= 2) {
+    hasLowPackage = true;
+  } else {
+    for (const p of activePaidPkgs) {
+      if (p.classes_remaining > 0) {
+        const initial = p.classes_total + (p.bonus_classes || 0);
+        if (initial > 0 && (p.classes_remaining / initial) <= 0.20) {
+          hasLowPackage = true;
+          break;
+        }
       }
-    });
+    }
+  }
+
+  if (hasLowPackage) {
+    flags.low_package = true;
+  } else {
+    delete flags.low_package;
+  }
+
+  if (unpaidClasses > 0) {
+    flags.unpaid_classes = unpaidClasses;
+    flags.unpaid_value = unpaidValue;
+  } else {
+    delete flags.unpaid_classes;
+    delete flags.unpaid_value;
+  }
+
+  const latestAttendance = await prisma.attendance.findFirst({
+    where: { student_id: studentId, status: { in: ['present', 'makeup'] } },
+    orderBy: { date: 'desc' }
+  });
+
+  await prisma.student.update({
+    where: { id: studentId },
+    data: {
+      flags,
+      last_attended: latestAttendance ? latestAttendance.date : null
+    }
+  });
+
+  // Re-run flags for siblings to sync their shared package balances
+  if (!skipSiblings && student.family && student.family.students.length > 1) {
+    for (const sib of student.family.students) {
+      if (sib.id !== studentId) {
+        await updateStudentFlags(sib.id, undefined, undefined, true);
+      }
+    }
   }
 }
 
@@ -905,54 +1057,19 @@ export async function logAttendance(studentId: string, status: string | null, co
     targetDate = new Date(customDateStr);
   }
 
-  const startOfDate = new Date(targetDate);
-  startOfDate.setHours(0, 0, 0, 0);
-
-  const endOfDate = new Date(targetDate);
-  endOfDate.setHours(23, 59, 59, 999);
+  // Timezone-safe UTC midnight date
+  const targetDateMidnight = new Date(targetDate.toISOString().split('T')[0] + 'T00:00:00.000Z');
 
   const existing = await prisma.attendance.findFirst({
     where: {
       student_id: studentId,
       slot_id: slotId || null,
-      date: {
-        gte: startOfDate,
-        lte: endOfDate
-      }
+      date: targetDateMidnight
     }
   });
 
   if (existing) {
     if (!status) {
-      // Unmarked: delete the record and restore class if it was present
-       if (existing.status === 'present' || existing.status === 'makeup') {
-        const pkgs = await prisma.package.findMany({
-          where: { student_id: studentId, frozen: false },
-          orderBy: { start_date: 'asc' }
-        });
-        let pkgToRestore = pkgs.find(p => p.classes_remaining < p.classes_total);
-        if (!pkgToRestore) {
-          const student = await prisma.student.findUnique({ where: { id: studentId } });
-          if (student && student.family_id) {
-            const siblings = await prisma.student.findMany({
-              where: { family_id: student.family_id }
-            });
-            const siblingIds = siblings.map(s => s.id);
-            const sharedPkgs = await prisma.package.findMany({
-              where: { student_id: { in: siblingIds }, is_family_shared: true, frozen: false },
-              orderBy: { start_date: 'asc' }
-            });
-            pkgToRestore = sharedPkgs.find(p => p.classes_remaining < p.classes_total);
-          }
-        }
-        if (pkgToRestore) {
-          const updatedPkg = await prisma.package.update({
-            where: { id: pkgToRestore.id },
-            data: { classes_remaining: pkgToRestore.classes_remaining + existing.duration }
-          });
-          await updateStudentFlags(studentId, pkgToRestore.id, updatedPkg.classes_remaining);
-        }
-      }
       const deletedRecord = await prisma.attendance.delete({
         where: { id: existing.id }
       });
@@ -967,113 +1084,13 @@ export async function logAttendance(studentId: string, status: string | null, co
 
     const oldStatus = existing.status;
     const oldDuration = existing.duration;
-    
-    // Update attendance record status and duration
+
     const updated = await prisma.attendance.update({
       where: { id: existing.id },
       data: { status, duration, topic: topic !== undefined ? topic : existing.topic }
     });
-    await logAuditDB(session.user.id, 'UPDATE_ATTENDANCE', 'attendance', { status: oldStatus, duration: oldDuration }, updated);
-
-    if ((oldStatus === 'present' || oldStatus === 'makeup') && (status !== 'present' && status !== 'makeup')) {
-      // Restore class
-      const pkgs = await prisma.package.findMany({
-        where: { student_id: studentId, frozen: false },
-        orderBy: { start_date: 'asc' }
-      });
-      let pkgToRestore = pkgs.find(p => p.classes_remaining < p.classes_total);
-      if (!pkgToRestore) {
-        const student = await prisma.student.findUnique({ where: { id: studentId } });
-        if (student && student.family_id) {
-          const siblings = await prisma.student.findMany({
-            where: { family_id: student.family_id }
-          });
-          const siblingIds = siblings.map(s => s.id);
-          const sharedPkgs = await prisma.package.findMany({
-            where: { student_id: { in: siblingIds }, is_family_shared: true, frozen: false },
-            orderBy: { start_date: 'asc' }
-          });
-          pkgToRestore = sharedPkgs.find(p => p.classes_remaining < p.classes_total);
-        }
-      }
-      if (pkgToRestore) {
-        const updatedPkg = await prisma.package.update({
-          where: { id: pkgToRestore.id },
-          data: { classes_remaining: pkgToRestore.classes_remaining + oldDuration }
-        });
-        await updateStudentFlags(studentId, pkgToRestore.id, updatedPkg.classes_remaining);
-      }
-    } else if ((oldStatus !== 'present' && oldStatus !== 'makeup') && (status === 'present' || status === 'makeup')) {
-      // Deduct class
-      const pkg = await prisma.package.findFirst({
-        where: {
-          student_id: studentId,
-          frozen: false,
-          classes_remaining: { gt: 0 }
-        },
-        orderBy: { start_date: 'asc' }
-      });
-      let targetPkg = pkg;
-      if (!targetPkg) {
-        const student = await prisma.student.findUnique({ where: { id: studentId } });
-        if (student && student.family_id) {
-          const siblings = await prisma.student.findMany({
-            where: { family_id: student.family_id }
-          });
-          const siblingIds = siblings.map(s => s.id);
-          targetPkg = await prisma.package.findFirst({
-            where: {
-              student_id: { in: siblingIds },
-              is_family_shared: true,
-              frozen: false,
-              classes_remaining: { gt: 0 }
-            },
-            orderBy: { start_date: 'asc' }
-          });
-        }
-      }
-      if (targetPkg) {
-        const updatedPkg = await prisma.package.update({
-          where: { id: targetPkg.id },
-          data: { classes_remaining: targetPkg.classes_remaining - duration }
-        });
-        await updateStudentFlags(studentId, targetPkg.id, updatedPkg.classes_remaining);
-      }
-    } else if ((oldStatus === 'present' || oldStatus === 'makeup') && (status === 'present' || status === 'makeup') && oldDuration !== duration) {
-      // Adjust class deduction difference
-      const pkg = await prisma.package.findFirst({
-        where: { student_id: studentId, frozen: false },
-        orderBy: { start_date: 'asc' }
-      });
-      let targetPkg = pkg;
-      if (!targetPkg) {
-        const student = await prisma.student.findUnique({ where: { id: studentId } });
-        if (student && student.family_id) {
-          const siblings = await prisma.student.findMany({
-            where: { family_id: student.family_id }
-          });
-          const siblingIds = siblings.map(s => s.id);
-          targetPkg = await prisma.package.findFirst({
-            where: {
-              student_id: { in: siblingIds },
-              is_family_shared: true,
-              frozen: false
-            },
-            orderBy: { start_date: 'asc' }
-          });
-        }
-      }
-      if (targetPkg) {
-        const diff = duration - oldDuration; // e.g. from 2 to 1 (diff = -1) or 1 to 2 (diff = 1)
-        const updatedPkg = await prisma.package.update({
-          where: { id: targetPkg.id },
-          data: { classes_remaining: targetPkg.classes_remaining - diff }
-        });
-        await updateStudentFlags(studentId, targetPkg.id, updatedPkg.classes_remaining);
-      }
-    }
-
     await updateStudentFlags(studentId);
+    await logAuditDB(session.user.id, 'UPDATE_ATTENDANCE', 'attendance', { status: oldStatus, duration: oldDuration }, updated);
     return updated;
   }
 
@@ -1085,51 +1102,13 @@ export async function logAttendance(studentId: string, status: string | null, co
       status: status,
       coach_id: coachId,
       slot_id: slotId || null,
-      date: targetDate,
+      date: targetDateMidnight,
       duration: duration,
       topic: topic || null
     }
   });
 
   await logAuditDB(session.user.id, 'CREATE_ATTENDANCE', 'attendance', null, newRecord);
-
-  if (status === 'present' || status === 'makeup') {
-    const pkg = await prisma.package.findFirst({
-      where: {
-        student_id: studentId,
-        frozen: false,
-        classes_remaining: { gt: 0 }
-      },
-      orderBy: { start_date: 'asc' }
-    });
-    let targetPkg = pkg;
-    if (!targetPkg) {
-      const student = await prisma.student.findUnique({ where: { id: studentId } });
-      if (student && student.family_id) {
-        const siblings = await prisma.student.findMany({
-          where: { family_id: student.family_id }
-        });
-        const siblingIds = siblings.map(s => s.id);
-        targetPkg = await prisma.package.findFirst({
-          where: {
-            student_id: { in: siblingIds },
-            is_family_shared: true,
-            frozen: false,
-            classes_remaining: { gt: 0 }
-          },
-          orderBy: { start_date: 'asc' }
-        });
-      }
-    }
-    if (targetPkg) {
-      const updatedPkg = await prisma.package.update({
-        where: { id: targetPkg.id },
-        data: { classes_remaining: targetPkg.classes_remaining - duration }
-      });
-      await updateStudentFlags(studentId, targetPkg.id, updatedPkg.classes_remaining);
-    }
-  }
-
   await updateStudentFlags(studentId);
   return newRecord;
 }
@@ -1439,10 +1418,12 @@ export async function registerStudent(data: any) {
       gender: data.gender,
       school: data.school,
       level: data.level,
+      parent_name: data.parent_name || null,
+      referral_source: data.acquisition_source || null,
       category: data.category || null,
       status: 'active',
       fide_id: data.fide_id,
-      join_date: new Date('2026-08-01'),
+      join_date: new Date(),
       photo_url: data.photo_url,
       flags: data.flags || {},
     }
@@ -1458,22 +1439,22 @@ export async function registerStudent(data: any) {
       const bonusClasses = Number(data.bonus_classes) || 0;
       const grandTotal = classesTotal + bonusClasses;
 
-      const packageId = require('crypto').randomUUID();
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO "packages" ("id", "student_id", "tier_id", "kind", "classes_total", "classes_remaining", "discount_pct", "start_date", "bonus_classes") 
-         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9)`,
-        packageId,
-        student.id,
-        tier.id,
-        'new',
-        grandTotal,
-        grandTotal,
-        discount,
-        new Date(),
-        bonusClasses
-      );
+      const packageId = crypto.randomUUID();
+      await prisma.package.create({
+        data: {
+          id: packageId,
+          student_id: student.id,
+          tier_id: tier.id,
+          kind: 'new',
+          classes_total: classesTotal,
+          classes_remaining: grandTotal,
+          discount_pct: discount,
+          start_date: new Date(),
+          bonus_classes: bonusClasses
+        }
+      });
 
-      // Auto-generate unpaid invoice for billing ledger
+      // Auto-generate paid invoice for billing ledger
       let finalAmount = 0;
       if (data.rate_per_class && data.package_size) {
         finalAmount = (Number(data.package_size) || 12) * (Number(data.rate_per_class) || 100);
@@ -1487,10 +1468,14 @@ export async function registerStudent(data: any) {
           student_id: student.id,
           package_id: packageId,
           amount: finalAmount,
-          status: 'unpaid',
+          status: data.payment_status || data.flags?.payment_status || 'paid',
+          method: data.payment_method || data.flags?.payment_method || 'cash',
+          settlement_ref: data.payment_remarks || data.flags?.payment_remarks || '',
           created_at: new Date()
         }
       }).catch(err => console.warn("Auto invoice generation skipped:", err));
+      
+      await updateStudentFlags(student.id);
     }
   }
 
@@ -1530,6 +1515,27 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
        if (match) classesTotal = parseInt(match[1], 10);
     }
 
+    // Arrears calculations
+    let arrearsAmount = 0;
+    const unbilledPkgs = await prisma.package.findMany({
+      where: { student_id: student.id, kind: 'unbilled' }
+    });
+    const totalArrearsClasses = unbilledPkgs.reduce((sum, p) => sum + Math.abs(p.classes_remaining), 0);
+    if (totalArrearsClasses > 0) {
+      let studentRate = 100;
+      const lastPkg = await prisma.package.findFirst({
+        where: { student_id: student.id, NOT: { kind: { in: ['unbilled', 'settled'] } } },
+        orderBy: { start_date: 'desc' }
+      });
+      if (lastPkg) {
+        const lastInvoice = await prisma.invoice.findFirst({ where: { package_id: lastPkg.id } });
+        if (lastInvoice && lastInvoice.amount) {
+          studentRate = Math.round(Number(lastInvoice.amount) / lastPkg.classes_total);
+        }
+      }
+      arrearsAmount = totalArrearsClasses * studentRate;
+    }
+
     const pkg = await prisma.package.create({
       data: {
         student_id: student.id,
@@ -1543,9 +1549,9 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
       }
     });
 
-    // Auto-generate invoice for billing ledger
+    // Auto-generate invoice for billing ledger (includes arrears)
     const tierPrice = Number(tier.price) || 1000;
-    const finalAmount = Math.round(tierPrice * (1 - discount / 100));
+    const finalAmount = Math.round(tierPrice * (1 - discount / 100)) + arrearsAmount;
     await prisma.invoice.create({
       data: {
         student_id: student.id,
@@ -1555,6 +1561,20 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
         created_at: new Date()
       }
     }).catch(err => console.warn("Auto invoice generation skipped:", err));
+
+    // Transition unbilled packages to settled status
+    for (const unbilled of unbilledPkgs) {
+      if (unbilled.classes_remaining < 0) {
+        await prisma.package.update({
+          where: { id: unbilled.id },
+          data: {
+            kind: 'settled',
+            classes_total: Math.abs(unbilled.classes_remaining),
+            classes_remaining: 0
+          }
+        });
+      }
+    }
 
     await updateStudentFlags(student.id);
 
@@ -1718,6 +1738,9 @@ export async function deleteAttendanceDB(id: string) {
     where: { id }
   });
   await logAuditDB(session.user.id, 'DELETE_ATTENDANCE_REGISTER', 'attendance', before, null);
+  if (before?.student_id) {
+    await updateStudentFlags(before.student_id);
+  }
   return deleted;
 }
 
@@ -1732,6 +1755,9 @@ export async function updateAttendanceDB(id: string, status: string) {
     data: { status }
   });
   await logAuditDB(session.user.id, 'UPDATE_ATTENDANCE_REGISTER', 'attendance', before, updated);
+  if (updated?.student_id) {
+    await updateStudentFlags(updated.student_id);
+  }
   return updated;
 }
 

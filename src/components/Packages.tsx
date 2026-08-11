@@ -161,12 +161,44 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
   };
 
   const handleUpdateAllocation = (studentId: string, field: 'classes' | 'amount', val: number) => {
-    setSiblingAllocations(prev => prev.map(item => {
-      if (item.studentId === studentId) {
-        return { ...item, [field]: Math.max(0, val) };
+    setSiblingAllocations(prev => {
+      // 1. Calculate updated item
+      const nextAllocations = prev.map(item => {
+        if (item.studentId === studentId) {
+          return { ...item, [field]: Math.max(0, val) };
+        }
+        return item;
+      });
+
+      // 2. If classes was updated, recalculate the amounts proportionally
+      if (field === 'classes') {
+        const totalCls = nextAllocations.reduce((sum, a) => sum + a.classes, 0);
+        const totalAmount = Math.round(calculatedDetails.total);
+
+        if (totalCls > 0) {
+          let runningAmountSum = 0;
+          return nextAllocations.map((alloc, idx) => {
+            // Last element gets the remainder to avoid rounding loss
+            if (idx === nextAllocations.length - 1) {
+              return { ...alloc, amount: totalAmount - runningAmountSum };
+            }
+            const proportionalAmount = Math.round(totalAmount * (alloc.classes / totalCls));
+            runningAmountSum += proportionalAmount;
+            return { ...alloc, amount: proportionalAmount };
+          });
+        } else {
+          // If all classes are 0, split the amount evenly
+          const baseA = Math.floor(totalAmount / nextAllocations.length);
+          const remA = totalAmount % nextAllocations.length;
+          return nextAllocations.map((alloc, idx) => ({
+            ...alloc,
+            amount: baseA + (idx === 0 ? remA : 0)
+          }));
+        }
       }
-      return item;
-    }));
+
+      return nextAllocations;
+    });
   };
 
   const totalAllocatedClasses = siblingAllocations.reduce((sum, a) => sum + Number(a.classes || 0), 0);

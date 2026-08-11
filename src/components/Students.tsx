@@ -216,7 +216,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
         .filter(p => p.student_id === s.id && !p.frozen)
         .sort((a, b) => new Date(a.start_date || '').getTime() - new Date(b.start_date || '').getTime());
       const classesLeft  = pkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
-      const pkgSize      = pkgs.reduce((sum, p) => sum + p.classes_total, 0);
+      const pkgSize      = pkgs.reduce((sum, p) => sum + p.classes_total + (p.bonus_classes || 0), 0);
       const completed    = Math.max(0, pkgSize - classesLeft);
 
       // Days since last class
@@ -251,7 +251,8 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
 
       // Segment & Heat mapping using domain rules
       const statusInfo   = computeStudentStatus(s, packages, attendance, invoices);
-      const engagement   = daysSince <= 14 ? 'ENGAGED'
+      const engagement   = daysSince === 999 ? 'NEW'
+        : daysSince <= 14 ? 'ENGAGED'
         : daysSince <= 30 ? 'SLIPPING'
         : daysSince <= 60 ? 'COLD'
         : 'DORMANT';
@@ -353,6 +354,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   );
 
   const engagementBadge = (e: string) => {
+    if (e === 'NEW')      return 'bg-violet-100 text-violet-700 border-violet-200';
     if (e === 'ENGAGED')  return 'bg-emerald-100 text-emerald-700 border-emerald-200';
     if (e === 'SLIPPING') return 'bg-amber-100 text-amber-700 border-amber-200';
     if (e === 'COLD')     return 'bg-slate-100 text-slate-500 border-slate-200';
@@ -579,6 +581,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
           className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
         >
           <option>All urgency</option>
+          <option value="NEW">NEW</option>
           <option value="HOT">HOT</option>
           <option value="WARM">WARM</option>
           <option value="COLD">COLD</option>
@@ -688,6 +691,32 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
                 ))
               )}
             </tbody>
+            {filtered.length > 0 && (
+              <tfoot className="border-t-2 border-line bg-canvas font-bold text-ink">
+                <tr>
+                  <td className="py-3 px-4 font-mono text-muted-custom">Total</td>
+                  <td className="py-3 px-4">—</td>
+                  <td className="py-3 px-4 font-mono text-muted-custom">—</td>
+                  <td className="py-3 px-4 text-muted-custom">—</td>
+                  <td className="py-3 px-4 text-muted-custom">—</td>
+                  <td className="py-3 px-4 text-right font-mono font-bold text-ink">
+                    {filtered.reduce((sum, row) => sum + row.classesLeft, 0)}
+                  </td>
+                  <td className="py-3 px-4 text-right font-mono text-ink">
+                    {filtered.reduce((sum, row) => sum + row.pkgSize, 0)}
+                  </td>
+                  <td className="py-3 px-4 text-right font-mono font-bold text-ink">
+                    {filtered.reduce((sum, row) => sum + row.cls30d, 0)}
+                  </td>
+                  <td className="py-3 px-4 text-right font-mono text-ink">
+                    {filtered.reduce((sum, row) => sum + row.cls90d, 0)}
+                  </td>
+                  <td className="py-3 px-4 text-right font-mono text-ink">—</td>
+                  <td className="py-3 px-4">—</td>
+                  <td className="py-3 px-4">—</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </div>

@@ -172,6 +172,8 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
       const statusInfo = computeStudentStatus(s, packages, [], invoices);
       const overdueSegment = statusInfo.segment;
 
+      const hasUnpaidInvoice = invoices.some(inv => inv.student_id === s.id && inv.status === 'unpaid');
+
       return {
         id: s.id,
         studentName: s.name,
@@ -186,6 +188,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
         segment,
         engagement,
         overdueSegment,
+        hasUnpaidInvoice,
       };
     });
   }, [students, packages, coaches, centres, invoices]);
@@ -782,9 +785,16 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
                   >
                     <td className="py-3 px-4 font-mono text-muted-custom whitespace-nowrap">{idx + 1}</td>
                     <td className="py-3 px-4 font-semibold text-ink whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      <a href={`/students?id=${row.id}`} className="text-forest hover:underline font-bold">
-                        {row.studentName}
-                      </a>
+                      <div className="flex items-center gap-2">
+                        <a href={`/students?id=${row.id}`} className="text-forest hover:underline font-bold">
+                          {row.studentName}
+                        </a>
+                        {row.hasUnpaidInvoice && (
+                          <span className="bg-red-50 text-red-600 border border-red-200 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider scale-90">
+                            Unpaid
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* ID */}

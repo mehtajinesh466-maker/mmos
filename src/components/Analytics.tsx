@@ -318,8 +318,16 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
     const paidInvs = invoices.filter(i => i.status === 'paid' && filteredSts.some(s => s.id === i.student_id));
     const collected = paidInvs.reduce((sum, i) => sum + Number(i.amount), 0);
 
-    const classes30 = attendance.filter(a => a.status === 'present' && filteredSts.some(s => s.id === a.student_id) && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
-    const classes90 = attendance.filter(a => a.status === 'present' && filteredSts.some(s => s.id === a.student_id) && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 90)).length;
+    let classes30 = 0;
+    let classes90 = 0;
+    attendance.forEach(a => {
+      if (a.status !== 'present') return;
+      if (!filteredSts.some(s => s.id === a.student_id)) return;
+      const diff = Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000);
+      const dur = a.duration ?? 2;
+      if (diff >= -1 && diff <= 30) classes30 += dur;
+      if (diff >= -1 && diff <= 90) classes90 += dur;
+    });
 
     const avgRate = filteredPkgs.length > 0
       ? Math.round(filteredPkgs.reduce((sum, p) => sum + getPackagePrice(p) / (p.classes_total || 8), 0) / filteredPkgs.length)
@@ -883,8 +891,26 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
   const totalCollectedK = (totalCollected / 1000).toFixed(0);
 
   const lifetimePaid = totalCollected;
-  const totalClasses30d = attendance.filter(a => a.status === 'present' && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
-  const totalClasses90d = attendance.filter(a => a.status === 'present' && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 90)).length;
+  
+  const totalClasses30d = (() => {
+    let sum = 0;
+    attendance.forEach(a => {
+      if (a.status !== 'present') return;
+      const diff = Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000);
+      if (diff >= -1 && diff <= 30) sum += (a.duration ?? 2);
+    });
+    return sum;
+  })();
+
+  const totalClasses90d = (() => {
+    let sum = 0;
+    attendance.forEach(a => {
+      if (a.status !== 'present') return;
+      const diff = Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000);
+      if (diff >= -1 && diff <= 90) sum += (a.duration ?? 2);
+    });
+    return sum;
+  })();
   const avgRatePerClass = packages.length > 0
     ? Math.round(packages.reduce((sum, p) => sum + getPackagePrice(p) / (p.classes_total || 8), 0) / packages.length)
     : 100;
@@ -914,7 +940,17 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
   const bayStudents = students.filter(s => s.centre_id === bayCentreId);
   const activeBay = bayStudents.filter(s => s.status === 'active').length;
   const activeRateBay = bayStudents.length > 0 ? Math.round((activeBay / bayStudents.length) * 100) : 0;
-  const bayClasses30d = attendance.filter(a => a.status === 'present' && bayStudents.some(s => s.id === a.student_id) && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
+  
+  const bayClasses30d = (() => {
+    let sum = 0;
+    attendance.forEach(a => {
+      if (a.status !== 'present') return;
+      if (!bayStudents.some(s => s.id === a.student_id)) return;
+      const diff = Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000);
+      if (diff >= -1 && diff <= 30) sum += (a.duration ?? 2);
+    });
+    return sum;
+  })();
   const bayRunrate = getRunRateForStudents(bayStudents);
   const bayUnbilled = bayStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
   const newBayThisMonth = bayStudents.filter(s => s.join_date && new Date(s.join_date).toISOString().slice(0, 7) === currentMonthStr).length;
@@ -924,7 +960,17 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
   const jltStudents = students.filter(s => s.centre_id === jltCentreId);
   const activeJlt = jltStudents.filter(s => s.status === 'active').length;
   const activeRateJlt = jltStudents.length > 0 ? Math.round((activeJlt / jltStudents.length) * 100) : 0;
-  const jltClasses30d = attendance.filter(a => a.status === 'present' && jltStudents.some(s => s.id === a.student_id) && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
+  
+  const jltClasses30d = (() => {
+    let sum = 0;
+    attendance.forEach(a => {
+      if (a.status !== 'present') return;
+      if (!jltStudents.some(s => s.id === a.student_id)) return;
+      const diff = Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000);
+      if (diff >= -1 && diff <= 30) sum += (a.duration ?? 2);
+    });
+    return sum;
+  })();
   const jltRunrate = getRunRateForStudents(jltStudents);
   const jltUnbilled = jltStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
   const newJltThisMonth = jltStudents.filter(s => s.join_date && new Date(s.join_date).toISOString().slice(0, 7) === currentMonthStr).length;
@@ -932,7 +978,12 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
 
   const activeAdvocates = useMemo(() => {
     return students.map(s => {
-      const classes30d = attendance.filter(a => a.student_id === s.id && a.status === 'present' && (Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000) <= 30)).length;
+      let classes30d = 0;
+      attendance.forEach(a => {
+        if (a.student_id !== s.id || a.status !== 'present') return;
+        const diff = Math.floor((new Date().getTime() - new Date(a.date).getTime()) / 86400000);
+        if (diff >= -1 && diff <= 30) classes30d += (a.duration ?? 2);
+      });
       
       const stPkgs = packages.filter(p => p.student_id === s.id);
       const totalRemaining = stPkgs.reduce((sum, p) => sum + p.classes_remaining, 0);

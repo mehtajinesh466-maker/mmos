@@ -25,3 +25,12 @@ dist-ssr
 .next
 .env
 .env.local
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+e2e/
+playwright.config.ts
+scratch/

@@ -233,16 +233,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
       : 999;
 
     // Classes in last 30 days
-    const cls30d = studentAtts.filter(a => {
+    let cls30d = 0;
+    let cls90d = 0;
+    studentAtts.forEach(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-      return diff >= -1 && diff <= 30;
-    }).length;
-
-    // Classes in last 90 days
-    const cls90d = studentAtts.filter(a => {
-      const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-      return diff >= -1 && diff <= 90;
-    }).length;
+      const dur = a.duration ?? 2;
+      if (diff >= -1 && diff <= 30) cls30d += dur;
+      if (diff >= -1 && diff <= 90) cls90d += dur;
+    });
 
     // Lifetime paid
     const lifetimePaid = studentInvs
@@ -257,7 +255,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     const owedVal = (activeStudent.flags as any)?.unpaid_value || 0;
 
     // Engagement status
-    const engagement = daysSince <= 14 ? 'HEALTHY'
+    const hasAttended = attendance.some(a => a.student_id === activeStudent.id && (a.status === 'present' || a.status === 'makeup'));
+    const engagement = !hasAttended && activeStudent.last_attended === null ? 'NEW'
+      : daysSince <= 14 ? 'HEALTHY'
       : daysSince <= 30 ? 'SLIPPING'
       : 'COLD';
 
@@ -468,7 +468,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
       const firstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '-');
 
       let ended = '-';
-      if (pkg.classes_remaining === 0) {
+      if (pkg.ended_at) {
+        ended = new Date(pkg.ended_at).toISOString().split('T')[0];
+      } else if (pkg.classes_remaining === 0) {
         if (pkgAtts.length > 0) {
           ended = new Date(pkgAtts[pkgAtts.length - 1].date).toISOString().split('T')[0];
         } else if (pkg.expiry_date) {
@@ -704,7 +706,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
               <h2 className="text-2xl font-bold font-display text-ink mt-1.5">
                 {studentMetrics.daysSince}
               </h2>
-              <p className="text-[10px] text-muted-custom mt-1">last: {activeStudent.last_attended ? new Date(activeStudent.last_attended).toISOString().split('T')[0] : '2026-06-25'}</p>
+              <p className="text-[10px] text-muted-custom mt-1">last: {activeStudent.last_attended ? new Date(activeStudent.last_attended).toISOString().split('T')[0] : '—'}</p>
             </div>
 
             {currentUser.role !== 'coach' && (
