@@ -116,7 +116,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
       // Auto-generated BAY/JLT style ID
       const prefix = (centre?.name || 'BAY').slice(0, 3).toUpperCase();
       const numPart = s.fide_id || s.id.replace(/\D/g, '').slice(0, 3) || '000';
-      const displayId = s.fide_id ? s.fide_id : `${prefix}-${numPart}`;
+      const displayId = s.flags?.custom_student_id || `${prefix}-${numPart}`;
 
       // Overdue Classes and Value from flags
       const overdueClasses = (s.flags as any)?.unpaid_classes || 0;
@@ -142,7 +142,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
       if (totalPaid === 0 && studentPkgs.length > 0) {
         studentPkgs.forEach(pkg => {
           const pkgRate = getPackageRate(pkg, invoices, tiers);
-          const completed = pkg.classes_total - pkg.classes_remaining;
+          const completed = (pkg.classes_total + (pkg.bonus_classes || 0)) - pkg.classes_remaining;
           totalPaid += completed * pkgRate;
         });
       }
@@ -310,7 +310,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
       if (totalPaid === 0 && studentPkgs.length > 0) {
         studentPkgs.forEach(pkg => {
           const pkgRate = getPackageRate(pkg, allInvoices, tiers);
-          const completed = pkg.classes_total - pkg.classes_remaining;
+          const completed = (pkg.classes_total + (pkg.bonus_classes || 0)) - pkg.classes_remaining;
           totalPaid += completed * pkgRate;
         });
       }
@@ -541,7 +541,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
           'Price (AED)': netPrice,
           'Price / Class': pricePerClass,
           'Date of Payment': pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '—',
-          'Classes Used': pkg.classes_total - pkg.classes_remaining,
+          'Classes Used': (pkg.classes_total + (pkg.bonus_classes || 0)) - pkg.classes_remaining,
           'Package Balance': pkg.classes_remaining
         });
       });

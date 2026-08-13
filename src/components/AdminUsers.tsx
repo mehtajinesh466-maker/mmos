@@ -7,7 +7,7 @@ import {
   addCoachDB, updateCoachDB, reassignCoachDB, deleteCoachDB,
   saveCentreDB, updateCentreStatusDB, deleteCentreDB,
   updateUserCredentialsDB, registerUser, backfillParentUsersDB,
-  syncDatabaseToClient
+  syncDatabaseToClient, purgeTestStudents
 } from '../app/actions';
 
 interface AdminUsersProps {
@@ -884,6 +884,42 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
             Deduct 2 Class Credits (Charge full 2 hours)
           </label>
         </div>
+      </div>
+
+      {/* Danger Zone: Purge Test Data */}
+      <div className="bg-surface border border-red-200 rounded-2xl p-6 shadow-sm mt-6 space-y-4 max-w-4xl">
+        <div className="flex items-center gap-2">
+          <span className="text-sm">⚠️</span>
+          <h3 className="font-bold text-sm text-red-700 uppercase tracking-wider font-display">Danger Zone — Purge Test Data</h3>
+        </div>
+        <p className="text-[11px] text-muted-custom">
+          Permanently deletes all students whose names start with <b>TEST_MMOS_</b>, <b>ZZTEST</b>, or <b>QA0813</b>, along with all their associated packages, attendance records, invoices, and enrollments. This action cannot be undone.
+        </p>
+        <button
+          id="btn-purge-test-students"
+          onClick={async () => {
+            if (!confirm('Are you sure? This will permanently delete all TEST_MMOS_, ZZTEST, and QA0813 students and all their data.')) return;
+            setIsSaving(true);
+            setStatus('Purging test students...');
+            try {
+              const result = await purgeTestStudents();
+              const freshData = await syncDatabaseToClient();
+              db.syncFromNeon(freshData);
+              setStatus(`✓ Purged ${result.purgedCount} test student(s): ${result.purgedNames.join(', ') || 'none found'}`);
+            } catch (err: any) {
+              setStatus('❌ Purge failed: ' + err.message);
+            } finally {
+              setIsSaving(false);
+            }
+          }}
+          disabled={isSaving}
+          className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all disabled:opacity-50"
+        >
+          🗑 Purge Test Students
+        </button>
+        {status && (
+          <p className={`text-xs font-semibold mt-1 ${status.startsWith('❌') ? 'text-red-600' : 'text-forest'}`}>{status}</p>
+        )}
       </div>
     </div>
   );

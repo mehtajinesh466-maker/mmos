@@ -109,10 +109,11 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
     const studentInvs = invoices.filter(i => i.student_id === activeStudent.id);
 
     const classesPaid = studentPkgs.reduce((sum, p) => sum + p.classes_total, 0);
-    const classesUsed = studentPkgs.reduce((sum, p) => sum + (p.classes_total - p.classes_remaining), 0);
+    const classesUsed = studentPkgs.reduce((sum, p) => sum + ((p.classes_total + (p.bonus_classes || 0)) - p.classes_remaining), 0);
     const balance = studentPkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
 
-    const utilisation = classesPaid > 0 ? Math.round((classesUsed / classesPaid) * 100) : 0;
+    const totalEntitlement = studentPkgs.reduce((sum, p) => sum + p.classes_total + (p.bonus_classes || 0), 0);
+    const utilisation = totalEntitlement > 0 ? Math.round((classesUsed / totalEntitlement) * 100) : 0;
     const owedVal = (activeStudent.flags as any)?.unpaid_value || 0;
 
     const daysSince = activeStudent.last_attended
@@ -202,7 +203,14 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
   const enrichedPackages = useMemo(() => {
     if (!activeStudent) return [];
     
-    const studentPkgs = packages.filter(p => p.student_id === activeStudent.id);
+    const studentPkgs = packages
+      .filter(p => p.student_id === activeStudent.id)
+      .sort((a, b) => {
+        const dateA = a.start_date ? new Date(a.start_date).getTime() : 0;
+        const dateB = b.start_date ? new Date(b.start_date).getTime() : 0;
+        if (dateA !== dateB) return dateA - dateB;
+        return a.id.localeCompare(b.id);
+      });
     const studentAtts = attendance
       .filter(a => a.student_id === activeStudent.id && a.status === 'present')
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -211,7 +219,7 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
 
     return studentPkgs.map((pkg, idx) => {
       const classesPaid = pkg.classes_total;
-      const used = pkg.classes_total - pkg.classes_remaining;
+      const used = (pkg.classes_total + (pkg.bonus_classes || 0)) - pkg.classes_remaining;
       const balance = pkg.classes_remaining;
 
       const pkgInvoice = invoices.find(inv => inv.package_id === pkg.id);
@@ -226,7 +234,9 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
 
       let ended = '-';
       if (pkg.classes_remaining === 0) {
-        if (pkgAtts.length > 0) {
+        if (pkg.ended_at) {
+          ended = new Date(pkg.ended_at).toISOString().split('T')[0];
+        } else if (pkgAtts.length > 0) {
           ended = new Date(pkgAtts[pkgAtts.length - 1].date).toISOString().split('T')[0];
         } else if (pkg.expiry_date) {
           ended = new Date(pkg.expiry_date).toISOString().split('T')[0];

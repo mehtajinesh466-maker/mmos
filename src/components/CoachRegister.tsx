@@ -107,17 +107,17 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
         ? Math.max(0, Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000))
         : 999;
 
-      // Calculate 30D and 90D attendance metrics from real records
-      const studentAtts = attendance.filter(a => a.student_id === s.id && a.status === 'present');
+      // Calculate 30D and 90D attendance metrics from real records (counting rows/sessions, status in ['present', 'absent', 'makeup'])
+      const studentAtts = attendance.filter(a => a.student_id === s.id && ['present', 'absent', 'makeup'].includes(a.status));
       let cls30d = 0;
       let cls90d = 0;
 
       studentAtts.forEach(a => {
         const attDate = new Date(a.date);
         const diffDays = Math.floor((today.getTime() - attDate.getTime()) / 86400000);
-        const dur = a.duration ?? 2;
-        if (diffDays >= -1 && diffDays <= 30) cls30d += dur;
-        if (diffDays >= -1 && diffDays <= 90) cls90d += dur;
+        const amt = typeof a.duration === 'number' ? a.duration : 1;
+        if (diffDays >= -1 && diffDays <= 30) cls30d += amt;
+        if (diffDays >= -1 && diffDays <= 90) cls90d += amt;
       });
 
       // Overdue value and classes
@@ -137,7 +137,10 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
       }
 
       // Engagement status
-      const engagement = daysSince <= 14 ? 'ENGAGED'
+      const engagement = s.status === 'inactive' ? 'COLD'
+        : s.status === 'departed' ? 'DORMANT'
+        : daysSince === 999 ? 'NEW'
+        : daysSince <= 14 ? 'ENGAGED'
         : daysSince <= 30 ? 'SLIPPING'
         : daysSince <= 60 ? 'COLD'
         : 'DORMANT';
@@ -182,18 +185,10 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
       const revenue = coachStudents.reduce((sum, s) => sum + (s.cls30d * s.rate), 0);
       const unbilled = coachStudents.reduce((sum, s) => sum + s.overdueValue, 0);
 
-      // Check if this coach has a valid centre name (e.g. Brett is JLT, James is Bay Avenue)
-      let customCentre = centreName;
-      if (c.name.toLowerCase().includes('james') || c.name.toLowerCase().includes('john') || c.name.toLowerCase().includes('reggie') || c.name.toLowerCase().includes('mahri')) {
-        customCentre = 'Bay Avenue';
-      } else if (c.name.toLowerCase().includes('brett') || c.name.toLowerCase().includes('brylle')) {
-        customCentre = 'JLT';
-      }
-
       list.push({
         id: c.id,
         coachName: c.name,
-        centreName: customCentre,
+        centreName: centreName,
         centre_ids: (c as any).centre_ids || [],
         studentsCount,
         engagedCount,
@@ -225,7 +220,7 @@ export const CoachRegister: React.FC<CoachRegisterProps> = ({ currentUser, activ
     list.push({
       id: 'unassigned',
       coachName: 'UNASSIGNED',
-      centreName: 'Bay Avenue', // default centre
+      centreName: '—',
       studentsCount,
       engagedCount,
       engagementPct,

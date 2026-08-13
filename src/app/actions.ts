@@ -368,6 +368,83 @@ export async function syncDatabaseToClient() {
   const role = session.user.role;
   const userCentreId = session.user.centre_id;
 
+  // Database Self-Healing Migration for Student Custom IDs
+  try {
+    const allSts = await prisma.student.findMany({
+      include: { centre: true }
+    });
+
+    const usedIds = new Set<string>();
+    const studentsToUpdate = [];
+
+    // First pass: collect all existing non-colliding custom IDs from flags
+    for (const s of allSts) {
+      const flags = typeof s.flags === 'object' && s.flags ? (s.flags as any) : {};
+      if (flags.custom_student_id) {
+        usedIds.add(flags.custom_student_id);
+      }
+    }
+
+    // Second pass: assign custom IDs to students who don't have them, or resolve duplicates
+    for (const s of allSts) {
+      const flags = typeof s.flags === 'object' && s.flags ? { ...(s.flags as any) } : {};
+      let idToAssign = flags.custom_student_id;
+      
+      const prefix = (s.centre?.name || 'BAY').slice(0, 3).toUpperCase();
+      let hasChange = false;
+
+      // If missing, or if it is a duplicate ID assigned to more than 1 student in database
+      const isDuplicate = idToAssign && [...allSts].filter(st => {
+        const otherFlags = typeof st.flags === 'object' && st.flags ? (st.flags as any) : {};
+        return otherFlags.custom_student_id === idToAssign;
+      }).length > 1;
+
+      if (!idToAssign || isDuplicate) {
+        // Fallback to fide_id if it's a real FIDE rating ID and not MM-xxxx
+        if (s.fide_id && !s.fide_id.startsWith('MM-')) {
+          idToAssign = s.fide_id;
+        } else {
+          // If it was a duplicate, remove it from usedIds so we can generate a new one
+          if (idToAssign) usedIds.delete(idToAssign);
+          const numPart = s.id.replace(/\D/g, '').slice(0, 3) || '000';
+          let candidate = `${prefix}-${numPart}`;
+          
+          // Resolve collisions immediately
+          if (usedIds.has(candidate)) {
+            let num = parseInt(numPart, 10) || 100;
+            while (usedIds.has(`${prefix}-${num}`)) {
+              num++;
+            }
+            candidate = `${prefix}-${num}`;
+          }
+          idToAssign = candidate;
+        }
+        
+        flags.custom_student_id = idToAssign;
+        usedIds.add(idToAssign);
+        hasChange = true;
+      }
+
+      if (hasChange) {
+        studentsToUpdate.push({ id: s.id, flags });
+      }
+    }
+
+    // Save updates to database
+    if (studentsToUpdate.length > 0) {
+      await Promise.all(
+        studentsToUpdate.map(item =>
+          prisma.student.update({
+            where: { id: item.id },
+            data: { flags: item.flags }
+          })
+        )
+      );
+    }
+  } catch (migErr) {
+    console.error("Custom ID self-healing migration failed:", migErr);
+  }
+
   if (role === 'owner') {
     const [
       centres,
@@ -852,8 +929,7 @@ export async function updateStudentFlags(studentId: string, pkgId?: string, upda
   const paidPkgs = allPkgs.filter(p => p.kind !== 'unbilled' && p.kind !== 'settled');
   const unbilledPkgs = allPkgs.filter(p => p.kind === 'unbilled');
 
-  // Sort paidPkgs by start_date asc, and break ties using lifecycle kind precedence:
-  // 'new' -> 'settled' -> 'renewal' -> 'tournament'
+  // Sort paidPkgs stably by start_date asc, then by kind order, and break ties with ID localeCompare to ensure stability.
   const kindOrder: Record<string, number> = { 'new': 1, 'settled': 2, 'renewal': 3, 'tournament': 4 };
   paidPkgs.sort((a, b) => {
     const dateA = a.start_date ? new Date(a.start_date).getTime() : 0;
@@ -863,7 +939,10 @@ export async function updateStudentFlags(studentId: string, pkgId?: string, upda
     }
     const orderA = kindOrder[a.kind || ''] || 99;
     const orderB = kindOrder[b.kind || ''] || 99;
-    return orderA - orderB;
+    if (orderA !== orderB) {
+      return orderA - orderB;
+    }
+    return a.id.localeCompare(b.id);
   });
 
   // Reset paid packages to their full initial entitlement
@@ -884,6 +963,7 @@ export async function updateStudentFlags(studentId: string, pkgId?: string, upda
   // Chronologically consume from packages:
   // For each attendance record, find the oldest eligible package with classes remaining and deduct from it.
   let primaryDeficit = 0;
+  const packageClosingDates: Record<string, Date> = {};
 
   for (const att of siblingAtts) {
     let amountToDeduct = att.duration || 1;
@@ -903,6 +983,9 @@ export async function updateStudentFlags(studentId: string, pkgId?: string, upda
         const deduct = Math.min(p.classes_remaining, amountToDeduct);
         p.classes_remaining -= deduct;
         amountToDeduct -= deduct;
+        if (p.classes_remaining === 0) {
+          packageClosingDates[p.id] = new Date(att.date);
+        }
       }
     }
 
@@ -913,22 +996,18 @@ export async function updateStudentFlags(studentId: string, pkgId?: string, upda
   }
 
   // 4. Update the paid packages in the database
-  // If a package hits exactly 0, flip it to 'completed' and stamp ended_at
-  // Note: ended_at is set via raw SQL because the Prisma client may not have been regenerated yet.
-  const now = new Date();
+  // We keep the original package kind (New/Renewal/Tournament) and only update classes_remaining.
+  // We dynamically stamp ended_at to the closing class date if classes_remaining is 0, and clear it to null if balance becomes > 0.
   for (const p of paidPkgs) {
-    const isNowComplete = p.classes_remaining === 0 && p.kind !== 'completed';
+    const shouldBeEnded = p.classes_remaining === 0;
+    const closingDate = packageClosingDates[p.id] || new Date();
     await prisma.package.update({
       where: { id: p.id },
       data: {
         classes_remaining: p.classes_remaining,
-        ...(isNowComplete ? { kind: 'completed' } : {})
+        ended_at: shouldBeEnded ? (p.ended_at || closingDate) : null
       }
     });
-    // Set ended_at via raw SQL (column exists in DB; client may be stale)
-    if (isNowComplete) {
-      await prisma.$executeRaw`UPDATE packages SET ended_at = ${now} WHERE id = ${p.id}::uuid`;
-    }
   }
 
   // 5. Handle unbilled overflow for the primary student
@@ -1536,6 +1615,14 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
       arrearsAmount = totalArrearsClasses * studentRate;
     }
 
+    // Reactivate student if they were inactive or departed
+    if (student.status !== 'active') {
+      await prisma.student.update({
+        where: { id: student.id },
+        data: { status: 'active' }
+      });
+    }
+
     const pkg = await prisma.package.create({
       data: {
         student_id: student.id,
@@ -1604,6 +1691,14 @@ export async function renewSiblingPackage(
         where: { id: alloc.studentId }
       });
       if (!student) continue;
+
+      // Reactivate student if they were inactive or departed
+      if (student.status !== 'active') {
+        await prisma.student.update({
+          where: { id: student.id },
+          data: { status: 'active' }
+        });
+      }
 
       const pkg = await prisma.package.create({
         data: {
@@ -2184,3 +2279,43 @@ export async function generateOnlineBackup() {
   return JSON.parse(JSON.stringify(backupPayload));
 }
 
+export async function purgeTestStudents() {
+  const session = await verifySession();
+  if (session.user.role !== 'owner') {
+    throw new Error("Unauthorized");
+  }
+
+  // Find all test students whose names start with known test prefixes
+  const testStudents = await prisma.student.findMany({
+    where: {
+      OR: [
+        { name: { startsWith: 'TEST_MMOS_', mode: 'insensitive' } },
+        { name: { startsWith: 'ZZTEST', mode: 'insensitive' } },
+        { name: { startsWith: 'QA0813', mode: 'insensitive' } },
+      ]
+    },
+    select: { id: true, name: true }
+  });
+
+  let purgedCount = 0;
+  for (const s of testStudents) {
+    await prisma.$transaction([
+      prisma.attendance.deleteMany({ where: { student_id: s.id } }),
+      prisma.enrollment.deleteMany({ where: { student_id: s.id } }),
+      prisma.fideRating.deleteMany({ where: { student_id: s.id } }),
+      prisma.invoice.deleteMany({ where: { student_id: s.id } }),
+      prisma.notification.deleteMany({ where: { student_id: s.id } }),
+      prisma.package.deleteMany({ where: { student_id: s.id } }),
+      prisma.progressLog.deleteMany({ where: { student_id: s.id } }),
+      prisma.report.deleteMany({ where: { student_id: s.id } }),
+      prisma.studentSkill.deleteMany({ where: { student_id: s.id } }),
+      prisma.tournamentReport.deleteMany({ where: { student_id: s.id } }),
+      prisma.student.delete({ where: { id: s.id } }),
+    ]);
+    purgedCount++;
+  }
+
+  await logAuditDB(session.user.id, 'PURGE_TEST_STUDENTS', 'system', null, { purgedCount, students: testStudents.map(s => s.name) });
+
+  return { success: true, purgedCount, purgedNames: testStudents.map(s => s.name) };
+}

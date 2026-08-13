@@ -1246,7 +1246,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           coachName: coach ? coach.name.split(' ')[0].toUpperCase() : 'UNASSIGNED',
           pkgLabel,
           paid: p.classes_total,
-          used: p.classes_total - p.classes_remaining,
+          used: (p.classes_total + (p.bonus_classes || 0)) - p.classes_remaining,
           left: p.classes_remaining,
           pctLeft,
           is20PctTrigger

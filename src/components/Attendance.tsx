@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/db';
 import type { User, Student, Package, ScheduleSlot, Attendance as AttendanceType, Coach } from '../lib/db';
-import { logAttendance, syncDatabaseToClient, toggleSummerCampSlot } from '../app/actions';
+import { logAttendance, syncDatabaseToClient, toggleSummerCampSlot, enrollStudent, unenrollStudent } from '../app/actions';
 
 interface AttendanceProps {
   currentUser: User;
@@ -42,6 +42,10 @@ export const Attendance: React.FC<AttendanceProps> = ({
   const [slots, setSlots] = useState<ScheduleSlot[]>([]);
   const [centres, setCentres] = useState<any[]>([]);
   const [attendance, setAttendance] = useState<AttendanceType[]>([]);
+  const [enrollments, setEnrollments] = useState<any[]>([]);
+  const [rosterModalSlot, setRosterModalSlot] = useState<ScheduleSlot | null>(null);
+  const [rosterSearch, setRosterSearch] = useState('');
+  const [rosterUpdating, setRosterUpdating] = useState(false);
 
   const loadData = () => {
     setStudents(db.getStudents());
@@ -50,6 +54,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
     setSlots(db.getScheduleSlots());
     setCentres(db.getCentres());
     setAttendance(db.getAttendance());
+    setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
 
     const coas = db.getCoaches();
     if (coas.length > 0 && !selectedCoachId) {
@@ -202,12 +207,17 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
   // Roster logic per slot: uses explicit enrollments if present, else level filter
   const getSlotRoster = (slot: ScheduleSlot) => {
-    const enrollments = db.getEnrollments ? db.getEnrollments() : [];
     const slotEnrollments = enrollments.filter(e => e.slot_id === slot.id);
     if (slotEnrollments.length > 0) {
       const enrolledIds = new Set(slotEnrollments.map(e => e.student_id));
       return students.filter(s => enrolledIds.has(s.id));
     }
+    
+    // Check if slot was explicitly cleared/marked empty
+    if (typeof window !== 'undefined' && localStorage.getItem(`explicit_empty_slot_${slot.id}`) === 'true') {
+      return [];
+    }
+
     return students.filter(s => 
       s.centre_id === slot.centre_id && 
       s.level === slot.level && 
@@ -216,12 +226,106 @@ export const Attendance: React.FC<AttendanceProps> = ({
     );
   };
 
+  const handleClearRoster = async () => {
+    if (!rosterModalSlot) return;
+    setRosterUpdating(true);
+    try {
+      // 1. Delete all existing enrollments for this slot
+      const slotEnrollments = enrollments.filter(e => e.slot_id === rosterModalSlot.id);
+      const promises = [];
+      for (const enr of slotEnrollments) {
+        db.removeEnrollment(enr.student_id, rosterModalSlot.id);
+        promises.push(unenrollStudent(enr.student_id, rosterModalSlot.id));
+      }
+      await Promise.all(promises);
+
+      // 2. Set localStorage flag to keep the slot explicitly empty
+      localStorage.setItem(`explicit_empty_slot_${rosterModalSlot.id}`, 'true');
+
+      const freshData = await syncDatabaseToClient();
+      db.syncFromNeon(freshData);
+      setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
+    } catch (err: any) {
+      alert("Failed to clear roster: " + err.message);
+    } finally {
+      setRosterUpdating(false);
+    }
+  };
+
+  const handleRestoreDefault = async () => {
+    if (!rosterModalSlot) return;
+    setRosterUpdating(true);
+    try {
+      // 1. Remove localStorage flag
+      localStorage.removeItem(`explicit_empty_slot_${rosterModalSlot.id}`);
+
+      // 2. Delete all explicit enrollments to revert to level fallback
+      const slotEnrollments = enrollments.filter(e => e.slot_id === rosterModalSlot.id);
+      const promises = [];
+      for (const enr of slotEnrollments) {
+        db.removeEnrollment(enr.student_id, rosterModalSlot.id);
+        promises.push(unenrollStudent(enr.student_id, rosterModalSlot.id));
+      }
+      await Promise.all(promises);
+
+      const freshData = await syncDatabaseToClient();
+      db.syncFromNeon(freshData);
+      setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
+    } catch (err: any) {
+      alert("Failed to reset roster: " + err.message);
+    } finally {
+      setRosterUpdating(false);
+    }
+  };
+
+  // Filter and sort students for the roster modal (enrolled first)
+  const rosterModalStudents = useMemo(() => {
+    if (!rosterModalSlot) return [];
+    
+    // Show active students at the same center
+    const centerStudents = students.filter(s => s.centre_id === rosterModalSlot.centre_id && s.status === 'active');
+    
+    const slotRoster = getSlotRoster(rosterModalSlot);
+    const slotRosterIds = new Set(slotRoster.map(s => s.id));
+    
+    const mapped = centerStudents.map(student => ({
+      student,
+      isEnrolled: slotRosterIds.has(student.id)
+    }));
+    
+    // Sort so enrolled students are at the top, then alphabetically
+    mapped.sort((a, b) => {
+      if (a.isEnrolled && !b.isEnrolled) return -1;
+      if (!a.isEnrolled && b.isEnrolled) return 1;
+      return a.student.name.localeCompare(b.student.name);
+    });
+    
+    const filtered = rosterSearch
+      ? mapped.filter(item => item.student.name.toLowerCase().includes(rosterSearch.toLowerCase()))
+      : mapped;
+      
+    return filtered;
+  }, [rosterModalSlot, students, enrollments, rosterSearch]);
+
   const getCentreName = (centreId: string) => {
     const match = centres.find(c => c.id === centreId);
     return match ? match.name : (centreId === 'c-2' || centreId === 'JLT' ? 'JLT' : 'Bay Avenue');
   };
 
   const handleMarkStatus = (slotId: string, studentId: string, status: 'present' | 'absent' | 'makeup' | 'informed') => {
+    // Block marking if the selected date is in the future
+    if (selectedDate) {
+      const today = new Date();
+      const [ty, tm, td] = [today.getFullYear(), today.getMonth() + 1, today.getDate()];
+      const [ay, am, ad] = selectedDate.split('-').map(Number);
+      const todayVal = ty * 10000 + tm * 100 + td;
+      const attVal  = ay * 10000 + am * 100 + ad;
+      if (attVal > todayVal) {
+        alert(`Cannot mark attendance for a future date (${selectedDate}).`);
+        return;
+      }
+    }
+
     const key = `${slotId}-${studentId}`;
     const newStatus = markings[key] === status ? null : status;
     
@@ -285,7 +389,8 @@ export const Attendance: React.FC<AttendanceProps> = ({
     }
 
     setSaveStatus('Saving attendance...');
-    let savedCount = 0;
+    let newCount = 0;
+    let updatedCount = 0;
     let queuedCount = 0;
 
     try {
@@ -310,8 +415,29 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
         if (isOnline) {
           db.processAttendanceRecord(record);
-          await logAttendance(record.student_id, record.status, record.coach_id, record.slot_id || undefined, duration, selectedDate, classTopic);
-          savedCount++;
+          const result = await logAttendance(record.student_id, record.status, record.coach_id, record.slot_id || undefined, duration, selectedDate, classTopic);
+          // logAttendance returns null when status is null (deletion), an existing record
+          // unchanged when nothing changed, or the created/updated record otherwise.
+          // We detect a NEW record by checking whether its created_at === updated_at (Prisma
+          // sets both on create; update only changes updated_at — but since we don't expose
+          // updated_at, use a simpler proxy: check if the id was freshly minted by seeing
+          // if it was not in the existing attendance list before this save loop).
+          const existingRecord = attendance.find(
+            a => a.student_id === studentId &&
+              a.slot_id === slot.id &&
+              new Date(a.date).toISOString().split('T')[0] === selectedDate
+          );
+
+          if (!existingRecord) {
+            newCount++;
+          } else {
+            const hasStatusChanged = existingRecord.status !== status;
+            const hasDurationChanged = existingRecord.duration !== duration;
+            const hasTopicChanged = existingRecord.topic !== classTopic;
+            if (hasStatusChanged || hasDurationChanged || hasTopicChanged) {
+              updatedCount++;
+            }
+          }
         } else {
           db.addToOfflineQueue(record);
           queuedCount++;
@@ -319,14 +445,17 @@ export const Attendance: React.FC<AttendanceProps> = ({
       }
 
       // Sync updated package balances back from Neon
-      if (isOnline && savedCount > 0) {
+      if (isOnline && (newCount + updatedCount) > 0) {
         try {
           const freshData = await syncDatabaseToClient();
           db.syncFromNeon(freshData);
           loadData();
         } catch (syncErr) {
           console.warn("Sync failed:", syncErr);
-          setSaveStatus(`✓ Saved to database: ${savedCount} student${savedCount > 1 ? 's' : ''} recorded. (Sync warning: local database will refresh on next reload).`);
+          const parts = [];
+          if (newCount > 0) parts.push(`${newCount} new`);
+          if (updatedCount > 0) parts.push(`${updatedCount} updated`);
+          setSaveStatus(`✓ Saved: ${parts.join(' · ')}. (Sync warning: refresh to see latest balances).`);
           onQueueChange();
           return;
         }
@@ -334,10 +463,15 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
       onQueueChange();
 
-      if (savedCount > 0) {
-        setSaveStatus(`✓ Saved to database: ${savedCount} student${savedCount > 1 ? 's' : ''} recorded.`);
+      if (newCount > 0 || updatedCount > 0) {
+        const parts = [];
+        if (newCount > 0) parts.push(`${newCount} new`);
+        if (updatedCount > 0) parts.push(`${updatedCount} updated`);
+        setSaveStatus(`✓ Saved to database: ${parts.join(' · ')}.`);
       } else if (queuedCount > 0) {
         setSaveStatus(`☁ Offline. Queued ${queuedCount} attendance records for later sync.`);
+      } else {
+        setSaveStatus('✓ No changes — all markings already saved.');
       }
     } catch (err: any) {
       setSaveStatus('❌ Error saving to database: ' + err.message);
@@ -389,6 +523,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
               type="date"
               value={selectedDate}
               onChange={e => setSelectedDate(e.target.value)}
+              max={new Date().toISOString().split('T')[0]}
               className="bg-white border border-line rounded-lg px-2 py-1 text-xs text-ink outline-none cursor-pointer"
             />
           </div>
@@ -412,6 +547,25 @@ export const Attendance: React.FC<AttendanceProps> = ({
           {formattedDateText} · {activeCoach?.name} · {getCentreName(selectedCentre)}
         </div>
       </div>
+
+      {/* Future date warning banner */}
+      {(() => {
+        if (!selectedDate) return null;
+        const today = new Date();
+        const [ty, tm, td] = [today.getFullYear(), today.getMonth() + 1, today.getDate()];
+        const [ay, am, ad] = selectedDate.split('-').map(Number);
+        const todayVal = ty * 10000 + tm * 100 + td;
+        const attVal  = ay * 10000 + am * 100 + ad;
+        if (attVal > todayVal) {
+          return (
+            <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-hot-custom text-xs font-semibold flex items-center gap-2 animate-fadeIn">
+              <span>⚠️</span>
+              <span>Future date selected ({selectedDate}). Attendance entry is disabled for future dates.</span>
+            </div>
+          );
+        }
+        return null;
+      })()}
 
       <p className="text-xs text-muted-custom">
         {formattedDateText} · {activeCoach?.name.toUpperCase()} · {getCentreName(selectedCentre)} · {activeDaySlots.length} class{activeDaySlots.length !== 1 ? 'es' : ''} today
@@ -477,10 +631,34 @@ export const Attendance: React.FC<AttendanceProps> = ({
                 {/* Expanded Roster Dropdown Panel */}
                 {isExpanded && (
                   <div className="border-t border-line bg-canvas/10 p-4 space-y-4">
+                    <div className="flex justify-between items-center pb-2 border-b border-line">
+                      <span className="text-[10px] font-bold text-[#C4A249] tracking-wider uppercase">Class Roster</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRosterModalSlot(slot);
+                        }}
+                        className="bg-white border border-line hover:bg-canvas text-ink font-bold text-[10px] px-2.5 py-1 rounded shadow-sm transition-all"
+                      >
+                        ⚙ Manage Class Roster
+                      </button>
+                    </div>
+
                     <div className="divide-y divide-line">
                       {roster.length === 0 ? (
-                        <div className="py-4 text-center text-xs text-muted-custom">
-                          No students enrolled in this class slot.
+                        <div className="py-6 text-center space-y-3">
+                          <p className="text-xs text-muted-custom">No students enrolled in this class slot.</p>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRosterModalSlot(slot);
+                            }}
+                            className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition-all"
+                          >
+                            ⚙ Manage Class Roster
+                          </button>
                         </div>
                       ) : (
                         roster.map(student => {
@@ -614,7 +792,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
                          </label>
 
                         <span className="text-[10px] text-muted-custom italic">
-                          Present decrements the package · works offline
+                          Present, Absent & Makeup deduct from the package · Informed does not · works offline
                         </span>
                       </div>
                     )}
@@ -630,8 +808,178 @@ export const Attendance: React.FC<AttendanceProps> = ({
       {/* Zero Balance Rule Explanation Banner */}
       <div className="p-5 rounded-[14px] bg-[#FBEEEA] border border-[#FBEEEA] border-l-4 border-l-hot-custom text-xs leading-relaxed text-[#6a4a41]">
         <b className="text-hot-custom block font-bold mb-1">The zero-balance rule.</b>
-        If a student has no classes left, the platform still records the class — but creates an <b className="text-hot-custom font-bold">unbilled record</b> and alerts the front desk instead of silently giving it away. This single rule is what closes the unbilled-class leak (defensible range AED 62–76K, computed from the package ledger — the legacy AED 236K summary figure is retracted).
+        If a student has no classes left, the platform still records the class — but creates an <b className="text-hot-custom font-bold">unbilled record</b> and alerts the front desk, instead of silently giving it away. This protects package revenue and keeps the ledger accurate.
       </div>
+
+      {/* Manage Roster Drawer Modal */}
+      {rosterModalSlot && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex justify-end animate-fadeIn">
+          <div className="bg-surface w-full max-w-md h-full shadow-2xl flex flex-col border-l border-line p-6 space-y-5 overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-line pb-4">
+              <div>
+                <h3 className="font-bold text-ink text-base flex items-center gap-2 font-display">
+                  <span>⚙</span> Class Roster Management
+                </h3>
+                <p className="text-xs text-muted-custom mt-0.5">
+                  {rosterModalSlot.day} {rosterModalSlot.time} · {rosterModalSlot.level} ({getCentreName(rosterModalSlot.centre_id)})
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setRosterModalSlot(null);
+                  setRosterSearch('');
+                }}
+                className="w-8 h-8 rounded-full bg-canvas border border-line flex items-center justify-center text-ink font-bold hover:bg-line transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs text-muted-custom leading-relaxed">
+                Check students to enroll them in this explicit class slot. Deselecting all returns slot to level-filtered roster.
+              </p>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleClearRoster}
+                  disabled={rosterUpdating}
+                  className="flex-1 text-[10px] font-bold bg-red-50 hover:bg-red-100 active:scale-[0.98] text-red-700 border border-red-200 px-2.5 py-1.5 rounded-lg transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  🧹 Clear Roster (Start Fresh)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRestoreDefault}
+                  disabled={rosterUpdating}
+                  className="flex-1 text-[10px] font-bold bg-canvas hover:bg-line active:scale-[0.98] text-ink border border-line px-2.5 py-1.5 rounded-lg transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  🔄 Reset (Level Fallback)
+                </button>
+              </div>
+              
+              {/* Search Box Input */}
+              <input
+                type="text"
+                placeholder="🔍 Search student by name..."
+                value={rosterSearch}
+                onChange={e => setRosterSearch(e.target.value)}
+                className="w-full bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none mb-2 focus:border-forest"
+              />
+
+              <div className="divide-y divide-line border border-line rounded-xl bg-white max-h-[60vh] overflow-y-auto">
+                {rosterModalStudents.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-muted-custom">No students found</div>
+                ) : (
+                  rosterModalStudents.map(({ student, isEnrolled }) => {
+                    return (
+                      <label key={student.id} className="flex items-center justify-between p-3.5 hover:bg-canvas/30 cursor-pointer transition-colors">
+                        <div className="flex items-center gap-3">
+                          <input
+                             type="checkbox"
+                             checked={isEnrolled}
+                             disabled={rosterUpdating}
+                             onChange={async (e) => {
+                               if (rosterUpdating) return;
+                               setRosterUpdating(true);
+                               const checked = e.target.checked;
+                               try {
+                                 // Clear explicit empty slot override when checking any student
+                                 if (checked) {
+                                   localStorage.removeItem(`explicit_empty_slot_${rosterModalSlot.id}`);
+                                 }
+
+                                 const slotEnrollments = enrollments.filter(ev => ev.slot_id === rosterModalSlot.id);
+                                 const hasExplicitEnrollments = slotEnrollments.length > 0;
+
+                                 if (!hasExplicitEnrollments) {
+                                   // Transition slot from level-filtered fallback to explicit roster
+                                   const fallbackStudents = students.filter(s => 
+                                     s.centre_id === rosterModalSlot.centre_id && 
+                                     s.status === 'active' && 
+                                     (s.level === rosterModalSlot.level || (rosterModalSlot.level === 'Beginner' && !s.level))
+                                   );
+
+                                   let targetRoster = [];
+                                   // If checked, only enroll the clicked student (allowing start fresh)
+                                   // instead of automatically checking all fallback students
+                                   if (checked) {
+                                     targetRoster.push(student);
+                                   }
+
+                                   const promises = [];
+                                   for (const s of targetRoster) {
+                                     const uuid = typeof window !== 'undefined' && window.crypto?.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2);
+                                     db.saveEnrollment({
+                                       id: `enr-${uuid}`,
+                                       student_id: s.id,
+                                       slot_id: rosterModalSlot.id,
+                                       enrolled_at: new Date().toISOString()
+                                     });
+                                     promises.push(enrollStudent(s.id, rosterModalSlot.id));
+                                   }
+                                   await Promise.all(promises);
+                                 } else {
+                                   if (checked) {
+                                     const uuid = typeof window !== 'undefined' && window.crypto?.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2);
+                                     db.saveEnrollment({
+                                       id: `enr-${uuid}`,
+                                       student_id: student.id,
+                                       slot_id: rosterModalSlot.id,
+                                       enrolled_at: new Date().toISOString()
+                                     });
+                                     setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
+                                     await enrollStudent(student.id, rosterModalSlot.id);
+                                   } else {
+                                     db.removeEnrollment(student.id, rosterModalSlot.id);
+                                     setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
+                                     await unenrollStudent(student.id, rosterModalSlot.id);
+                                   }
+                                 }
+                                 const freshData = await syncDatabaseToClient();
+                                 db.syncFromNeon(freshData);
+                                 setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
+                               } catch (err: any) {
+                                 console.error("Enrollment failed:", err);
+                                 alert("Roster update failed: " + err.message);
+                                 const freshData = await syncDatabaseToClient();
+                                 db.syncFromNeon(freshData);
+                                 setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
+                               } finally {
+                                 setRosterUpdating(false);
+                               }
+                             }}
+                             className="w-4 h-4 rounded border-line text-forest focus:ring-forest cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
+                          <div>
+                            <span className="font-bold text-xs text-ink block">{student.name}</span>
+                            <span className="text-[9px] text-muted-custom">{student.level || 'No level'}</span>
+                          </div>
+                        </div>
+                        {isEnrolled && (
+                          <span className="text-[9px] font-bold text-forest bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5">
+                            Enrolled
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-line flex justify-end">
+              <button
+                onClick={() => setRosterModalSlot(null)}
+                className="bg-forest text-white font-bold text-xs px-5 py-2.5 rounded-xl hover:bg-forest-light transition-all"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -38,7 +38,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
 
   // Fetch active students and tiers on mount
   useEffect(() => {
-    let list = db.getStudents().filter(s => s.status === 'active');
+    let list = db.getStudents().filter(s => ['active', 'inactive', 'departed'].includes(s.status));
     if (activeCentre !== 'All') {
       list = list.filter(s => s.centre_id === activeCentre || s.id === studentIdParam);
     }

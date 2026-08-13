@@ -221,7 +221,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
 
     const today = new Date();
     const studentPkgs = packages.filter(p => p.student_id === activeStudent.id);
-    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && a.status === 'present');
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && ['present', 'absent', 'makeup'].includes(a.status));
     const studentInvs = invoices.filter(i => i.student_id === activeStudent.id);
 
     // Classes left
@@ -237,9 +237,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     let cls90d = 0;
     studentAtts.forEach(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-      const dur = a.duration ?? 2;
-      if (diff >= -1 && diff <= 30) cls30d += dur;
-      if (diff >= -1 && diff <= 90) cls90d += dur;
+      const amt = typeof a.duration === 'number' ? a.duration : 1;
+      if (diff >= -1 && diff <= 30) cls30d += amt;
+      if (diff >= -1 && diff <= 90) cls90d += amt;
     });
 
     // Lifetime paid
@@ -256,7 +256,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
 
     // Engagement status
     const hasAttended = attendance.some(a => a.student_id === activeStudent.id && (a.status === 'present' || a.status === 'makeup'));
-    const engagement = !hasAttended && activeStudent.last_attended === null ? 'NEW'
+    const engagement = activeStudent.status === 'inactive' ? 'COLD'
+      : activeStudent.status === 'departed' ? 'DORMANT'
+      : (!hasAttended && activeStudent.last_attended === null) ? 'NEW'
       : daysSince <= 14 ? 'HEALTHY'
       : daysSince <= 30 ? 'SLIPPING'
       : 'COLD';
@@ -443,7 +445,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
   const enrichedPackages = useMemo(() => {
     if (!activeStudent) return [];
     
-    const studentPkgs = packages.filter(p => p.student_id === activeStudent.id);
+    const studentPkgs = packages
+      .filter(p => p.student_id === activeStudent.id)
+      .sort((a, b) => {
+        const dateA = a.start_date ? new Date(a.start_date).getTime() : 0;
+        const dateB = b.start_date ? new Date(b.start_date).getTime() : 0;
+        if (dateA !== dateB) return dateA - dateB;
+        return a.id.localeCompare(b.id);
+      });
     const studentAtts = attendance
       .filter(a => a.student_id === activeStudent.id && a.status === 'present')
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -452,7 +461,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
 
     return studentPkgs.map((pkg, idx) => {
       const classesPaid = pkg.classes_total;
-      const used = pkg.classes_total - pkg.classes_remaining;
+      const used = (pkg.classes_total + (pkg.bonus_classes || 0)) - pkg.classes_remaining;
       const balance = pkg.classes_remaining;
 
       // Determine paid on date
@@ -468,10 +477,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
       const firstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '-');
 
       let ended = '-';
-      if (pkg.ended_at) {
-        ended = new Date(pkg.ended_at).toISOString().split('T')[0];
-      } else if (pkg.classes_remaining === 0) {
-        if (pkgAtts.length > 0) {
+      if (pkg.classes_remaining === 0) {
+        if (pkg.ended_at) {
+          ended = new Date(pkg.ended_at).toISOString().split('T')[0];
+        } else if (pkgAtts.length > 0) {
           ended = new Date(pkgAtts[pkgAtts.length - 1].date).toISOString().split('T')[0];
         } else if (pkg.expiry_date) {
           ended = new Date(pkg.expiry_date).toISOString().split('T')[0];
@@ -480,14 +489,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
 
       return {
         pkgNo: idx + 1,
-        type: pkg.kind ? (pkg.kind.charAt(0).toUpperCase() + pkg.kind.slice(1)) : 'New',
-        paidOn,
+        type: pkg.kind === 'unbilled' ? 'Unbilled' : (pkg.kind ? (pkg.kind.charAt(0).toUpperCase() + pkg.kind.slice(1)) : 'New'),
+        paidOn: pkg.kind === 'unbilled' ? '-' : paidOn,
         firstClass,
         ended,
         classesPaid,
         used,
         balance,
-        status: pkg.classes_remaining === 0 ? 'COMPLETED' : 'CURRENT',
+        status: pkg.kind === 'unbilled' ? 'UNBILLED' : (pkg.classes_remaining === 0 ? 'COMPLETED' : 'CURRENT'),
       };
     });
   }, [activeStudent, packages, attendance, invoices]);
@@ -617,11 +626,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
                 </select>
               </div>
               <div className="flex gap-2 pt-1">
-                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border bg-emerald-500/20 border-emerald-500/40 text-mint uppercase">
+                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border uppercase ${
+                  studentMetrics.engagement === 'HEALTHY' ? 'bg-emerald-500/20 border-emerald-500/40 text-mint'
+                  : studentMetrics.engagement === 'NEW' ? 'bg-blue-500/20 border-blue-500/40 text-blue-300'
+                  : studentMetrics.engagement === 'SLIPPING' ? 'bg-amber-500/20 border-amber-500/40 text-brass2'
+                  : studentMetrics.engagement === 'COLD' ? 'bg-red-500/20 border-red-500/40 text-red-300'
+                  : studentMetrics.engagement === 'DORMANT' ? 'bg-slate-500/20 border-slate-500/40 text-slate-400'
+                  : 'bg-emerald-500/20 border-emerald-500/40 text-mint'
+                }`}>
                   {studentMetrics.engagement}
-                </span>
-                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border bg-amber-500/20 border-amber-500/40 text-brass2 uppercase">
-                  SLIPPING
                 </span>
                 <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border bg-white/5 border-white/10 text-slate-300">
                   ENROLLED {activeStudent.join_date ? new Date(activeStudent.join_date).toISOString().split('T')[0] : '2025-01-10'}
@@ -688,7 +701,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
               <h2 className="text-2xl font-bold font-display text-forest mt-1.5">
                 {studentMetrics.classesLeft}
               </h2>
-              <p className="text-[10px] text-muted-custom mt-1">in the current package</p>
+              <p className="text-[10px] text-muted-custom mt-1">across all packages</p>
             </div>
 
             {/* LAST 30 DAYS */}
@@ -715,7 +728,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
                 <div className="bg-surface border border-line rounded-[14px] p-4 shadow-sm">
                   <div className="text-[9px] font-bold text-muted-custom uppercase tracking-wider">Lifetime Paid</div>
                   <h2 className="text-2xl font-bold font-display text-ink mt-1.5">
-                    AED {(studentMetrics.lifetimePaid / 1000).toFixed(0)}K
+                    AED {studentMetrics.lifetimePaid.toLocaleString()}
                   </h2>
                   <p className="text-[10px] text-muted-custom mt-1">at AED {studentMetrics.avgRate}/class</p>
                 </div>

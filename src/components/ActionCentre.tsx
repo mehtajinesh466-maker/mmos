@@ -127,7 +127,8 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
       
       let shouldInclude = false;
       if (pkg.classes_remaining > 0) {
-        shouldInclude = (pctLeft <= 20 || totalRemaining <= 3);
+        // Only flag packages that have crossed the 20% remaining threshold
+        shouldInclude = pctLeft <= 20;
       } else if (pkg.classes_remaining === 0 && isLatest && totalRemaining === 0 && pkg.kind !== 'completed') {
         shouldInclude = true;
       }
@@ -143,7 +144,7 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
           coachName: displayCoachName,
           packageName: `#${idx + 1} ${pkg.kind === 'renewal' ? 'Renewal' : pkg.kind === 'new' ? 'New' : 'Tournament'}`,
           paid: pkg.classes_total,
-          used: pkg.classes_total - pkg.classes_remaining,
+          used: (pkg.classes_total + (pkg.bonus_classes || 0)) - pkg.classes_remaining,
           left: pkg.classes_remaining,
           pctLeft,
           thresholdTrigger: pctLeft <= 20
@@ -288,7 +289,7 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
         {[
           { label: 'INVOICE NOW', value: invoiceNowCount, desc: 'attending unpaid', color: 'before:bg-forest' },
           { label: 'RENEW NOW', value: renewNowCount, desc: '≤3 classes left', color: 'before:bg-warm-custom' },
-          { label: 'RECOVERABLE', value: recoverableAmount === 0 ? 'AED 0' : `AED ${(recoverableAmount / 1000).toFixed(0)}K`, desc: 'invoice today', color: 'before:bg-brass' },
+          { label: 'RECOVERABLE', value: recoverableAmount === 0 ? 'AED 0' : `AED ${recoverableAmount.toLocaleString()}`, desc: 'invoice today', color: 'before:bg-brass' },
           { label: 'CLASSES GIVEN AWAY', value: classesGivenAway, desc: 'never billed', color: 'before:bg-hot-custom' }
         ].map((kpi, idx) => (
           <div key={idx} className={`bg-surface border border-line rounded-[14px] p-6 shadow-sm relative overflow-hidden before:absolute before:top-0 before:left-0 before:w-full before:h-[3px] ${kpi.color}`}>
@@ -383,6 +384,24 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
                   {sortedUnpaidStudents.map(s => {
                     const unpaidCount = (s.flags as any)?.unpaid_classes || 0;
                     const val = (s.flags as any)?.unpaid_value || 0;
+
+                    // Calculate when the overrun began (first unbilled class date)
+                    const studentPkgs = (s.packages || []).filter(p => p.kind !== 'unbilled' && p.kind !== 'settled');
+                    const totalEntitlement = studentPkgs.reduce((sum, p) => sum + p.classes_total + (p.bonus_classes || 0), 0);
+                    const allAtts = db.getAttendance ? db.getAttendance() : (db.get('attendance') || []);
+                    const studentAtts = allAtts.filter(a => a.student_id === s.id && ['present', 'absent', 'makeup'].includes(a.status));
+                    const sortedAtts = [...studentAtts].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+                    let runningSum = 0;
+                    let firstUnbilledDate = '—';
+                    for (const att of sortedAtts) {
+                      runningSum += (att.duration ?? 1);
+                      if (runningSum > totalEntitlement) {
+                        firstUnbilledDate = new Date(att.date).toISOString().split('T')[0];
+                        break;
+                      }
+                    }
+
                     return (
                       <tr key={s.id} className="border-b border-line hover:bg-canvas/50 transition-all">
                         <td className="py-4 px-4">
@@ -398,7 +417,7 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
                         <td className="py-4 px-4 text-right font-bold text-hot-custom">{unpaidCount}</td>
                         <td className="py-4 px-4 text-right font-mono font-semibold text-ink">AED {val.toLocaleString()}</td>
                         <td className="py-4 px-4 text-muted-custom text-sm">
-                          {s.join_date ? new Date(s.join_date).toISOString().split('T')[0] : '—'}
+                          {firstUnbilledDate}
                         </td>
                         <td className="py-4 px-4 text-right">
                           <button

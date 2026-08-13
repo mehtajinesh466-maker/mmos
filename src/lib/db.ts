@@ -527,28 +527,29 @@ export const db = {
           delete student.flags.low_package;
         }
 
-        // 3) Recalculate unpaid classes and values
-        const allStudentAtt = list.filter(a => a.student_id === record.student_id && (a.status === 'present' || a.status === 'makeup'));
+        // 3) Recalculate unpaid classes and values (including present, absent, makeup; excluding informed)
+        const allStudentAtt = list.filter(a => a.student_id === record.student_id && ['present', 'absent', 'makeup'].includes(a.status));
         const totalAttended = allStudentAtt.reduce((sum, a) => sum + (a.duration ?? 1), 0);
 
-        const totalPurchased = studentPkgs.reduce((sum, p) => sum + p.classes_total, 0);
+        const totalPurchased = studentPkgs.reduce((sum, p) => sum + p.classes_total + (p.bonus_classes || 0), 0);
         const unpaidClasses = Math.max(0, totalAttended - totalPurchased);
 
-        // Compute student rate
+        // Compute student rate based on sum of paid and bonus classes
         let studentRate = 125;
         if (studentPkgs.length > 0) {
           const sorted = [...studentPkgs].sort((a, b) => new Date(b.start_date || 0).getTime() - new Date(a.start_date || 0).getTime());
           const latestPkg = sorted[0];
           const invoices = this.get<any>('invoices') || [];
           const invoice = invoices.find((inv: any) => inv.package_id === latestPkg.id);
+          const pkgTotalClasses = latestPkg.classes_total + (latestPkg.bonus_classes || 0);
           if (invoice && invoice.amount) {
-            studentRate = Math.round(Number(invoice.amount) / latestPkg.classes_total);
+            studentRate = Math.round(Number(invoice.amount) / pkgTotalClasses);
           } else if (latestPkg.tier_id) {
             const tiers = this.get<any>('tiers') || [];
             const tier = tiers.find((t: any) => t.id === latestPkg.tier_id);
             if (tier && tier.price) {
               const discount = latestPkg.discount_pct ? Number(latestPkg.discount_pct) : 0;
-              studentRate = Math.round(Number(tier.price) * (1 - discount / 100) / latestPkg.classes_total);
+              studentRate = Math.round(Number(tier.price) * (1 - discount / 100) / pkgTotalClasses);
             }
           }
         }

@@ -144,9 +144,19 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
   // Auto student ID calculation based on centre selection
   useEffect(() => {
     const prefix = formData.centre_id === jltCentre?.id ? 'JLT' : 'BAY';
-    const count = db.getStudents().filter(s => s.centre_id === formData.centre_id).length;
-    setStudentIdAuto(`${prefix}-${count + 1 + 100} (auto)`);
-  }, [formData.centre_id, centres, jltCentre]);
+    const allStudents = db.getStudents();
+    let maxNum = 100;
+    allStudents.forEach(s => {
+      const idStr = s.flags?.custom_student_id || '';
+      const match = idStr.match(new RegExp(`${prefix}-(\\d+)`));
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNum) maxNum = num;
+      }
+    });
+    const nextNum = maxNum + 1;
+    setStudentIdAuto(`${prefix}-${nextNum} (auto)`);
+  }, [formData.centre_id, jltCentre]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -210,6 +220,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       payment_status: formData.payment_status || 'paid',
       payment_remarks: formData.payment_remarks,
       flags: {
+        custom_student_id: studentIdAuto.replace(' (auto)', ''),
         reg_form_url: regFormUrl,
         emirates_id_url: emiratesIdUrl,
         payment_method: formData.payment_method,
@@ -229,19 +240,22 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       const centre = allCentres.find((c: any) => c.id === formData.centre_id);
       const prefix = (centre?.name || 'BAY').slice(0, 3).toUpperCase();
       const numPart = savedStudent.fide_id || savedStudent.id.replace(/\D/g, '').slice(0, 4) || '0000';
-      const displayId = savedStudent.fide_id ? savedStudent.fide_id : `${prefix}-${numPart}`;
+      const displayId = savedStudent.flags?.custom_student_id || (savedStudent.fide_id ? savedStudent.fide_id : `${prefix}-${numPart}`);
 
-      // T5: confirmation message includes student name and ID
-      setSaveStatus(`✓ ${savedStudent.name} registered successfully! ID: ${displayId}`);
+      // T5: confirmation receipt with student name and ID
+      setSaveStatus(`✓ ${savedStudent.name} registered successfully! Student ID: ${displayId}`);
       // T4: reflect the real ID on the form header
-      setStudentIdAuto(displayId);
+      setStudentIdAuto(`${displayId.startsWith('JLT') ? 'JLT' : 'BAY'}-??? (auto)`);
       setPhotoUrl('');
       setRegFormUrl('');
       setEmiratesIdUrl('');
       setSelectedFamilyId('');
       setSelectedSiblingName('');
-      
-      // Reset form
+
+      // M14: Full form reset — clear ALL fields so next registration is blank
+      setDobYear('');
+      setDobMonth('');
+      setDobDay('');
       setFormData(prev => ({
         ...prev,
         name: '',
@@ -249,10 +263,17 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
         phone: '',
         email: '',
         dob: '',
+        gender: '',
         school: '',
+        level: '',
         fide_id: '',
+        coach_id: '',
         emergency_contact: '',
+        package_size: '12',
         bonus_classes: '0',
+        rate_per_class: '125',
+        payment_method: '',
+        payment_status: 'paid',
         payment_remarks: '',
         category: ''
       }));
@@ -261,7 +282,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       setSaveStatus('❌ Error: ' + error.message);
     } finally {
       setIsSubmitting(false);
-      setTimeout(() => setSaveStatus(''), 8000);
+      setTimeout(() => setSaveStatus(''), 15000);
     }
   };
 
@@ -285,8 +306,16 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       </div>
 
       {saveStatus && (
-        <div className={`p-4 rounded-xl border text-xs font-semibold ${saveStatus.startsWith('❌') ? 'bg-red-50 border-red-200 text-hot-custom' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
-          {saveStatus}
+        <div className={`rounded-2xl border-2 text-sm font-bold flex items-start gap-4 p-5 shadow-sm ${
+          saveStatus.startsWith('❌')
+            ? 'bg-red-50 border-red-300 text-red-800'
+            : 'bg-emerald-50 border-emerald-400 text-emerald-800'
+        }`}>
+          <span className="text-2xl mt-0.5">{saveStatus.startsWith('❌') ? '❌' : '✅'}</span>
+          <div>
+            <div className="font-bold text-base">{saveStatus.startsWith('❌') ? 'Registration Failed' : 'Student Registered'}</div>
+            <div className="text-xs font-normal mt-1 opacity-80">{saveStatus.replace('✓ ', '').replace('❌ Error: ', '')}</div>
+          </div>
         </div>
       )}
 

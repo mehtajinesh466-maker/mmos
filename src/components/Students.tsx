@@ -224,15 +224,15 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
         ? Math.max(0, Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000))
         : 999;
 
-      // 30D / 90D classes calculated from real attendance
-      const studentAtts  = attendance.filter(a => a.student_id === s.id && a.status === 'present');
+      // 30D / 90D classes calculated from real attendance (counting rows/sessions, status in ['present', 'absent', 'makeup'])
+      const studentAtts  = attendance.filter(a => a.student_id === s.id && ['present', 'absent', 'makeup'].includes(a.status));
       let cls30d = 0;
       let cls90d = 0;
       studentAtts.forEach(a => {
         const diffDays = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-        const dur = a.duration ?? 2;
-        if (diffDays >= -1 && diffDays <= 30) cls30d += dur;
-        if (diffDays >= -1 && diffDays <= 90) cls90d += dur;
+        const amt = typeof a.duration === 'number' ? a.duration : 1;
+        if (diffDays >= -1 && diffDays <= 30) cls30d += amt;
+        if (diffDays >= -1 && diffDays <= 90) cls90d += amt;
       });
 
       // Rate per class
@@ -251,7 +251,9 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
 
       // Segment & Heat mapping using domain rules
       const statusInfo   = computeStudentStatus(s, packages, attendance, invoices);
-      const engagement   = daysSince === 999 ? 'NEW'
+      const engagement   = s.status === 'inactive' ? 'COLD'
+        : s.status === 'departed' ? 'DORMANT'
+        : daysSince === 999 ? 'NEW'
         : daysSince <= 14 ? 'ENGAGED'
         : daysSince <= 30 ? 'SLIPPING'
         : daysSince <= 60 ? 'COLD'
@@ -263,7 +265,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
       const centre       = centres.find(c => c.id === s.centre_id);
       const prefix       = (centre?.name || 'BAY').slice(0, 3).toUpperCase();
       const numPart      = s.fide_id || s.id.replace(/\D/g, '').slice(0, 3) || '000';
-      const displayId    = `${prefix}-${numPart}`;
+      const displayId    = s.flags?.custom_student_id || `${prefix}-${numPart}`;
 
       return {
         ...s,

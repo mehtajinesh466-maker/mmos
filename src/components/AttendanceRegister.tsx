@@ -113,24 +113,24 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       // Auto-generated BAY/JLT style ID
       const prefix = (centre?.name || 'BAY').slice(0, 3).toUpperCase();
       const numPart = s.fide_id || s.id.replace(/\D/g, '').slice(0, 3) || '000';
-      const displayId = s.fide_id ? s.fide_id : `${prefix}-${numPart}`;
+      const displayId = s.flags?.custom_student_id || `${prefix}-${numPart}`;
 
       // Days since last class
       const daysSince = s.last_attended
         ? Math.max(0, Math.floor((today.getTime() - new Date(s.last_attended).getTime()) / 86400000))
         : 999;
 
-      // Calculate 30D and 90D attendance metrics from real records
-      const studentAtts = attendance.filter(a => a.student_id === s.id && a.status === 'present');
+      // Calculate 30D and 90D attendance metrics from real records (counting rows, status in ['present', 'absent', 'makeup'])
+      const studentAtts = attendance.filter(a => a.student_id === s.id && ['present', 'absent', 'makeup'].includes(a.status));
       let cls30d = 0;
       let cls90d = 0;
 
       studentAtts.forEach(a => {
         const attDate = new Date(a.date);
         const diffDays = Math.floor((today.getTime() - attDate.getTime()) / 86400000);
-        const dur = a.duration ?? 2;
-        if (diffDays >= -1 && diffDays <= 30) cls30d += dur;
-        if (diffDays >= -1 && diffDays <= 90) cls90d += dur;
+        const amt = typeof a.duration === 'number' ? a.duration : 1;
+        if (diffDays >= -1 && diffDays <= 30) cls30d += amt;
+        if (diffDays >= -1 && diffDays <= 90) cls90d += amt;
       });
 
       // Classes left across packages

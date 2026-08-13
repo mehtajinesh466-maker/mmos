@@ -23,6 +23,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const pathname = usePathname();
   const router = useRouter();
 
+  // M16: Compute live action count (unpaid + expiring) to drive the Action Centre badge
+  const actionCount = (() => {
+    const students = db.getStudents();
+    const packages = db.get<any>('packages');
+    const unpaid = students.filter(s => (s.flags as any)?.unpaid_classes > 0).length;
+    const expiring = students.filter(s => {
+      const pkgs = packages.filter((p: any) => p.student_id === s.id && !p.frozen && p.kind !== 'unbilled' && p.kind !== 'settled');
+      return pkgs.some((p: any) => {
+        if (p.classes_remaining <= 0) return false;
+        const pct = p.classes_total > 0 ? (p.classes_remaining / p.classes_total) * 100 : 0;
+        return pct <= 20;
+      });
+    }).length;
+    return unpaid + expiring;
+  })();
+
   const handleLogout = async () => {
     await signOut({ redirect: false });
     router.push('/login');
@@ -83,7 +99,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       sections.push({
         title: 'ACTION',
         items: [
-          { id: 'action_centre', path: '/action-centre', label: 'Action Centre', glyph: '♜', badge: 115 }
+          { id: 'action_centre', path: '/action-centre', label: 'Action Centre', glyph: '♜', badge: actionCount > 0 ? actionCount : undefined }
         ]
       });
       sections.push({

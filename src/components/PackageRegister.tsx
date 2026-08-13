@@ -118,24 +118,29 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
       // Auto-generated BAY/JLT style ID
       const prefix = (centre?.name || 'BAY').slice(0, 3).toUpperCase();
       const numPart = s.fide_id || s.id.replace(/\D/g, '').slice(0, 3) || '000';
-      const displayId = `${prefix}-${numPart}`;
+      const displayId = s.flags?.custom_student_id || `${prefix}-${numPart}`;
 
       // Get all student's attendances (present) sorted by date asc
       const studentAtts = attendance
         .filter(a => a.student_id === s.id && a.status === 'present')
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-      // Get all student's packages sorted by start_date asc (exclude unbilled and settled)
+      // Get all student's packages sorted by start_date asc (exclude settled), stably using ID fallback
       const studentPkgs = packages
-        .filter(p => p.student_id === s.id && p.kind !== 'unbilled' && p.kind !== 'settled')
-        .sort((a, b) => new Date(a.start_date || '').getTime() - new Date(b.start_date || '').getTime());
+        .filter(p => p.student_id === s.id && p.kind !== 'settled')
+        .sort((a, b) => {
+          const dateA = a.start_date ? new Date(a.start_date).getTime() : 0;
+          const dateB = b.start_date ? new Date(b.start_date).getTime() : 0;
+          if (dateA !== dateB) return dateA - dateB;
+          return a.id.localeCompare(b.id);
+        });
 
       let attCursor = 0;
 
       studentPkgs.forEach((pkg, index) => {
         const pkgNo = index + 1;
         const classesPaid = pkg.classes_total;
-        const used = pkg.classes_total - pkg.classes_remaining;
+        const used = (pkg.classes_total + (pkg.bonus_classes || 0)) - pkg.classes_remaining;
         const balance = pkg.classes_remaining;
 
         // Determine paid on date
@@ -151,15 +156,14 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
         const firstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '-');
 
         let ended = '-';
-        if (pkg.ended_at) {
-          ended = new Date(pkg.ended_at).toISOString().split('T')[0];
-        } else if (pkg.classes_remaining === 0) {
-          if (pkgAtts.length > 0) {
+        if (pkg.classes_remaining === 0) {
+          if (pkg.ended_at) {
+            ended = new Date(pkg.ended_at).toISOString().split('T')[0];
+          } else if (pkgAtts.length > 0) {
             ended = new Date(pkgAtts[pkgAtts.length - 1].date).toISOString().split('T')[0];
           } else if (pkg.expiry_date) {
             ended = new Date(pkg.expiry_date).toISOString().split('T')[0];
           }
-          // No fallback — show '-' if we genuinely don't know the end date
         }
 
         // Segment calculation
@@ -181,14 +185,14 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
           segment,
           engagement,
           pkgNo,
-          type: pkg.kind ? (pkg.kind.charAt(0).toUpperCase() + pkg.kind.slice(1)) : 'New',
-          paidOn,
+          type: pkg.kind === 'unbilled' ? 'Unbilled' : (pkg.kind ? (pkg.kind.charAt(0).toUpperCase() + pkg.kind.slice(1)) : 'New'),
+          paidOn: pkg.kind === 'unbilled' ? '-' : paidOn,
           firstClass,
           ended,
           classesPaid,
           used,
           balance,
-          status: pkg.classes_remaining === 0 ? 'COMPLETED' : 'CURRENT',
+          status: pkg.kind === 'unbilled' ? 'UNBILLED' : (pkg.classes_remaining === 0 ? 'COMPLETED' : 'CURRENT'),
           is_family_shared: pkg.is_family_shared || false,
           dateForSort: pkg.start_date ? new Date(pkg.start_date).getTime() : 0
         });
@@ -361,7 +365,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
           <option>All types</option>
           <option value="Renewal">Renewal</option>
           <option value="New">New</option>
-          <option value=">> UNPAID <<">UNPAID</option>
+          <option value="Unbilled">Unbilled</option>
         </select>
 
         <input

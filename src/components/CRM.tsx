@@ -151,6 +151,14 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
     return c ? c.name : 'Bay Avenue';
   };
 
+  // M19: Format ISO trial dates as readable DD MMM YYYY
+  const formatTrialDate = (raw: string | undefined | null) => {
+    if (!raw) return '—';
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return raw;
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
   const filteredEnquiries = enquiries.filter(e => {
     if (activeCentre !== 'All' && e.centre_id !== activeCentre) return false;
     return true;
@@ -440,9 +448,9 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
                       </td>
                       <td className="py-3 px-3">
                         {enq.trial_date 
-                          ? <span className="text-xs font-mono text-ink">{enq.trial_date}</span>
-                          : <span className="text-[10px] text-muted-custom">—</span>
-                        }
+                        ? <span className="text-xs font-mono text-ink">{formatTrialDate(enq.trial_date)}</span>
+                        : <span className="text-[10px] text-muted-custom">—</span>
+                      }
                       </td>
                       <td className="py-3 px-3" onClick={e => e.stopPropagation()}>
                         <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${stageBadgeClass(enq.stage)}`}>
@@ -585,7 +593,7 @@ export const CRM: React.FC<CRMProps> = ({ currentUser, activeCentre }) => {
                   </div>
                   <div>
                     <div className="text-[10px] text-muted-custom uppercase font-bold">Trial Date</div>
-                    <div className="text-xs font-semibold text-ink mt-0.5 font-mono">{selectedEnquiry.trial_date || '—'}</div>
+                    <div className="text-xs font-semibold text-ink mt-0.5">{formatTrialDate(selectedEnquiry.trial_date)}</div>
                   </div>
                   <div>
                     <div className="text-[10px] text-muted-custom uppercase font-bold">Assigned Coach</div>
