@@ -40,6 +40,8 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
   // Editing state
   const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
   const [studentLogs, setStudentLogs] = useState<any[]>([]);
+  const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   useEffect(() => {
     if (selectedStudent) {
@@ -56,22 +58,33 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       const fresh = await syncDatabaseToClient();
       db.syncFromNeon(fresh);
       refresh();
-      alert('✓ Attendance record updated.');
+      setMessage({ text: '✓ Attendance record updated.', type: 'success' });
+      setTimeout(() => setMessage(null), 3000);
     } catch (e: any) {
-      alert('Error updating attendance: ' + e.message);
+      console.error(e);
+      setMessage({ text: 'Error updating attendance: ' + e.message, type: 'error' });
+      setTimeout(() => setMessage(null), 5000);
     }
   };
 
   const handleDeleteLog = async (logId: string) => {
-    if (!confirm('Are you sure you want to delete this attendance log?')) return;
+    if (deleteConfirmId !== logId) {
+      setDeleteConfirmId(logId);
+      setTimeout(() => setDeleteConfirmId(null), 3000);
+      return;
+    }
     try {
       await deleteAttendanceDB(logId);
       const fresh = await syncDatabaseToClient();
       db.syncFromNeon(fresh);
       refresh();
-      alert('✓ Attendance record deleted.');
+      setDeleteConfirmId(null);
+      setMessage({ text: '✓ Attendance record deleted.', type: 'success' });
+      setTimeout(() => setMessage(null), 3000);
     } catch (e: any) {
-      alert('Error deleting attendance: ' + e.message);
+      console.error(e);
+      setMessage({ text: 'Error deleting attendance: ' + e.message, type: 'error' });
+      setTimeout(() => setMessage(null), 5000);
     }
   };
 
@@ -408,6 +421,14 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
         Attendance register. Class counts per student by period — download for your own attendance checks.
       </p>
 
+      {message && (
+        <div className={`p-4 rounded-xl border text-xs font-semibold ${
+          message.type === 'error' ? 'bg-red-50 border-red-200 text-hot-custom' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+        }`}>
+          {message.text}
+        </div>
+      )}
+
       {/* Tab Switcher & Action Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-line pb-1 gap-4">
         <div className="flex gap-2">
@@ -696,10 +717,14 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
                           </select>
                           <button
                             onClick={() => handleDeleteLog(log.id)}
-                            className="w-5 h-5 flex items-center justify-center rounded border border-red-200 text-hot-custom text-xs hover:bg-red-50 cursor-pointer"
-                            title="Delete Attendance Log"
+                            className={`w-6 h-6 flex items-center justify-center rounded border text-xs cursor-pointer ${
+                              deleteConfirmId === log.id 
+                                ? 'bg-red-600 text-white border-red-600 font-bold' 
+                                : 'border-red-200 text-hot-custom hover:bg-red-50'
+                            }`}
+                            title={deleteConfirmId === log.id ? "Click again to confirm" : "Delete Attendance Log"}
                           >
-                            ×
+                            {deleteConfirmId === log.id ? "!" : "×"}
                           </button>
                         </div>
                       </td>
@@ -755,9 +780,14 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
                           </select>
                           <button
                             onClick={() => handleDeleteLog(log.id)}
-                            className="w-6 h-6 flex items-center justify-center rounded border border-red-200 text-hot-custom text-xs hover:bg-red-50"
+                            className={`w-6 h-6 flex items-center justify-center rounded border text-xs cursor-pointer ${
+                              deleteConfirmId === log.id 
+                                ? 'bg-red-600 text-white border-red-600 font-bold' 
+                                : 'border-red-200 text-hot-custom hover:bg-red-50'
+                            }`}
+                            title={deleteConfirmId === log.id ? "Click again to confirm" : "Delete Attendance Log"}
                           >
-                            ×
+                            {deleteConfirmId === log.id ? "!" : "×"}
                           </button>
                         </div>
                       </div>

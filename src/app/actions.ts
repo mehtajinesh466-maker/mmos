@@ -253,7 +253,7 @@ export async function deleteCentreDB(centreId: string) {
 // Module 3 & 4: Scheduling and Progress
 // -------------------------------------------------------------
 
-export async function createScheduleSlot(centreId: string, coachId: string, day: string, time: string, level: string, capacity: number = 10, isSummerCamp: boolean = false) {
+export async function createScheduleSlot(centreId: string, coachId: string, day: string, time: string, level: string, capacity: number = 10, isSummerCamp: boolean = false, explicitId?: string) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
@@ -264,27 +264,39 @@ export async function createScheduleSlot(centreId: string, coachId: string, day:
       throw new Error("Unauthorized");
     }
   }
+
+  const data: any = {
+    centre_id: centreId,
+    coach_id: coachId,
+    day,
+    time,
+    level,
+    capacity,
+    is_summer_camp: isSummerCamp
+  };
+  
+  if (explicitId) {
+    data.id = explicitId.startsWith('slot-') ? explicitId.replace('slot-', '') : explicitId;
+  }
+
   return await prisma.scheduleSlot.create({
-    data: {
-      centre_id: centreId,
-      coach_id: coachId,
-      day,
-      time,
-      level,
-      capacity,
-      is_summer_camp: isSummerCamp
-    }
+    data
   });
 }
 
-export async function toggleSummerCampSlot(slotId: string, isSummerCamp: boolean) {
+export async function toggleSummerCampSlot(slotId: string, isSummerCamp: boolean, newTime?: string) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
   }
+  const cleanSlotId = slotId.startsWith('slot-') ? slotId.replace('slot-', '') : slotId;
+  const data: any = { is_summer_camp: isSummerCamp };
+  if (newTime) {
+    data.time = newTime;
+  }
   return await prisma.scheduleSlot.update({
-    where: { id: slotId },
-    data: { is_summer_camp: isSummerCamp }
+    where: { id: cleanSlotId },
+    data
   });
 }
 
@@ -300,11 +312,14 @@ export async function enrollStudent(studentId: string, slotId: string) {
     }
   }
 
+  // Ensure slotId is a clean UUID
+  const cleanSlotId = slotId.startsWith('slot-') ? slotId.replace('slot-', '') : slotId;
+
   // Check if enrollment already exists to prevent duplicate key errors
   const existing = await prisma.enrollment.findFirst({
     where: {
       student_id: studentId,
-      slot_id: slotId
+      slot_id: cleanSlotId
     }
   });
   if (existing) {
@@ -314,7 +329,7 @@ export async function enrollStudent(studentId: string, slotId: string) {
   return await prisma.enrollment.create({
     data: {
       student_id: studentId,
-      slot_id: slotId
+      slot_id: cleanSlotId
     }
   });
 }
@@ -1019,13 +1034,16 @@ export async function updateStudentFlags(studentId: string, pkgId?: string, upda
         data: { classes_remaining: -primaryDeficit }
       });
     } else {
+      const existingPkgsCount = await prisma.package.count({ where: { student_id: studentId } });
       await prisma.package.create({
         data: {
           student_id: studentId,
           classes_total: 0,
           classes_remaining: -primaryDeficit,
           kind: 'unbilled',
-          start_date: new Date()
+          start_date: new Date(),
+          first_class_date: new Date(),
+          package_number: existingPkgsCount + 1
         }
       });
     }
@@ -1518,6 +1536,7 @@ export async function registerStudent(data: any) {
       const bonusClasses = Number(data.bonus_classes) || 0;
       const grandTotal = classesTotal + bonusClasses;
 
+      const existingPkgsCount = await prisma.package.count({ where: { student_id: student.id } });
       const packageId = crypto.randomUUID();
       await prisma.package.create({
         data: {
@@ -1529,6 +1548,8 @@ export async function registerStudent(data: any) {
           classes_remaining: grandTotal,
           discount_pct: discount,
           start_date: new Date(),
+          first_class_date: new Date(),
+          package_number: existingPkgsCount + 1,
           bonus_classes: bonusClasses
         }
       });
@@ -1561,7 +1582,7 @@ export async function registerStudent(data: any) {
   return student;
 }
 
-export async function renewPackage(studentId: string, tierId: string, kind: 'renewal' | 'tournament' = 'renewal', isFamilyShared: boolean = false) {
+export async function renewPackage(studentId: string, tierId: string, kind: 'renewal' | 'tournament' | 'new' = 'renewal', isFamilyShared: boolean = false, customClasses?: number, customRate?: number, paymentMethod?: string, paymentRemarks?: string) {
   try {
     const session = await verifySession();
     if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
@@ -1588,8 +1609,8 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
     const discount = siblingsCount > 1 ? 10 : 0;
     
     // Parse total classes
-    let classesTotal = 8;
-    if (tier.inclusions && Array.isArray(tier.inclusions)) {
+    let classesTotal = customClasses || 8;
+    if (!customClasses && tier.inclusions && Array.isArray(tier.inclusions)) {
        const match = tier.inclusions[0]?.match(/(\d+)\s*classes/i);
        if (match) classesTotal = parseInt(match[1], 10);
     }
@@ -1623,6 +1644,7 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
       });
     }
 
+    const existingPkgsCount = await prisma.package.count({ where: { student_id: student.id } });
     const pkg = await prisma.package.create({
       data: {
         student_id: student.id,
@@ -1633,18 +1655,23 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
         discount_pct: discount,
         is_family_shared: isFamilyShared,
         start_date: new Date(),
+        first_class_date: new Date(),
+        package_number: existingPkgsCount + 1,
       }
     });
 
     // Auto-generate invoice for billing ledger (includes arrears)
-    const tierPrice = Number(tier.price) || 1000;
+    const tierPrice = (customClasses && customRate) ? customClasses * customRate : (Number(tier.price) || 1000);
     const finalAmount = Math.round(tierPrice * (1 - discount / 100)) + arrearsAmount;
+
     await prisma.invoice.create({
       data: {
-        student_id: student.id,
         package_id: pkg.id,
+        student_id: student.id,
         amount: finalAmount,
         status: 'paid',
+        method: paymentMethod || 'cash',
+        settlement_ref: paymentRemarks || '',
         created_at: new Date()
       }
     }).catch(err => console.warn("Auto invoice generation skipped:", err));
@@ -1700,6 +1727,7 @@ export async function renewSiblingPackage(
         });
       }
 
+      const existingPkgsCount = await prisma.package.count({ where: { student_id: student.id } });
       const pkg = await prisma.package.create({
         data: {
           student_id: student.id,
@@ -1709,6 +1737,8 @@ export async function renewSiblingPackage(
           classes_remaining: Number(alloc.classes),
           discount_pct: Number(alloc.discountPct ?? 10),
           start_date: new Date(),
+          first_class_date: new Date(),
+          package_number: existingPkgsCount + 1,
         }
       });
 

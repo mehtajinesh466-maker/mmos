@@ -41,7 +41,9 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   // Add Class Slot Modal state
   const [showAddSlotModal, setShowAddSlotModal] = useState(false);
   const [newSlotDay, setNewSlotDay] = useState<'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun'>('Mon');
-  const [newSlotTime, setNewSlotTime] = useState('16:00');
+  const [newSlotStartTime, setNewSlotStartTime] = useState('16:00');
+  const [newSlotEndTime, setNewSlotEndTime] = useState('17:00');
+  const [newSlotSummerDeduction, setNewSlotSummerDeduction] = useState(5);
   const [newSlotLevel, setNewSlotLevel] = useState('Beginner');
   const [newSlotCapacity, setNewSlotCapacity] = useState(10);
   const [newSlotCentreId, setNewSlotCentreId] = useState('');
@@ -107,19 +109,11 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
 
   const activeCoach = coaches.find(c => c.id === activeCoachId);
 
-  // Roster logic per slot: uses explicit Enrollments if configured for slot, else falls back to level matching
+  // Roster logic per slot: uses only explicit Enrollments now
   const getSlotRoster = (slot: ScheduleSlot) => {
     const slotEnrollments = enrollments.filter(e => e.slot_id === slot.id);
-    if (slotEnrollments.length > 0) {
-      const enrolledStudentIds = new Set(slotEnrollments.map(e => e.student_id));
-      return students.filter(s => enrolledStudentIds.has(s.id));
-    }
-    return students.filter(s => 
-      s.centre_id === slot.centre_id && 
-      s.level === slot.level && 
-      s.status === 'active' &&
-      s.coach_id === slot.coach_id
-    );
+    const enrolledStudentIds = new Set(slotEnrollments.map(e => e.student_id));
+    return students.filter(s => enrolledStudentIds.has(s.id));
   };
 
   // Get dynamic dates for the current week (Monday to Sunday)
@@ -255,6 +249,8 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     return filteredSlots.filter(s => normalizeDay(s.day) === normalizeDay(activeDay));
   }, [filteredSlots, activeDay]);
 
+  const formatSlotTime = (t: string) => t ? t.split('::')[0] : '';
+
   // Auto-expand first slot
   useEffect(() => {
     if (activeDaySlots.length > 0) {
@@ -331,7 +327,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       list.push({
         id: slot.id,
         day: slot.day,
-        time: slot.time,
+        time: formatSlotTime(slot.time),
         level: slot.level || 'Unassigned level',
         centreName: getCentreName(slot.centre_id),
         studentCount: roster.length,
@@ -368,6 +364,25 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       ...prev,
       [key]: newStatus
     }));
+  };
+
+  const getDefaultDuration = (slot: ScheduleSlot) => {
+    let timeStr = slot.time || '';
+    if (timeStr.includes('::')) {
+      const [t, d] = timeStr.split('::');
+      return Number(d) || 1;
+    }
+    // calculate hours from timeStr
+    const [start, end] = timeStr.split('-').map(t => t.trim());
+    if (start && end) {
+      const [sH, sM] = start.split(':').map(Number);
+      const [eH, eM] = end.split(':').map(Number);
+      if (!isNaN(sH) && !isNaN(eH)) {
+        const diff = (eH - sH) + ((eM || 0) - (sM || 0)) / 60;
+        return diff > 0 ? diff : 1;
+      }
+    }
+    return 1;
   };
 
   const handleSaveAttendance = async (slotId: string) => {
@@ -441,14 +456,15 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
         }
       }
 
-      const duration = slot.is_summer_camp ? 1 : ((slot.day === 'Sat' || slot.day === 'Sun') ? 2 : 1);
+      const duration = getDefaultDuration(slot);
       for (const key of slotMarkings) {
         const studentId = key.substring(slotId.length + 1);
         // Skip if student no longer exists in the db (stale marking from removed student)
         const studentExists = students.find(s => s.id === studentId);
         if (!studentExists) continue;
         const status = markings[key];
-        await logAttendance(studentId, status, activeCoachId, slotId, duration, slotDate, classTopic);
+        const finalDuration = status === 'informed' ? 0 : duration;
+        await logAttendance(studentId, status, activeCoachId, slotId, finalDuration, slotDate, classTopic);
         savedCount++;
       }
       const freshData = await syncDatabaseToClient();
@@ -648,7 +664,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                   className="flex items-center justify-between p-4 cursor-pointer hover:bg-canvas/20 transition-colors select-none"
                 >
                   <div className="flex items-center gap-6">
-                    <span className="font-mono font-bold text-sm text-ink">{slot.time}</span>
+                    <span className="font-mono font-bold text-sm text-ink">{formatSlotTime(slot.time)}</span>
                     <div>
                       <h4 className="font-bold text-ink text-sm flex items-center gap-2">
                         {slot.level || 'Unassigned level'}
@@ -811,15 +827,18 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                               const checked = e.target.checked;
                               const existing = db.getScheduleSlots();
                               const sIdx = existing.findIndex(s => s.id === slot.id);
+                              
+                              const baseTime = slot.time.split('::')[0];
+                              const newTime = checked ? `${baseTime}::1` : baseTime;
+                              
                               if (sIdx !== -1) {
                                 existing[sIdx].is_summer_camp = checked;
+                                existing[sIdx].time = newTime;
                                 db.save('schedule_slots', existing);
+                                setSlots([...existing]); // Trigger UI update immediately
                               }
                               try {
-                                await toggleSummerCampSlot(slot.id, checked);
-                                const freshData = await syncDatabaseToClient();
-                                db.syncFromNeon(freshData);
-                                loadData();
+                                await toggleSummerCampSlot(slot.id, checked, newTime);
                               } catch (err) {
                                 console.error("Failed to toggle summer camp on server:", err);
                               }
@@ -828,6 +847,37 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                           />
                           <span>Summer Camp Class ☀️</span>
                         </label>
+
+                        {slot.is_summer_camp && (
+                          <div className="flex items-center gap-1.5 bg-orange-50 border border-orange-200 px-2 py-1.5 rounded-lg text-xs">
+                            <span className="font-semibold text-ink">Deduct:</span>
+                            <input
+                              type="number"
+                              min={1}
+                              value={getDefaultDuration(slot)}
+                              onChange={async (e) => {
+                                const newDed = Number(e.target.value);
+                                if (!newDed || newDed < 1) return;
+                                const baseTime = slot.time.split('::')[0];
+                                const newTime = `${baseTime}::${newDed}`;
+                                const existing = db.getScheduleSlots();
+                                const sIdx = existing.findIndex(s => s.id === slot.id);
+                                if (sIdx !== -1) {
+                                  existing[sIdx].time = newTime;
+                                  db.save('schedule_slots', existing);
+                                  setSlots([...existing]); 
+                                }
+                                try {
+                                  await toggleSummerCampSlot(slot.id, true, newTime);
+                                } catch (err) {
+                                  console.error("Failed to update deduction amount:", err);
+                                }
+                              }}
+                              className="w-12 border border-line rounded px-1.5 py-0.5 text-center outline-none bg-white focus:border-forest text-ink"
+                            />
+                            <span className="text-muted-custom">classes</span>
+                          </div>
+                        )}
 
                         <button
                           onClick={() => router.push(`/progress?slotId=${slot.id}`)}
@@ -948,7 +998,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                   <span>⚙</span> Class Roster Management
                 </h3>
                 <p className="text-xs text-muted-custom mt-0.5">
-                  {rosterModalSlot.day} {rosterModalSlot.time} · {rosterModalSlot.level} ({getCentreName(rosterModalSlot.centre_id)})
+                  {rosterModalSlot.day} {formatSlotTime(rosterModalSlot.time)} · {rosterModalSlot.level} ({getCentreName(rosterModalSlot.centre_id)})
                 </p>
               </div>
               <button
@@ -990,48 +1040,20 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                              onChange={async (e) => {
                                const checked = e.target.checked;
                                try {
-                                 const slotEnrollments = enrollments.filter(ev => ev.slot_id === rosterModalSlot.id);
-                                 const hasExplicitEnrollments = slotEnrollments.length > 0;
-
-                                 if (!hasExplicitEnrollments) {
-                                   // Transition slot from level-filtered fallback to explicit roster
-                                   const fallbackStudents = students.filter(s => 
-                                     s.centre_id === rosterModalSlot.centre_id && 
-                                     s.status === 'active' && 
-                                     (s.level === rosterModalSlot.level || (rosterModalSlot.level === 'Beginner' && !s.level))
-                                   );
-
-                                   const promises = [];
-                                   for (const fs of fallbackStudents) {
-                                     const shouldEnroll = (fs.id === student.id) ? checked : true;
-                                     if (shouldEnroll) {
-                                       const uuid = typeof window !== 'undefined' && window.crypto?.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2);
-                                       db.saveEnrollment({
-                                         id: `enr-${uuid}`,
-                                         student_id: fs.id,
-                                         slot_id: rosterModalSlot.id,
-                                         enrolled_at: new Date().toISOString()
-                                       });
-                                       promises.push(enrollStudent(fs.id, rosterModalSlot.id));
-                                     }
-                                   }
-                                   await Promise.all(promises);
+                                 if (checked) {
+                                   const uuid = typeof window !== 'undefined' && window.crypto?.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2);
+                                   db.saveEnrollment({
+                                     id: `enr-${uuid}`,
+                                     student_id: student.id,
+                                     slot_id: rosterModalSlot.id,
+                                     enrolled_at: new Date().toISOString()
+                                   });
+                                   setEnrollments(db.getEnrollments());
+                                   await enrollStudent(student.id, rosterModalSlot.id);
                                  } else {
-                                   if (checked) {
-                                     const uuid = typeof window !== 'undefined' && window.crypto?.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2);
-                                     db.saveEnrollment({
-                                       id: `enr-${uuid}`,
-                                       student_id: student.id,
-                                       slot_id: rosterModalSlot.id,
-                                       enrolled_at: new Date().toISOString()
-                                     });
-                                     setEnrollments(db.getEnrollments());
-                                     await enrollStudent(student.id, rosterModalSlot.id);
-                                   } else {
-                                     db.removeEnrollment(student.id, rosterModalSlot.id);
-                                     setEnrollments(db.getEnrollments());
-                                     await unenrollStudent(student.id, rosterModalSlot.id);
-                                   }
+                                   db.removeEnrollment(student.id, rosterModalSlot.id);
+                                   setEnrollments(db.getEnrollments());
+                                   await unenrollStudent(student.id, rosterModalSlot.id);
                                  }
                                  const freshData = await syncDatabaseToClient();
                                  db.syncFromNeon(freshData);
@@ -1098,12 +1120,15 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                 const targetCentreId = newSlotCentreId || (centres[0]?.id || 'c-1');
                 
                 try {
+                  const baseTime = `${newSlotStartTime} - ${newSlotEndTime}`;
+                  const finalTime = newSlotIsSummerCamp ? `${baseTime}::${newSlotSummerDeduction}` : baseTime;
+
                   const newSlot: ScheduleSlot = {
                     id: `slot-${crypto.randomUUID()}`,
                     centre_id: targetCentreId,
                     coach_id: targetCoachId,
                     day: newSlotDay,
-                    time: newSlotTime,
+                    time: finalTime,
                     level: newSlotLevel,
                     capacity: newSlotCapacity,
                     is_summer_camp: newSlotIsSummerCamp
@@ -1114,7 +1139,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                   db.save('schedule_slots', existingSlots);
                   
                   try {
-                    await createScheduleSlot(targetCentreId, targetCoachId, newSlotDay, newSlotTime, newSlotLevel, newSlotCapacity, newSlotIsSummerCamp);
+                    await createScheduleSlot(targetCentreId, targetCoachId, newSlotDay, finalTime, newSlotLevel, newSlotCapacity, newSlotIsSummerCamp, newSlot.id);
                   } catch (err) {
                     console.warn("Server createScheduleSlot fallback:", err);
                   }
@@ -1123,7 +1148,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                   window.dispatchEvent(new Event('db-synced'));
                   
                   setShowAddSlotModal(false);
-                  setSaveStatus(`✓ Class slot created: ${newSlotDay} ${newSlotTime} (${newSlotLevel})`);
+                  setSaveStatus(`✓ Class slot created: ${newSlotDay} ${formatSlotTime(finalTime)} (${newSlotLevel})`);
                   setTimeout(() => setSaveStatus(''), 4000);
                 } catch (err: any) {
                   alert("Error creating slot: " + err.message);
@@ -1150,16 +1175,28 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
-                  <label className="font-bold text-ink">Time (HH:MM) *</label>
+                  <label className="font-bold text-ink">Start Time *</label>
                   <input
-                    type="text"
-                    value={newSlotTime}
-                    onChange={(e) => setNewSlotTime(e.target.value)}
-                    placeholder="16:00"
+                    type="time"
+                    value={newSlotStartTime}
+                    onChange={(e) => setNewSlotStartTime(e.target.value)}
                     required
                     className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
                   />
                 </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-bold text-ink">End Time *</label>
+                  <input
+                    type="time"
+                    value={newSlotEndTime}
+                    onChange={(e) => setNewSlotEndTime(e.target.value)}
+                    required
+                    className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
                   <label className="font-bold text-ink">Level *</label>
                   <select
@@ -1214,17 +1251,31 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                 />
               </div>
 
-              <div className="flex items-center gap-2 py-1">
-                <input
-                  type="checkbox"
-                  id="newSlotIsSummerCamp"
-                  checked={newSlotIsSummerCamp}
-                  onChange={(e) => setNewSlotIsSummerCamp(e.target.checked)}
-                  className="rounded border-line text-forest focus:ring-forest w-4 h-4 cursor-pointer"
-                />
-                <label htmlFor="newSlotIsSummerCamp" className="font-bold text-ink cursor-pointer select-none">
-                  Mark as Summer Camp Class ☀️
-                </label>
+              <div className="flex flex-col gap-2 py-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="newSlotIsSummerCamp"
+                    checked={newSlotIsSummerCamp}
+                    onChange={(e) => setNewSlotIsSummerCamp(e.target.checked)}
+                    className="rounded border-line text-forest focus:ring-forest w-4 h-4 cursor-pointer"
+                  />
+                  <label htmlFor="newSlotIsSummerCamp" className="font-bold text-ink cursor-pointer select-none">
+                    Mark as Summer Camp Class ☀️
+                  </label>
+                </div>
+                {newSlotIsSummerCamp && (
+                  <div className="flex flex-col gap-1.5 mt-2 ml-6 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                    <label className="font-bold text-ink text-xs">Classes to deduct per attendance</label>
+                    <input
+                      type="number"
+                      value={newSlotSummerDeduction}
+                      onChange={(e) => setNewSlotSummerDeduction(Number(e.target.value))}
+                      min={1}
+                      className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none w-32"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="pt-4 border-t border-line flex gap-3">

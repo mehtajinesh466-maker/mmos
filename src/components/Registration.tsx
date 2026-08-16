@@ -319,11 +319,6 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
         </div>
       )}
 
-      {/* Top Banner */}
-      <div className="p-4 rounded-[14px] bg-emerald-50/50 border border-emerald-100 border-l-4 border-l-forest text-xs text-ink/80">
-        ✍ <b className="text-ink">Register student.</b> Creates the student record, the family link, the first package and queues the welcome message — one pass, no re-keying.
-      </div>
-
       {/* Form Container */}
       <form onSubmit={handleSubmit} className="bg-surface border border-line rounded-[14px] p-8 shadow-sm space-y-8">
         

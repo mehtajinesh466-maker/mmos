@@ -17,9 +17,22 @@ export const Attendance: React.FC<AttendanceProps> = ({
   onQueueChange,
 }) => {
   const getDefaultDuration = (slot: ScheduleSlot) => {
-    if (slot.is_summer_camp) return 1;
-    const isWeekend = slot.day === 'Sat' || slot.day === 'Sun';
-    return isWeekend ? 2 : 1;
+    let timeStr = slot.time || '';
+    if (timeStr.includes('::')) {
+      const [t, d] = timeStr.split('::');
+      return Number(d) || 1;
+    }
+    // calculate hours from timeStr
+    const [start, end] = timeStr.split('-').map(t => t.trim());
+    if (start && end) {
+      const [sH, sM] = start.split(':').map(Number);
+      const [eH, eM] = end.split(':').map(Number);
+      if (!isNaN(sH) && !isNaN(eH)) {
+        const diff = (eH - sH) + ((eM || 0) - (sM || 0)) / 60;
+        return diff > 0 ? diff : 1;
+      }
+    }
+    return 1;
   };
 
   const [selectedDate, setSelectedDate] = useState<string>(
@@ -205,25 +218,11 @@ export const Attendance: React.FC<AttendanceProps> = ({
     return activePkgs.length === 0;
   };
 
-  // Roster logic per slot: uses explicit enrollments if present, else level filter
+  // Roster logic per slot: uses only explicit enrollments now
   const getSlotRoster = (slot: ScheduleSlot) => {
     const slotEnrollments = enrollments.filter(e => e.slot_id === slot.id);
-    if (slotEnrollments.length > 0) {
-      const enrolledIds = new Set(slotEnrollments.map(e => e.student_id));
-      return students.filter(s => enrolledIds.has(s.id));
-    }
-    
-    // Check if slot was explicitly cleared/marked empty
-    if (typeof window !== 'undefined' && localStorage.getItem(`explicit_empty_slot_${slot.id}`) === 'true') {
-      return [];
-    }
-
-    return students.filter(s => 
-      s.centre_id === slot.centre_id && 
-      s.level === slot.level && 
-      s.status === 'active' &&
-      s.coach_id === slot.coach_id
-    );
+    const enrolledIds = new Set(slotEnrollments.map(e => e.student_id));
+    return students.filter(s => enrolledIds.has(s.id));
   };
 
   const handleClearRoster = async () => {
@@ -246,7 +245,9 @@ export const Attendance: React.FC<AttendanceProps> = ({
       db.syncFromNeon(freshData);
       setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
     } catch (err: any) {
-      alert("Failed to clear roster: " + err.message);
+      console.error("Failed to clear roster: " + err.message);
+      setSaveStatus("❌ Failed to clear roster: " + err.message);
+      setTimeout(() => setSaveStatus(''), 5000);
     } finally {
       setRosterUpdating(false);
     }
@@ -272,7 +273,9 @@ export const Attendance: React.FC<AttendanceProps> = ({
       db.syncFromNeon(freshData);
       setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
     } catch (err: any) {
-      alert("Failed to reset roster: " + err.message);
+      console.error("Failed to reset roster: " + err.message);
+      setSaveStatus("❌ Failed to reset roster: " + err.message);
+      setTimeout(() => setSaveStatus(''), 5000);
     } finally {
       setRosterUpdating(false);
     }
@@ -321,7 +324,8 @@ export const Attendance: React.FC<AttendanceProps> = ({
       const todayVal = ty * 10000 + tm * 100 + td;
       const attVal  = ay * 10000 + am * 100 + ad;
       if (attVal > todayVal) {
-        alert(`Cannot mark attendance for a future date (${selectedDate}).`);
+        setSaveStatus(`❌ Error: Cannot log attendance for a future date (${selectedDate}).`);
+        setTimeout(() => setSaveStatus(''), 5000);
         return;
       }
     }
@@ -399,7 +403,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
         const status = markings[key];
         if (!status) continue;
 
-        const duration = billedHours[key] ?? getDefaultDuration(slot);
+        const duration = status === 'informed' ? 0 : (billedHours[key] ?? getDefaultDuration(slot));
         const record: AttendanceType = {
           id: `att-${slot.id}-${studentId}-${selectedDate}`,
           student_id: studentId,
@@ -604,7 +608,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
                   className="flex items-center justify-between p-4 cursor-pointer hover:bg-canvas/20 transition-colors select-none"
                 >
                   <div className="flex items-center gap-6">
-                    <span className="font-mono font-bold text-sm text-ink">{slot.time}</span>
+                    <span className="font-mono font-bold text-sm text-ink">{slot.time?.split('::')[0]}</span>
                     <div>
                       <h4 className="font-bold text-ink text-sm flex items-center gap-2">
                         {slot.level || 'Unassigned level'}
@@ -734,8 +738,13 @@ export const Attendance: React.FC<AttendanceProps> = ({
                                     onChange={e => setBilledHours(prev => ({ ...prev, [key]: Number(e.target.value) }))}
                                     className="bg-white border border-line rounded px-1.5 py-0.5 text-[9px] text-ink outline-none cursor-pointer focus:border-forest"
                                   >
-                                    <option value={1}>1 Class (Regular / Camp Promo)</option>
-                                    <option value={2}>2 Classes (Boot Camp)</option>
+                                    <option value={1}>1 Class</option>
+                                    <option value={1.5}>1.5 Classes</option>
+                                    <option value={2}>2 Classes</option>
+                                    <option value={2.5}>2.5 Classes</option>
+                                    <option value={3}>3 Classes</option>
+                                    <option value={4}>4 Classes</option>
+                                    <option value={5}>5 Classes</option>
                                   </select>
                                 )}
                               </div>
@@ -773,15 +782,17 @@ export const Attendance: React.FC<AttendanceProps> = ({
                                const checked = e.target.checked;
                                const existing = db.getScheduleSlots();
                                const sIdx = existing.findIndex(s => s.id === slot.id);
+                               const baseTime = slot.time.split('::')[0];
+                               const newTime = checked ? `${baseTime}::1` : baseTime;
+
                                if (sIdx !== -1) {
                                  existing[sIdx].is_summer_camp = checked;
+                                 existing[sIdx].time = newTime;
                                  db.save('schedule_slots', existing);
+                                 setSlots([...existing]); 
                                }
                                try {
-                                 await toggleSummerCampSlot(slot.id, checked);
-                                 const freshData = await syncDatabaseToClient();
-                                 db.syncFromNeon(freshData);
-                                 loadData();
+                                 await toggleSummerCampSlot(slot.id, checked, newTime);
                                } catch (err) {
                                  console.error("Failed to toggle summer camp on server:", err);
                                }
@@ -790,6 +801,37 @@ export const Attendance: React.FC<AttendanceProps> = ({
                            />
                            <span>Summer Camp Class ☀️</span>
                          </label>
+
+                         {slot.is_summer_camp && (
+                           <div className="flex items-center gap-1.5 bg-orange-50 border border-orange-200 px-2 py-1.5 rounded-lg text-xs">
+                             <span className="font-semibold text-ink">Deduct:</span>
+                             <input
+                               type="number"
+                               min={1}
+                               value={getDefaultDuration(slot)}
+                               onChange={async (e) => {
+                                 const newDed = Number(e.target.value);
+                                 if (!newDed || newDed < 1) return;
+                                 const baseTime = slot.time.split('::')[0];
+                                 const newTime = `${baseTime}::${newDed}`;
+                                 const existing = db.getScheduleSlots();
+                                 const sIdx = existing.findIndex(s => s.id === slot.id);
+                                 if (sIdx !== -1) {
+                                   existing[sIdx].time = newTime;
+                                   db.save('schedule_slots', existing);
+                                   setSlots([...existing]); 
+                                 }
+                                 try {
+                                   await toggleSummerCampSlot(slot.id, true, newTime);
+                                 } catch (err) {
+                                   console.error("Failed to update deduction amount:", err);
+                                 }
+                               }}
+                               className="w-12 border border-line rounded px-1.5 py-0.5 text-center outline-none bg-white focus:border-forest text-ink"
+                             />
+                             <span className="text-muted-custom">classes</span>
+                           </div>
+                         )}
 
                         <span className="text-[10px] text-muted-custom italic">
                           Present, Absent & Makeup deduct from the package · Informed does not · works offline
@@ -840,24 +882,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
                 Check students to enroll them in this explicit class slot. Deselecting all returns slot to level-filtered roster.
               </p>
 
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleClearRoster}
-                  disabled={rosterUpdating}
-                  className="flex-1 text-[10px] font-bold bg-red-50 hover:bg-red-100 active:scale-[0.98] text-red-700 border border-red-200 px-2.5 py-1.5 rounded-lg transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  🧹 Clear Roster (Start Fresh)
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRestoreDefault}
-                  disabled={rosterUpdating}
-                  className="flex-1 text-[10px] font-bold bg-canvas hover:bg-line active:scale-[0.98] text-ink border border-line px-2.5 py-1.5 rounded-lg transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  🔄 Reset (Level Fallback)
-                </button>
-              </div>
+
               
               {/* Search Box Input */}
               <input
@@ -885,64 +910,28 @@ export const Attendance: React.FC<AttendanceProps> = ({
                                setRosterUpdating(true);
                                const checked = e.target.checked;
                                try {
-                                 // Clear explicit empty slot override when checking any student
                                  if (checked) {
-                                   localStorage.removeItem(`explicit_empty_slot_${rosterModalSlot.id}`);
-                                 }
-
-                                 const slotEnrollments = enrollments.filter(ev => ev.slot_id === rosterModalSlot.id);
-                                 const hasExplicitEnrollments = slotEnrollments.length > 0;
-
-                                 if (!hasExplicitEnrollments) {
-                                   // Transition slot from level-filtered fallback to explicit roster
-                                   const fallbackStudents = students.filter(s => 
-                                     s.centre_id === rosterModalSlot.centre_id && 
-                                     s.status === 'active' && 
-                                     (s.level === rosterModalSlot.level || (rosterModalSlot.level === 'Beginner' && !s.level))
-                                   );
-
-                                   let targetRoster = [];
-                                   // If checked, only enroll the clicked student (allowing start fresh)
-                                   // instead of automatically checking all fallback students
-                                   if (checked) {
-                                     targetRoster.push(student);
-                                   }
-
-                                   const promises = [];
-                                   for (const s of targetRoster) {
-                                     const uuid = typeof window !== 'undefined' && window.crypto?.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2);
-                                     db.saveEnrollment({
-                                       id: `enr-${uuid}`,
-                                       student_id: s.id,
-                                       slot_id: rosterModalSlot.id,
-                                       enrolled_at: new Date().toISOString()
-                                     });
-                                     promises.push(enrollStudent(s.id, rosterModalSlot.id));
-                                   }
-                                   await Promise.all(promises);
+                                   const uuid = typeof window !== 'undefined' && window.crypto?.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2);
+                                   db.saveEnrollment({
+                                     id: `enr-${uuid}`,
+                                     student_id: student.id,
+                                     slot_id: rosterModalSlot.id,
+                                     enrolled_at: new Date().toISOString()
+                                   });
+                                   setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
+                                   await enrollStudent(student.id, rosterModalSlot.id);
                                  } else {
-                                   if (checked) {
-                                     const uuid = typeof window !== 'undefined' && window.crypto?.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2);
-                                     db.saveEnrollment({
-                                       id: `enr-${uuid}`,
-                                       student_id: student.id,
-                                       slot_id: rosterModalSlot.id,
-                                       enrolled_at: new Date().toISOString()
-                                     });
-                                     setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
-                                     await enrollStudent(student.id, rosterModalSlot.id);
-                                   } else {
-                                     db.removeEnrollment(student.id, rosterModalSlot.id);
-                                     setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
-                                     await unenrollStudent(student.id, rosterModalSlot.id);
-                                   }
+                                   db.removeEnrollment(student.id, rosterModalSlot.id);
+                                   setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
+                                   await unenrollStudent(student.id, rosterModalSlot.id);
                                  }
                                  const freshData = await syncDatabaseToClient();
                                  db.syncFromNeon(freshData);
                                  setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
                                } catch (err: any) {
                                  console.error("Enrollment failed:", err);
-                                 alert("Roster update failed: " + err.message);
+                                 setSaveStatus("❌ Roster update failed: " + err.message);
+                                 setTimeout(() => setSaveStatus(''), 5000);
                                  const freshData = await syncDatabaseToClient();
                                  db.syncFromNeon(freshData);
                                  setEnrollments(db.getEnrollments ? db.getEnrollments() : []);

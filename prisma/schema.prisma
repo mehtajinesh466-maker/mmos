@@ -131,10 +131,12 @@ model Package {
   discount_pct      Decimal?  @default(0) @db.Decimal(5, 2)
   frozen            Boolean?  @default(false)
   start_date        DateTime? @default(now()) @db.Date
+  first_class_date  DateTime? @db.Date
   expiry_date       DateTime? @db.Date
   ended_at          DateTime? @db.Timestamptz
   bonus_classes     Int?      @default(0)
   is_family_shared  Boolean   @default(false)
+  package_number    Int?
   invoices          Invoice[]
   student           Student   @relation(fields: [student_id], references: [id])
   tier              Tier?     @relation(fields: [tier_id], references: [id])

@@ -735,7 +735,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
         <div className="bg-surface border border-line rounded-[14px] p-5 shadow-sm relative overflow-hidden">
           <div className="text-[10px] font-bold text-muted-custom uppercase tracking-wider">Unbilled / Owed</div>
           <h2 className="text-2xl font-bold font-display text-hot-custom mt-1">
-            {formatLargeAmount(totalUnbilledOwed)}
+            AED {totalUnbilledOwed.toLocaleString()}
           </h2>
           <p className="text-[10px] text-muted-custom mt-0.5">{totalOverdueClasses} classes</p>
         </div>

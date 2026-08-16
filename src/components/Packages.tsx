@@ -261,7 +261,16 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
         document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
-        const res = await renewPackage(selectedStudentId, tierId, packageType.toLowerCase() as any, isFamilyShared);
+        const res = await renewPackage(
+          selectedStudentId, 
+          tierId, 
+          packageType.toLowerCase() as any, 
+          isFamilyShared,
+          Number(packageSize),
+          Number(ratePerClass),
+          paymentMethod,
+          paymentRemarks
+        );
         if (res && !res.success) {
           throw new Error(res.error);
         }
@@ -322,11 +331,6 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
           {saveStatus}
         </div>
       )}
-
-      {/* Top Banner */}
-      <div className="p-4 rounded-[14px] bg-emerald-50/50 border border-emerald-100 border-l-4 border-l-forest text-xs text-ink/80">
-        ✍ <b className="text-ink">New / renew package.</b> Price and discounts compute automatically. On save the balance is topped up and the renewal alert clears.
-      </div>
 
       {/* Form Container */}
       <form onSubmit={handleSubmit} className="bg-surface border border-line rounded-[14px] p-8 shadow-sm space-y-8">

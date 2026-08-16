@@ -138,7 +138,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
       let attCursor = 0;
 
       studentPkgs.forEach((pkg, index) => {
-        const pkgNo = index + 1;
+        const pkgNo = pkg.package_number || (index + 1);
         const classesPaid = pkg.classes_total;
         const used = (pkg.classes_total + (pkg.bonus_classes || 0)) - pkg.classes_remaining;
         const balance = pkg.classes_remaining;
@@ -153,7 +153,8 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
         const pkgAtts = studentAtts.slice(attCursor, attCursor + classesPaid);
         attCursor += classesPaid;
 
-        const firstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '-');
+        const dynamicFirstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '-');
+        const firstClass = pkg.first_class_date ? new Date(pkg.first_class_date).toISOString().split('T')[0] : dynamicFirstClass;
 
         let ended = '-';
         if (pkg.classes_remaining === 0) {
