@@ -188,7 +188,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
       { Metric: "Student ID", Value: activeStudent.id },
       { Metric: "Centre", Value: getCentreName(activeStudent.centre_id) },
       { Metric: "Assigned Coach", Value: getCoachName(activeStudent.coach_id) },
-      { Metric: "Level", Value: activeStudent.level || "Beginner" },
+      { Metric: "Level", Value: activeStudent.level || "Beginner 1" },
       { Metric: "Classes Left", Value: studentMetrics.classesLeft },
       { Metric: "Classes Completed", Value: studentMetrics.completed },
       { Metric: "Rate per Class (AED)", Value: studentMetrics.rate },
@@ -326,9 +326,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     const student90d = studentMetrics?.cls90d || 0;
     const studentDays = typeof studentMetrics?.daysSince === 'number' ? studentMetrics.daysSince : 0;
 
-    // Calculate actual peer average across all other students
-    const levelPeers = students.filter(s => s.id !== activeStudent.id && s.level === activeStudent.level);
-    const peersList = levelPeers.length > 0 ? levelPeers : students.filter(s => s.id !== activeStudent.id);
+    // Calculate actual peer average across all other students (same level AND same centre)
+    const levelPeers = students.filter(s => s.id !== activeStudent.id && s.level === activeStudent.level && s.centre_id === activeStudent.centre_id);
+    const peersList = levelPeers.length > 0 ? levelPeers : [];
     
     let avg30 = 0;
     let avg90 = 0;
@@ -338,6 +338,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
       let sum30 = 0;
       let sum90 = 0;
       let sumDays = 0;
+      let validDaysCount = 0;
       
       peersList.forEach(p => {
         const pAtts = attendance.filter(a => a.student_id === p.id && a.status === 'present');
@@ -348,18 +349,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
           if (diffDays >= -1 && diffDays <= 30) p30++;
           if (diffDays >= -1 && diffDays <= 90) p90++;
         });
-        const pDays = p.last_attended
-          ? Math.floor((today.getTime() - new Date(p.last_attended).getTime()) / 86400000)
-          : 365;
         
         sum30 += p30;
         sum90 += p90;
-        sumDays += pDays;
+        
+        if (p.last_attended) {
+          sumDays += Math.floor((today.getTime() - new Date(p.last_attended).getTime()) / 86400000);
+          validDaysCount++;
+        }
       });
       
       avg30 = Math.round((sum30 / peersList.length) * 10) / 10;
       avg90 = Math.round((sum90 / peersList.length) * 10) / 10;
-      avgDays = Math.round(sumDays / peersList.length);
+      avgDays = validDaysCount > 0 ? Math.round(sumDays / validDaysCount) : 0;
     }
 
     chartInstances.current.comparison = new Chart(comparisonChartRef.current, {
@@ -581,6 +583,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
 
             <div className="flex-1 space-y-1">
               <h2 className="text-2xl font-bold text-white font-display leading-tight">{activeStudent.name}</h2>
+              <div className="text-[10px] text-mint mb-1 flex items-center gap-1.5 opacity-90">
+                <span className="font-semibold">Parent Contact:</span>
+                <span>{activeStudent.parent_name || '—'}</span>
+              </div>
               <div className="text-xs text-mint/80 flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span>FIDE ID: {activeStudent.fide_id || '—'}</span>
                 <span>·</span>
@@ -597,7 +603,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
                 <span>·</span>
                 <span className="text-white">Level:</span>
                 <select
-                  value={activeStudent.level || 'Beginner'}
+                  value={activeStudent.level || 'Beginner 1'}
                   onChange={async (e) => {
                     const newLevel = e.target.value as any;
                     try {
@@ -619,10 +625,12 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
                   }}
                   className="bg-[#122f28] border border-white/20 rounded px-1.5 py-0.5 text-xs text-white outline-none cursor-pointer hover:bg-white/10"
                 >
-                  <option value="Beginner" className="text-white bg-[#122f28]">Beginner</option>
-                  <option value="Intermediate" className="text-white bg-[#122f28]">Intermediate</option>
+                  <option value="Beginner 1" className="text-white bg-[#122f28]">Beginner 1</option>
+                  <option value="Beginner 2" className="text-white bg-[#122f28]">Beginner 2</option>
+                  <option value="Intermediate 1" className="text-white bg-[#122f28]">Intermediate 1</option>
+                  <option value="Intermediate 2" className="text-white bg-[#122f28]">Intermediate 2</option>
                   <option value="Advanced" className="text-white bg-[#122f28]">Advanced</option>
-                  <option value="Pro-Track" className="text-white bg-[#122f28]">Pro-Track</option>
+                  <option value="FIDE" className="text-white bg-[#122f28]">FIDE</option>
                 </select>
               </div>
               <div className="flex gap-2 pt-1">
@@ -770,7 +778,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
                 <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
                   <span className="text-[#C4A249]">♟</span> Vs peers
                 </h3>
-                <p className="text-[10px] text-muted-custom mt-0.5">Same centre, same level ({students.filter(st => st.centre_id === activeStudent.centre_id).length} students).</p>
+                <p className="text-[10px] text-muted-custom mt-0.5">Same centre, same level ({students.filter(st => st.centre_id === activeStudent.centre_id && st.level === activeStudent.level).length} students).</p>
               </div>
               <div className="h-56">
                 <canvas ref={comparisonChartRef}></canvas>

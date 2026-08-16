@@ -360,6 +360,13 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
                   .filter(s => s.name.toLowerCase().includes(studentSearchQuery.toLowerCase()))
                   .map(s => <option key={s.id} value={s.id}>{s.name.toUpperCase()}</option>)}
               </select>
+              {selectedStudentId && (
+                <div className="mt-1 text-[10px] text-muted-custom">
+                  {students.find(s => s.id === selectedStudentId)?.parent_name ? (
+                    <>Parent Contact: <span className="font-semibold text-ink">{students.find(s => s.id === selectedStudentId)?.parent_name}</span></>
+                  ) : 'No parent contact logged'}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -601,7 +608,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
           <h3 className="text-xs font-bold text-[#C4A249] tracking-wider uppercase border-b border-line pb-2">OUTSTANDING CHECK</h3>
           
           <div className="p-4 rounded-xl bg-red-50 border border-red-200 border-l-4 border-l-hot-custom text-xs leading-relaxed text-ink/90">
-            <b className="text-hot-custom">Blocked if unpaid.</b> If this student has unbilled classes, the platform adds them to this invoice — it will not start a fresh package on top of an unpaid balance. That rule is what closes the unbilled-class leak (defensible range AED 62–76K from the package ledger).
+            <b className="text-hot-custom">Blocked if unpaid.</b> If this student has unbilled classes, the platform adds them to this invoice — it will not start a fresh package on top of an unpaid balance. That rule is what closes the unbilled-class leak.
           </div>
         </div>
 

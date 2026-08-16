@@ -1204,10 +1204,12 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                     onChange={(e) => setNewSlotLevel(e.target.value)}
                     className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
                   >
-                    <option value="Beginner">Beginner</option>
-                    <option value="Intermediate">Intermediate</option>
+                    <option value="Beginner 1">Beginner 1</option>
+                    <option value="Beginner 2">Beginner 2</option>
+                    <option value="Intermediate 1">Intermediate 1</option>
+                    <option value="Intermediate 2">Intermediate 2</option>
                     <option value="Advanced">Advanced</option>
-                    <option value="Pro-Track">Pro-Track</option>
+                    <option value="FIDE">FIDE</option>
                   </select>
                 </div>
               </div>

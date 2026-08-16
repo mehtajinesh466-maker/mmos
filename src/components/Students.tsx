@@ -548,10 +548,12 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
           className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
         >
           <option>All levels</option>
-          <option value="Beginner">Beginner</option>
-          <option value="Intermediate">Intermediate</option>
+          <option value="Beginner 1">Beginner 1</option>
+          <option value="Beginner 2">Beginner 2</option>
+          <option value="Intermediate 1">Intermediate 1</option>
+          <option value="Intermediate 2">Intermediate 2</option>
           <option value="Advanced">Advanced</option>
-          <option value="Pro-Track">Pro-Track</option>
+          <option value="FIDE">FIDE</option>
         </select>
 
         <select
