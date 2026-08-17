@@ -40,7 +40,8 @@ export const ReportsCentre: React.FC<ReportsCentreProps> = ({ currentUser }) => 
         { id: 'cohort-retention', title: 'Cohort Retention', desc: 'Centre' },
         { id: 'slow-risk', title: 'Slow / At-Risk', desc: 'Centre · Engagement · Level · Segment' },
         { id: 'package-expiry', title: 'Package Expiry', desc: 'Centre · Level · Segment' },
-        { id: 'unpaid-attendance', title: 'Unpaid Attendance', desc: 'Centre · Level · Engagement' }
+        { id: 'unpaid-attendance', title: 'Unpaid Attendance', desc: 'Centre · Level · Engagement' },
+        { id: 'weekly-calendar', title: 'Weekly Class Calendar', desc: 'Active class placements across the week, grouped by level within each time slot.' }
       ]
     },
     {

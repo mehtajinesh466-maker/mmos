@@ -95,7 +95,10 @@ export default function ExecutivePage() {
     const jltCentreId = centres.find(c => c.name === 'JLT')?.id || 'c-2';
 
     return students.filter(s => {
-      if (filterCentre !== 'All' && s.centre_id !== (filterCentre === 'JLT' ? jltCentreId : bayCentreId)) return false;
+      if (filterCentre !== 'All') {
+        const selectedCentreRecord = centres.find(c => c.name === filterCentre);
+        if (selectedCentreRecord && s.centre_id !== selectedCentreRecord.id) return false;
+      }
       
       // Filter level
       if (filterLevel !== 'All') {
@@ -774,8 +777,9 @@ export default function ExecutivePage() {
           <span className="font-bold text-[#C4A249] uppercase tracking-wider text-[10px] mr-1">SLICE</span>
           <select value={filterCentre} onChange={e => setFilterCentre(e.target.value)} className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none">
             <option value="All">All centres</option>
-            <option value="Bay Avenue">Bay Avenue</option>
-            <option value="JLT">JLT</option>
+            {centres.map(c => (
+              <option key={c.id} value={c.name}>{c.name}</option>
+            ))}
           </select>
           <select value={filterSegment} onChange={e => setFilterSegment(e.target.value)} className="bg-white border border-line rounded-lg px-2.5 py-1 text-xs text-ink outline-none">
             <option value="All">All segments</option>

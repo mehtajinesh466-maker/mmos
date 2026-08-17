@@ -941,8 +941,15 @@ export const Attendance: React.FC<AttendanceProps> = ({
                              }}
                              className="w-4 h-4 rounded border-line text-forest focus:ring-forest cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                           />
-                          <div>
-                            <span className="font-bold text-xs text-ink block">{student.name}</span>
+                           <div>
+                            <span className="font-bold text-xs text-ink block">
+                              {student.name}
+                              {student.level && rosterModalSlot.level && student.level !== rosterModalSlot.level && (
+                                <span className="inline-block ml-2 text-[8px] font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.2" title={`Class level: ${rosterModalSlot.level}`}>
+                                  ⚠️ Level Mismatch
+                                </span>
+                              )}
+                            </span>
                             <span className="text-[9px] text-muted-custom">{student.level || 'No level'}</span>
                           </div>
                         </div>

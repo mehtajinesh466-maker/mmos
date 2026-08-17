@@ -36,6 +36,8 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [centres, setCentres] = useState<any[]>([]);
+  const [scheduleSlots, setScheduleSlots] = useState<any[]>([]);
+  const [enrollments, setEnrollments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Chart ref
@@ -51,6 +53,8 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
     setCoaches(db.getCoaches());
     setCentres(db.getCentres());
     setInvoices(db.get<any>('invoices') || []);
+    setScheduleSlots(db.getScheduleSlots ? db.getScheduleSlots() : []);
+    setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
     setLoading(false);
   };
 
@@ -2559,17 +2563,140 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         sumRunRate: totalRevenue,
         sumClasses: totalCls30D,
         sumStudents: totalStudents,
+      };
+    }
+
+    if (reportId === 'weekly-calendar') {
+      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const timeSlots = [
+        '10 AM–11 AM',
+        '11 AM–12 PM',
+        '12 PM–1 PM',
+        '2 PM–3 PM',
+        '3 PM–4 PM',
+        '4 PM–5 PM',
+        '5 PM–6 PM',
+        '6 PM–7 PM',
+        '7 PM–8 PM'
+      ];
+      
+      const levelOrder = ['Beginner 1', 'Beginner 2', 'Intermediate 1', 'Intermediate 1+', 'Intermediate 2', 'Junior Interm 1+'];
+      
+      const mapStudentLevel = (lvl: string): string => {
+        const clean = String(lvl || '').trim();
+        if (!clean || clean === 'Not assigned' || clean === 'Beginner') return 'Beginner 1';
+        if (clean.includes('Beginner 1')) return 'Beginner 1';
+        if (clean.includes('Beginner 2')) return 'Beginner 2';
+        if (clean.includes('Intermediate 1+')) return 'Intermediate 1+';
+        if (clean.includes('Intermediate 1')) return 'Intermediate 1';
+        if (clean.includes('Intermediate 2')) return 'Intermediate 2';
+        if (clean.includes('Intermediate')) return 'Intermediate 1';
+        if (clean.includes('Advanced')) return 'Intermediate 2';
+        if (clean.includes('Pro-Track')) return 'Intermediate 2';
+        if (clean.includes('FIDE')) return 'Junior Interm 1+';
+        if (clean.includes('Junior Interm 1+')) return 'Junior Interm 1+';
+        return clean;
+      };
+
+      const getHourSlot = (timeStr: string): string => {
+        const parts = timeStr.split(':');
+        if (parts.length === 0) return '';
+        const hour = parseInt(parts[0], 10);
+        if (isNaN(hour)) return '';
+        
+        if (hour === 10) return '10 AM–11 AM';
+        if (hour === 11) return '11 AM–12 PM';
+        if (hour === 12) return '12 PM–1 PM';
+        if (hour === 14) return '2 PM–3 PM';
+        if (hour === 15) return '3 PM–4 PM';
+        if (hour === 16) return '4 PM–5 PM';
+        if (hour === 17) return '5 PM–6 PM';
+        if (hour === 18) return '6 PM–7 PM';
+        if (hour === 19) return '7 PM–8 PM';
+        
+        if (hour < 12) return `${hour} AM–${hour + 1} ${hour + 1 === 12 ? 'PM' : 'AM'}`;
+        if (hour === 12) return '12 PM–1 PM';
+        const pmHour = hour - 12;
+        return `${pmHour} PM–${pmHour + 1} PM`;
+      };
+
+      // Filter active students only
+      const activeStudentMap = new Map();
+      students.forEach(s => {
+        if (s.status === 'active') {
+          if (filterCentre !== 'All') {
+            const selectedCentreRecord = centres.find(c => c.name === filterCentre);
+            if (selectedCentreRecord && s.centre_id !== selectedCentreRecord.id) return;
+          }
+          activeStudentMap.set(s.id, s);
+        }
+      });
+
+      // Map slots
+      const slotMap = new Map();
+      scheduleSlots.forEach(s => {
+        slotMap.set(s.id, s);
+      });
+
+      // Calculate class placements per day
+      const dayCounts: Record<string, number> = {
+        Monday: 0, Tuesday: 0, Wednesday: 0, Thursday: 0, Friday: 0, Saturday: 0, Sunday: 0
+      };
+
+      // Group students by [day][timeSlot][level] = Set of student names
+      const calendarData: Record<string, Record<string, Record<string, Set<string>>>> = {};
+      days.forEach(d => {
+        calendarData[d] = {};
+        timeSlots.forEach(ts => {
+          calendarData[d][ts] = {};
+        });
+      });
+
+      let totalPlacements = 0;
+      enrollments.forEach(enr => {
+        const student = activeStudentMap.get(enr.student_id);
+        const slot = slotMap.get(enr.slot_id);
+        if (student && slot) {
+          const day = slot.day;
+          const cleanTime = slot.time.split('::')[0];
+          const timeSlot = getHourSlot(cleanTime);
+          const level = mapStudentLevel(student.level);
+          
+          if (days.includes(day) && timeSlots.includes(timeSlot)) {
+            dayCounts[day] = (dayCounts[day] || 0) + 1;
+            totalPlacements++;
+            
+            if (!calendarData[day][timeSlot][level]) {
+              calendarData[day][timeSlot][level] = new Set();
+            }
+            calendarData[day][timeSlot][level].add(student.name);
+          }
+        }
+      });
+
+      return {
+        calendarData,
+        dayCounts,
+        totalPlacements,
+        days,
+        timeSlots,
+        levelOrder,
+        labels: [],
+        datasetData: [],
+        totalStudentsVal: activeStudentMap.size,
+        totalClassesVal: totalPlacements,
+        totalRunRateVal: 0,
+        totalPackagesVal: 0,
+        annualisedVal: 0,
+        tableRows: [],
+        sumRunRate: 0,
+        sumClasses: totalPlacements,
+        sumStudents: activeStudentMap.size,
         rawList: []
       };
     }
 
-
     // Default reports calculations
-
-
-
-    // Default reports calculations
-
     let kpi1 = { label: 'Active Students', val: filteredStudents.length.toString() };
     let kpi2 = { label: 'Average LTV', val: 'AED 0' };
     let kpi3 = { label: 'Unbilled Value', val: 'AED 0' };
@@ -2681,11 +2808,11 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         };
       })
     };
-  }, [filteredStudents, reportId, diceBy, coaches, packages, invoices, attendance, filterCentre, filterCoach, filterSegment, filterEngagement, filterLevel, students, centres]);
+  }, [filteredStudents, reportId, diceBy, coaches, packages, invoices, attendance, filterCentre, filterCoach, filterSegment, filterEngagement, filterLevel, students, centres, scheduleSlots, enrollments]);
 
   // Draw Chart
   const drawChart = () => {
-    if (!chartRef.current) return;
+    if (!chartRef.current || reportId === 'weekly-calendar') return;
 
     if (chartInstance.current) {
       chartInstance.current.destroy();
@@ -3379,7 +3506,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       )}
 
       {/* KPI Cards */}
-      {(currentUser?.role !== 'front_desk' && currentUser?.role !== 'coach') && (
+      {(currentUser?.role !== 'front_desk' && currentUser?.role !== 'coach' && reportId !== 'weekly-calendar') && (
         reportId === 'membership-economics' || reportId === 'cohort-retention' ? (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-surface border border-line rounded-2xl p-4 shadow-sm">
@@ -3521,7 +3648,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       )}
 
       {/* Custom layout for all reports */}
-      {(reportId === 'revenue-summary' || reportId === 'unbilled-leak' || reportId === 'data-reconciliation' || reportId === 'collection-list' || reportId === 'membership-economics' || reportId === 'lifetime-value' || reportId === 'rate-card' || reportId === 'attendance-summary' || reportId === 'engagement-report' || reportId === 'cohort-retention' || reportId === 'slow-risk' || reportId === 'package-expiry' || reportId === 'unpaid-attendance' || reportId === 'growth-trajectory' || reportId === 'centre-perf' || reportId === 'board-investor-pack' || reportId === 'new-centre-model' || reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') ? (
+      {(reportId === 'revenue-summary' || reportId === 'unbilled-leak' || reportId === 'data-reconciliation' || reportId === 'collection-list' || reportId === 'membership-economics' || reportId === 'lifetime-value' || reportId === 'rate-card' || reportId === 'attendance-summary' || reportId === 'engagement-report' || reportId === 'cohort-retention' || reportId === 'slow-risk' || reportId === 'package-expiry' || reportId === 'unpaid-attendance' || reportId === 'growth-trajectory' || reportId === 'centre-perf' || reportId === 'board-investor-pack' || reportId === 'new-centre-model' || reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution' || reportId === 'weekly-calendar') ? (
         (reportId === 'coach-utilisation' || reportId === 'load-capacity' || reportId === 'coach-retention' || reportId === 'revenue-contribution') ? (
           <div className="space-y-6">
             {/* Utilisation / Retention / Revenue % chart */}
@@ -5423,6 +5550,94 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        ) : reportId === 'weekly-calendar' ? (
+          <div className="bg-white border border-line rounded-2xl p-6 shadow-sm space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-line pb-4">
+              <div>
+                <h2 className="text-lg font-bold text-forest font-display">Master Moves Chess Club — Weekly Class Calendar</h2>
+                <p className="text-xs text-muted-custom mt-1">
+                  <span className="font-bold text-ink">{reportData.totalPlacements} class placements</span> across the week · Active students only · grouped by level within each time slot
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={handleExcelDownload} className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">↓ Excel</button>
+                <button onClick={exportToPDF} className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">⎙ PDF</button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 items-center py-2 text-[11px] border-b border-line no-print">
+              <span className="font-semibold text-muted-custom uppercase tracking-wider text-[9px] mr-1">LEVELS:</span>
+              {reportData.levelOrder.map((lvl: string) => (
+                <span key={lvl} className="px-2.5 py-1 rounded-full bg-canvas border border-line text-ink font-bold">
+                  {lvl}
+                </span>
+              ))}
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-line bg-surface">
+              <table className="w-full text-xs border-collapse min-w-[1000px]">
+                <thead>
+                  <tr className="bg-canvas border-b border-line text-[10px] font-bold text-muted-custom uppercase tracking-wider text-left">
+                    <th className="py-3.5 px-3 border-r border-line w-28">Time</th>
+                    {reportData.days.map((day: string) => {
+                      const count = reportData.dayCounts[day] || 0;
+                      return (
+                        <th key={day} className="py-3.5 px-3 border-r border-line last:border-r-0 text-left">
+                          <div className="font-extrabold text-ink">{day}</div>
+                          <div className="text-[9px] text-muted-custom mt-0.5 normal-case font-medium">
+                            {count} classes
+                          </div>
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line align-top">
+                  {reportData.timeSlots.map((timeSlot: string) => (
+                    <tr key={timeSlot} className="hover:bg-canvas/10 align-top transition-colors">
+                      <td className="py-3.5 px-3 border-r border-line font-bold text-forest text-xs w-28 bg-canvas/30">
+                        {timeSlot}
+                      </td>
+                      {reportData.days.map((day: string) => {
+                        const levelsObj = reportData.calendarData[day]?.[timeSlot] || {};
+                        const levelKeys = Object.keys(levelsObj).sort((a, b) => {
+                          const idxA = reportData.levelOrder.indexOf(a);
+                          const idxB = reportData.levelOrder.indexOf(b);
+                          if (idxA === -1 && idxB === -1) return a.localeCompare(b);
+                          if (idxA === -1) return 1;
+                          if (idxB === -1) return -1;
+                          return idxA - idxB;
+                        });
+
+                        return (
+                          <td key={day} className="py-3.5 px-3 border-r border-line last:border-r-0 text-left space-y-3">
+                            {levelKeys.length === 0 ? (
+                              <span className="text-muted-custom/40 italic text-[10px]"></span>
+                            ) : (
+                              levelKeys.map((lvl: string) => {
+                                const studentNamesSet = levelsObj[lvl];
+                                const sortedNames = Array.from(studentNamesSet).sort().join(' · ');
+                                return (
+                                  <div key={lvl} className="space-y-1">
+                                    <div className="text-[10px] font-extrabold text-[#C4A249] uppercase tracking-wider">
+                                      {lvl}
+                                    </div>
+                                    <div className="text-xs text-ink font-semibold leading-relaxed">
+                                      {sortedNames}
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         ) : (

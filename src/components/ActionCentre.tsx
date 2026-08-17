@@ -112,6 +112,13 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
   const recoverableAmount = unpaidStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
   const classesGivenAway = unpaidStudents.reduce((sum, s) => sum + ((s.flags as any)?.unpaid_classes || 0), 0);
 
+  // List 3: Registered but not scheduled (active students with 0 slot enrollments)
+  const enrolls = db.getEnrollments ? db.getEnrollments() : [];
+  const unscheduledStudents = filteredStudents.filter(s => {
+    if (s.status !== 'active') return false;
+    return !enrolls.some(e => e.student_id === s.id);
+  });
+
   // List 2: Expiring packages (classes left <= 3, classes left > 0)
   const expiringPackages: any[] = [];
   filteredStudents.forEach(s => {
@@ -285,10 +292,11 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
       )}
 
       {/* Top KPIs Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {[
           { label: 'INVOICE NOW', value: invoiceNowCount, desc: 'attending unpaid', color: 'before:bg-forest' },
-          { label: 'RENEW NOW', value: renewNowCount, desc: '≤3 classes left', color: 'before:bg-warm-custom' },
+          { label: 'RENEW NOW', value: renewNowCount, desc: '≤20% left', color: 'before:bg-warm-custom' },
+          { label: 'NOT SCHEDULED', value: unscheduledStudents.length, desc: 'active with 0 slots', color: 'before:bg-[#C4A249]' },
           { label: 'RECOVERABLE', value: recoverableAmount === 0 ? 'AED 0' : `AED ${recoverableAmount.toLocaleString()}`, desc: 'invoice today', color: 'before:bg-brass' },
           { label: 'CLASSES GIVEN AWAY', value: classesGivenAway, desc: 'never billed', color: 'before:bg-hot-custom' }
         ].map((kpi, idx) => (
@@ -521,6 +529,76 @@ export const ActionCentre: React.FC<ActionCentreProps> = ({ currentUser, activeC
                         className="bg-forest hover:bg-forest/90 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg transition-all active:scale-95 cursor-pointer shadow-sm"
                       >
                         Renew
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Table 3: Registered but not scheduled */}
+      <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm">
+        <div className="flex justify-between items-center mb-1">
+          <h3 className="text-lg font-bold font-display text-ink flex items-center gap-2">
+            <span className="text-[#C4A249]">📅</span> Registered but not scheduled
+          </h3>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => exportTableToCSV('#unscheduled-table', 'unscheduled_students.csv')}
+              className="bg-white border border-line text-ink font-bold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1 cursor-pointer transition-all"
+            >
+              ↓ Excel
+            </button>
+            <button 
+              onClick={exportToPDF}
+              className="bg-white border border-line text-ink font-bold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1 cursor-pointer transition-all"
+            >
+              ⎙ PDF
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-muted-custom mb-6">Active students on the book who are not enrolled in any weekly schedule class slots.</p>
+
+        <div className="overflow-x-auto">
+          <table id="unscheduled-table" className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-line text-left">
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Student</th>
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Centre</th>
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Coach</th>
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Level</th>
+                <th className="text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Alternate Centre</th>
+                <th className="text-right text-xs font-bold text-muted-custom tracking-wider uppercase py-3 px-4">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {unscheduledStudents.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="text-center text-muted-custom py-8">
+                    ✓ All active students are scheduled! Great job!
+                  </td>
+                </tr>
+              ) : (
+                unscheduledStudents.map(student => (
+                  <tr key={student.id} className="border-b border-line hover:bg-canvas/50 transition-all">
+                    <td className="py-4 px-4 font-semibold text-ink">
+                      <a href={`/student-dashboard?studentId=${student.id}`} className="hover:text-forest hover:underline">
+                        {student.name}
+                      </a>
+                    </td>
+                    <td className="py-4 px-4 text-ink">{student.centre?.name || '—'}</td>
+                    <td className="py-4 px-4 text-ink">{getCoachName(student.coach)}</td>
+                    <td className="py-4 px-4 text-ink font-medium">{student.level || 'No level'}</td>
+                    <td className="py-4 px-4 text-muted-custom">{student.alternate_centre || '—'}</td>
+                    <td className="py-4 px-4 text-right">
+                      <button
+                        onClick={() => router.push(`/schedule?studentId=${student.id}`)}
+                        className="bg-forest hover:bg-forest/90 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg transition-all active:scale-95 cursor-pointer shadow-sm"
+                      >
+                        Schedule now
                       </button>
                     </td>
                   </tr>
