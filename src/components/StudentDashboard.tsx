@@ -4,8 +4,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Chart, registerables } from 'chart.js';
 import { db } from '../lib/db';
-import type { User, Student, Package, Attendance, ProgressLog, Invoice } from '../lib/db';
+import type { User, Student, Package, Attendance, ProgressLog, Invoice, Coach, Centre } from '../lib/db';
 import { sendProgressReport, syncDatabaseToClient, saveStudentDB } from '../app/actions';
+import { exportTableToCSV } from '../lib/export';
 
 Chart.register(...registerables);
 
@@ -24,6 +25,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
   const [progressLogs, setProgressLogs] = useState<ProgressLog[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [coaches, setCoaches] = useState<Coach[]>([]);
+  const [centres, setCentres] = useState<Centre[]>([]);
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
@@ -64,6 +67,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     const logs = db.getProgressLogs();
     const invs = db.get<Invoice>('invoices') || [];
     const notifs = db.getNotifications ? db.getNotifications() : [];
+    const cochs = db.getCoaches();
+    const cents = db.getCentres();
 
     setStudents(stds);
     setPackages(pkgs);
@@ -71,6 +76,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     setProgressLogs(logs);
     setInvoices(invs);
     setNotifications(notifs);
+    setCoaches(cochs);
+    setCentres(cents);
     setLoading(false);
 
     if (stds.length > 0 && !selectedStudentId) {
@@ -282,7 +289,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     destroyCharts();
 
     const today = new Date();
-    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && a.status === 'present');
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && ['present', 'absent', 'makeup'].includes(a.status));
 
     // 1. Attendance trend per month
     const months = ['Feb-25', 'Mar-25', 'Apr-25', 'May-25', 'Jun-25', 'Jul-25', 'Aug-25', 'Sep-25', 'Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26', 'Jul-26', 'Aug-26'];
@@ -290,13 +297,13 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     const getMonthLabel = (dateStr: string) => {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return '';
-      const m = monthNames[d.getMonth()];
-      const y = d.getFullYear().toString().slice(-2);
+      const m = monthNames[d.getUTCMonth()];
+      const y = d.getUTCFullYear().toString().slice(-2);
       return `${m}-${y}`;
     };
 
     const trendData = months.map(m => {
-      return studentAtts.filter(a => getMonthLabel(a.date) === m).length;
+      return studentAtts.filter(a => getMonthLabel(a.date) === m).reduce((sum, a) => sum + (a.duration || 1), 0);
     });
 
     chartInstances.current.trend = new Chart(trendChartRef.current, {
@@ -341,13 +348,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
       let validDaysCount = 0;
       
       peersList.forEach(p => {
-        const pAtts = attendance.filter(a => a.student_id === p.id && a.status === 'present');
+        const pAtts = attendance.filter(a => a.student_id === p.id && ['present', 'absent', 'makeup'].includes(a.status));
         let p30 = 0;
         let p90 = 0;
         pAtts.forEach(a => {
           const diffDays = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
-          if (diffDays >= -1 && diffDays <= 30) p30++;
-          if (diffDays >= -1 && diffDays <= 90) p90++;
+          const amt = typeof a.duration === 'number' ? a.duration : 1;
+          if (diffDays >= -1 && diffDays <= 30) p30 += amt;
+          if (diffDays >= -1 && diffDays <= 90) p90 += amt;
         });
         
         sum30 += p30;
@@ -456,7 +464,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
         return a.id.localeCompare(b.id);
       });
     const studentAtts = attendance
-      .filter(a => a.student_id === activeStudent.id && a.status === 'present')
+      .filter(a => a.student_id === activeStudent.id && ['present', 'absent', 'makeup'].includes(a.status))
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     let attCursor = 0;
@@ -518,14 +526,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     const getMonthLabel = (dateStr: string) => {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return '';
-      const m = monthNames[d.getMonth()];
-      const y = d.getFullYear().toString().slice(-2);
+      const m = monthNames[d.getUTCMonth()];
+      const y = d.getUTCFullYear().toString().slice(-2);
       return `${m}-${y}`;
     };
 
-    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && (a.status === 'present' || a.status === 'makeup'));
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && ['present', 'absent', 'makeup'].includes(a.status));
     return months.map(m => {
-      const count = studentAtts.filter(a => getMonthLabel(a.date) === m).length;
+      const count = studentAtts.filter(a => getMonthLabel(a.date) === m).reduce((sum, a) => sum + (a.duration || 1), 0);
       return { name: m, count };
     });
   }, [activeStudent, attendance]);
@@ -944,7 +952,99 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
                 )}
               </div>
             </div>
- 
+
+            {/* Attendance History Panel */}
+            <div className="bg-surface border border-line rounded-[14px] p-5 shadow-sm space-y-4 col-span-1 lg:col-span-2">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
+                    <span className="text-[#C4A249]">📋</span> Attendance History
+                  </h3>
+                  <p className="text-[10px] text-muted-custom mt-0.5 font-semibold">Student chronological attendance record history.</p>
+                </div>
+                <div className="flex gap-2 no-print">
+                  <button 
+                    onClick={() => exportTableToCSV('#student-attendance-table', `${activeStudent.name}_attendance.csv`)}
+                    className="bg-white border border-line text-ink font-bold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1 cursor-pointer transition-all"
+                  >
+                    ↓ Excel
+                  </button>
+                  <button 
+                    onClick={() => window.print()}
+                    className="bg-white border border-line text-ink font-bold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1 cursor-pointer transition-all"
+                  >
+                    ⎙ PDF
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table id="student-attendance-table" className="w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-line text-left text-muted-custom text-[9px] uppercase tracking-wider font-bold">
+                      <th className="py-2.5 px-3 w-12 font-mono">S.No</th>
+                      <th className="py-2.5 px-3">Date</th>
+                      <th className="py-2.5 px-3">Centre</th>
+                      <th className="py-2.5 px-3">Coach</th>
+                      <th className="py-2.5 px-3">Topic / Lesson</th>
+                      <th className="py-2.5 px-3 text-right">Duration</th>
+                      <th className="py-2.5 px-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attendance.filter(a => a.student_id === activeStudent.id).length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-muted-custom">
+                          No attendance logs found for this student.
+                        </td>
+                      </tr>
+                    ) : (
+                      [...attendance]
+                        .filter(a => a.student_id === activeStudent.id)
+                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                        .map((a, idx) => {
+                          const coachObj = coaches.find(c => c.id === a.coach_id);
+                          const centreObj = centres.find(c => c.id === activeStudent.centre_id);
+                          return (
+                            <tr key={a.id || idx} className="border-b border-line hover:bg-canvas/30 transition-colors font-medium">
+                              <td className="py-2.5 px-3 font-mono text-muted-custom">{idx + 1}</td>
+                              <td className="py-2.5 px-3 font-mono text-ink">
+                                {new Date(a.date).toISOString().split('T')[0]}
+                              </td>
+                              <td className="py-2.5 px-3 text-ink">
+                                {centreObj ? centreObj.name : '—'}
+                              </td>
+                              <td className="py-2.5 px-3 text-ink uppercase text-[10px]">
+                                {coachObj ? coachObj.name : 'Unassigned'}
+                              </td>
+                              <td className="py-2.5 px-3 text-ink">
+                                {a.topic || '—'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono text-ink">
+                                {a.duration !== undefined ? a.duration : 1} hrs
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${
+                                  a.status === 'present' 
+                                    ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
+                                    : a.status === 'absent' 
+                                    ? 'bg-red-100 text-red-700 border-red-200'
+                                    : a.status === 'informed'
+                                    ? 'bg-blue-100 text-blue-700 border-blue-200'
+                                    : 'bg-amber-100 text-amber-700 border-amber-200'
+                                }`}>
+                                  {a.status}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             {/* Tournament Logs Panel */}
             <div className="bg-surface border border-line rounded-[14px] p-5 shadow-sm space-y-4 col-span-1 lg:col-span-2">
               <div className="flex justify-between items-center">

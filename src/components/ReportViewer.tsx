@@ -166,7 +166,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       });
 
       const classes30D = attendance.filter(a => {
-        if (a.status !== 'present' && a.status !== 'makeup') return false;
+        if (!['present', 'absent', 'makeup'].includes(a.status)) return false;
         const aDate = new Date(a.date);
         return aDate >= thirtyDaysAgo && aDate <= anchorDate && filteredStudents.some(s => s.id === a.student_id);
       });
@@ -632,7 +632,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
 
       const studentClasses30D = new Map<string, number>();
       attendance.forEach(a => {
-        if (a.status !== 'present' && a.status !== 'makeup') return;
+        if (!['present', 'absent', 'makeup'].includes(a.status)) return;
         const aDate = new Date(a.date);
         if (aDate >= thirtyDaysAgo && aDate <= anchorDate) {
           studentClasses30D.set(a.student_id, (studentClasses30D.get(a.student_id) || 0) + 1);
@@ -761,6 +761,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           classesPaid,
           classesUsed,
           balance,
+          classesRemaining: balance,
           pctLeft,
           is20PctTrigger,
           totalPaid: s.total_paid || 0
@@ -837,7 +838,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
 
       attendance.forEach(a => {
         if (!filteredStudents.some(s => s.id === a.student_id)) return;
-        if (a.status !== 'present' && a.status !== 'makeup') return;
+        if (!['present', 'absent', 'makeup'].includes(a.status)) return;
 
         const aDate = new Date(a.date);
         if (aDate >= thirtyDaysAgo && aDate <= anchorDate) {
@@ -1328,7 +1329,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         if (unpaidClasses > 0) {
           const sPkgs = packages.filter(p => p.student_id === s.id);
           const totalPaidClasses = sPkgs.reduce((sum, p) => sum + p.classes_total, 0);
-          const presentAtts = attendance.filter(a => a.student_id === s.id && (a.status === 'present' || a.status === 'makeup'));
+          const presentAtts = attendance.filter(a => a.student_id === s.id && ['present', 'absent', 'makeup'].includes(a.status));
 
           // Find oldest unpaid class date:
           // The oldest unpaid class would be the index totalPaidClasses in presentAtts sorted chronologically!
@@ -1413,8 +1414,8 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         return `${m}-${y}`;
       };
 
-      // Filter present/makeup attendances for students in scope
-      const validAtts = attendance.filter(a => (a.status === 'present' || a.status === 'makeup') && filteredStudents.some(s => s.id === a.student_id));
+      // Filter present/makeup/absent attendances for students in scope
+      const validAtts = attendance.filter(a => ['present', 'absent', 'makeup'].includes(a.status) && filteredStudents.some(s => s.id === a.student_id));
 
       const monthlyData = months.map(m => {
         let bayCount = 0;
@@ -1500,8 +1501,8 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       });
 
       // Total attendances
-      const bayAtts = attendance.filter(a => (a.status === 'present' || a.status === 'makeup') && filteredStudents.some(s => s.id === a.student_id && s.centre_id !== 'c-2'));
-      const jltAtts = attendance.filter(a => (a.status === 'present' || a.status === 'makeup') && filteredStudents.some(s => s.id === a.student_id && s.centre_id === 'c-2'));
+      const bayAtts = attendance.filter(a => ['present', 'absent', 'makeup'].includes(a.status) && filteredStudents.some(s => s.id === a.student_id && s.centre_id !== 'c-2'));
+      const jltAtts = attendance.filter(a => ['present', 'absent', 'makeup'].includes(a.status) && filteredStudents.some(s => s.id === a.student_id && s.centre_id === 'c-2'));
 
       // Average monthly classes (over 12 months)
       const avgClassesBay = Math.round(bayAtts.length / 12);
@@ -1515,7 +1516,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       const unbilledBay = activeBayStudents.reduce((sum, s) => {
         const sPkgs = packages.filter(p => p.student_id === s.id);
         const totalPaidClasses = sPkgs.reduce((tot, p) => tot + p.classes_total, 0);
-        const totalUsedClasses = attendance.filter(a => a.student_id === s.id && (a.status === 'present' || a.status === 'makeup')).length;
+        const totalUsedClasses = attendance.filter(a => a.student_id === s.id && ['present', 'absent', 'makeup'].includes(a.status)).length;
         const unpaidClasses = totalUsedClasses > totalPaidClasses ? totalUsedClasses - totalPaidClasses : 0;
         const latestPkg = sPkgs.find(p => p.classes_remaining > 0) || sPkgs[0] || null;
         const rate = latestPkg ? getPackageRate(latestPkg, invoices, db.getTiers()) : 100;
@@ -1525,7 +1526,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       const unbilledJlt = activeJltStudents.reduce((sum, s) => {
         const sPkgs = packages.filter(p => p.student_id === s.id);
         const totalPaidClasses = sPkgs.reduce((tot, p) => tot + p.classes_total, 0);
-        const totalUsedClasses = attendance.filter(a => a.student_id === s.id && (a.status === 'present' || a.status === 'makeup')).length;
+        const totalUsedClasses = attendance.filter(a => a.student_id === s.id && ['present', 'absent', 'makeup'].includes(a.status)).length;
         const unpaidClasses = totalUsedClasses > totalPaidClasses ? totalUsedClasses - totalPaidClasses : 0;
         const latestPkg = sPkgs.find(p => p.classes_remaining > 0) || sPkgs[0] || null;
         const rate = latestPkg ? getPackageRate(latestPkg, invoices, db.getTiers()) : 90;
@@ -1552,7 +1553,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         return `${m}-${y}`;
       };
 
-      const validAtts = attendance.filter(a => (a.status === 'present' || a.status === 'makeup') && filteredStudents.some(s => s.id === a.student_id));
+      const validAtts = attendance.filter(a => ['present', 'absent', 'makeup'].includes(a.status) && filteredStudents.some(s => s.id === a.student_id));
       const monthlyData = months.map(m => {
         let bayCount = 0;
         let jltCount = 0;
@@ -1642,7 +1643,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
 
       // Student-classes delivered (30d)
       const classesDelivered30D = attendance.filter(a => {
-        if (a.status !== 'present' && a.status !== 'makeup') return false;
+        if (!['present', 'absent', 'makeup'].includes(a.status)) return false;
         const aDate = new Date(a.date);
         return aDate >= thirtyDaysAgo && aDate <= anchorDate && filteredStudents.some(s => s.id === a.student_id);
       }).length;
@@ -1662,7 +1663,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
           rate = (price * (1 - discount / 100)) / totalClasses;
         }
 
-        const studentAtts30D = attendance.filter(a => a.student_id === s.id && (a.status === 'present' || a.status === 'makeup') && new Date(a.date) >= thirtyDaysAgo && new Date(a.date) <= anchorDate).length;
+        const studentAtts30D = attendance.filter(a => a.student_id === s.id && ['present', 'absent', 'makeup'].includes(a.status) && new Date(a.date) >= thirtyDaysAgo && new Date(a.date) <= anchorDate).length;
         runRate += studentAtts30D * rate;
       });
 
@@ -1762,7 +1763,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
         return `${m}-${y}`;
       };
 
-      const jltAtts = attendance.filter(a => (a.status === 'present' || a.status === 'makeup') && filteredStudents.some(s => s.id === a.student_id && s.centre_id === 'c-2'));
+      const jltAtts = attendance.filter(a => ['present', 'absent', 'makeup'].includes(a.status) && filteredStudents.some(s => s.id === a.student_id && s.centre_id === 'c-2'));
 
       const jltActuals = jltMonths.map(m => {
         return jltAtts.filter(a => getMonthLabel(a.date) === m).length;
@@ -2740,7 +2741,7 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
       
       const totalInvoiced = invoices.filter(i => filteredStudents.some(s => s.id === i.student_id));
       const totalInvoiceAmt = totalInvoiced.reduce((sum, i) => sum + Number(i.amount), 0);
-      const totalClassesTaught = attendance.filter(a => a.status === 'present' && filteredStudents.some(s => s.id === a.student_id)).length;
+      const totalClassesTaught = attendance.filter(a => ['present', 'absent', 'makeup'].includes(a.status) && filteredStudents.some(s => s.id === a.student_id)).length;
       const avgRate = totalClassesTaught > 0 ? Math.round(totalInvoiceAmt / totalClassesTaught) : 125;
       kpi3 = { label: 'Avg Rate per Class', val: `AED ${avgRate}` };
     } else if (reportId.includes('unbilled') || reportId.includes('leak') || reportId.includes('reconciliation')) {
@@ -3231,6 +3232,22 @@ export const ReportViewer: React.FC<ReportViewerProps> = ({ reportId }) => {
   };
 
   const handleExcelDownload = () => {
+    if (reportId === 'student-class-usage') {
+      let csvContent = "\ufeffStudent Name,Centre,Coach,Level,Classes Paid,Classes Used,Balance,% Left,Status\n";
+      reportData.rawList.forEach((s: any) => {
+        csvContent += `"${s.name}","${s.centre}","${s.coach}","${s.level}",${s.classesPaid},${s.classesUsed},${s.balance},${s.pctLeft}%,"${s.segment}"\n`;
+      });
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", "student_class_usage_report.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
     const tableEl = document.querySelector('table');
     if (tableEl) {
       exportTableToCSV('table', `${reportId}_report.csv`);

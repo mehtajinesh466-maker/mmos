@@ -105,7 +105,7 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
 
     const today = new Date();
     const studentPkgs = packages.filter(p => p.student_id === activeStudent.id);
-    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && a.status === 'present');
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && ['present', 'absent', 'makeup'].includes(a.status));
     const studentInvs = invoices.filter(i => i.student_id === activeStudent.id);
 
     const classesPaid = studentPkgs.reduce((sum, p) => sum + p.classes_total, 0);
@@ -123,12 +123,12 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
     const cls30d = studentAtts.filter(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
       return diff >= -1 && diff <= 30;
-    }).length;
+    }).reduce((sum, a) => sum + (a.duration || 1), 0);
 
     const cls90d = studentAtts.filter(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
       return diff >= -1 && diff <= 90;
-    }).length;
+    }).reduce((sum, a) => sum + (a.duration || 1), 0);
 
     const lifetimePaid = studentInvs
       .filter(i => i.status === 'paid')
@@ -165,14 +165,14 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
     const getMonthLabel = (dateStr: string) => {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return '';
-      const m = monthNames[d.getMonth()];
-      const y = d.getFullYear().toString().slice(-2);
+      const m = monthNames[d.getUTCMonth()];
+      const y = d.getUTCFullYear().toString().slice(-2);
       return `${m}-${y}`;
     };
 
-    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && a.status === 'present');
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && ['present', 'absent', 'makeup'].includes(a.status));
     const trendData = months.map(m => {
-      return studentAtts.filter(a => getMonthLabel(a.date) === m).length;
+      return studentAtts.filter(a => getMonthLabel(a.date) === m).reduce((sum, a) => sum + (a.duration || 1), 0);
     });
 
     chartInstance.current = new Chart(trendChartRef.current, {
@@ -212,7 +212,7 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
         return a.id.localeCompare(b.id);
       });
     const studentAtts = attendance
-      .filter(a => a.student_id === activeStudent.id && a.status === 'present')
+      .filter(a => a.student_id === activeStudent.id && ['present', 'absent', 'makeup'].includes(a.status))
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     let attCursor = 0;
@@ -271,14 +271,14 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
     const getMonthLabel = (dateStr: string) => {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return '';
-      const m = monthNames[d.getMonth()];
-      const y = d.getFullYear().toString().slice(-2);
+      const m = monthNames[d.getUTCMonth()];
+      const y = d.getUTCFullYear().toString().slice(-2);
       return `${m}-${y}`;
     };
 
-    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && (a.status === 'present' || a.status === 'makeup'));
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && ['present', 'absent', 'makeup'].includes(a.status));
     return months.map(m => {
-      const count = studentAtts.filter(a => getMonthLabel(a.date) === m).length;
+      const count = studentAtts.filter(a => getMonthLabel(a.date) === m).reduce((sum, a) => sum + (a.duration || 1), 0);
       return { name: m, count };
     });
   }, [activeStudent, attendance]);

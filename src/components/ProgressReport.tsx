@@ -114,7 +114,7 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
 
     const today = new Date();
     const studentPkgs = packages.filter(p => p.student_id === activeStudent.id);
-    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && a.status === 'present');
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && ['present', 'absent', 'makeup'].includes(a.status));
     const logs = progressLogs.filter(l => l.student_id === activeStudent.id);
 
     const classesLeft = studentPkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
@@ -126,12 +126,12 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
     const cls30d = studentAtts.filter(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
       return diff >= -1 && diff <= 30;
-    }).length;
+    }).reduce((sum, a) => sum + (a.duration || 1), 0);
 
     const cls90d = studentAtts.filter(a => {
       const diff = Math.floor((today.getTime() - new Date(a.date).getTime()) / 86400000);
       return diff >= -1 && diff <= 90;
-    }).length;
+    }).reduce((sum, a) => sum + (a.duration || 1), 0);
 
     // Filter logs that are high mastery ratings (4 or 5)
     const topicsMastered = logs.filter(l => (l.rating || 0) >= 4).length || 2;
@@ -160,14 +160,14 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
     const getMonthLabel = (dateStr: string) => {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return '';
-      const m = monthNames[d.getMonth()];
-      const y = d.getFullYear().toString().slice(-2);
+      const m = monthNames[d.getUTCMonth()];
+      const y = d.getUTCFullYear().toString().slice(-2);
       return `${m}-${y}`;
     };
 
-    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && a.status === 'present');
+    const studentAtts = attendance.filter(a => a.student_id === activeStudent.id && ['present', 'absent', 'makeup'].includes(a.status));
     const lineData = months.map(m => {
-      return studentAtts.filter(a => getMonthLabel(a.date) === m).length;
+      return studentAtts.filter(a => getMonthLabel(a.date) === m).reduce((sum, a) => sum + (a.duration || 1), 0);
     });
 
     chartInstances.current.line = new Chart(lineChartRef.current, {

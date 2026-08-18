@@ -939,9 +939,9 @@ export async function updateStudentFlags(studentId: string, pkgId?: string, upda
   });
 
   // Separate packages:
-  // - Paid packages (new, renewal, tournament, completed)
-  // - Unbilled and Settled packages (arrears tracking)
-  const paidPkgs = allPkgs.filter(p => p.kind !== 'unbilled' && p.kind !== 'settled');
+  // - Paid packages (new, renewal, tournament, completed, settled)
+  // - Unbilled packages (arrears tracking)
+  const paidPkgs = allPkgs.filter(p => p.kind !== 'unbilled');
   const unbilledPkgs = allPkgs.filter(p => p.kind === 'unbilled');
 
   // Sort paidPkgs stably by start_date asc, then by kind order, and break ties with ID localeCompare to ensure stability.
@@ -1677,6 +1677,7 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
     }).catch(err => console.warn("Auto invoice generation skipped:", err));
 
     // Transition unbilled packages to settled status
+    const renewalDate = new Date();
     for (const unbilled of unbilledPkgs) {
       if (unbilled.classes_remaining < 0) {
         await prisma.package.update({
@@ -1684,7 +1685,9 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
           data: {
             kind: 'settled',
             classes_total: Math.abs(unbilled.classes_remaining),
-            classes_remaining: 0
+            classes_remaining: 0,
+            start_date: renewalDate,
+            ended_at: renewalDate
           }
         });
       }

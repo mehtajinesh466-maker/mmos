@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../lib/db';
-import { renewPackage, renewSiblingPackage, syncDatabaseToClient } from '../app/actions';
+import { renewPackage, renewSiblingPackage, syncDatabaseToClient, saveStudentDB } from '../app/actions';
 import { useSearchParams } from 'next/navigation';
 
 interface PackagesProps {
@@ -36,20 +36,89 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
   // Student search filter state
   const [studentSearchQuery, setStudentSearchQuery] = useState('');
 
-  // Fetch active students and tiers on mount
+  // Centre state
+  const [centres, setCentres] = useState<any[]>([]);
+  const [selectedCentreId, setSelectedCentreId] = useState<string>('All');
+
+  // Fetch active students, centres, and tiers on mount
+  useEffect(() => {
+    const allCentres = db.getCentres();
+    setCentres(allCentres);
+    setTiers(db.getTiers());
+  }, []);
+
+  // Sync selectedCentreId with activeCentre prop if it changes
+  useEffect(() => {
+    if (activeCentre) {
+      setSelectedCentreId(activeCentre);
+    }
+  }, [activeCentre]);
+
+  // Fetch active students based on selectedCentreId
   useEffect(() => {
     let list = db.getStudents().filter(s => ['active', 'inactive', 'departed'].includes(s.status));
-    if (activeCentre !== 'All') {
-      list = list.filter(s => s.centre_id === activeCentre || s.id === studentIdParam);
+    if (selectedCentreId !== 'All') {
+      list = list.filter(s => s.centre_id === selectedCentreId || s.id === studentIdParam);
     }
     setStudents(list);
+    
     if (studentIdParam && list.some(s => s.id === studentIdParam)) {
       setSelectedStudentId(studentIdParam);
-    } else if (list.length > 0) {
-      setSelectedStudentId(list[0].id);
+    } else if (selectedStudentId && list.some(s => s.id === selectedStudentId)) {
+      // Keep currently selected student
+    } else {
+      setSelectedStudentId('');
     }
-    setTiers(db.getTiers());
-  }, [activeCentre, studentIdParam]);
+  }, [selectedCentreId, studentIdParam]);
+
+  const getCentreName = (centreId?: string) => {
+    if (!centreId) return 'Unassigned';
+    const c = centres.find(ctr => ctr.id === centreId);
+    return c ? c.name : 'Unassigned';
+  };
+
+  const handleMoveStudentCentre = async (studentId: string, newCentreId: string) => {
+    const studentToUpdate = db.getStudents().find(s => s.id === studentId);
+    if (!studentToUpdate) return;
+
+    try {
+      setIsSubmitting(true);
+      const updated = {
+        ...studentToUpdate,
+        centre_id: newCentreId
+      };
+      
+      // 1. Update in client local storage
+      db.saveStudent(updated);
+
+      // 2. Update in Postgres database
+      await saveStudentDB(updated);
+
+      // 3. Sync from Postgres database to ensure client is in sync
+      try {
+        const freshData = await syncDatabaseToClient();
+        db.syncFromNeon(freshData);
+      } catch (syncErr) {
+        console.warn("Post-update sync failed:", syncErr);
+      }
+
+      // 4. Reload local data
+      let list = db.getStudents().filter(s => ['active', 'inactive', 'departed'].includes(s.status));
+      if (selectedCentreId !== 'All') {
+        list = list.filter(s => s.centre_id === selectedCentreId || s.id === studentIdParam);
+      }
+      setStudents(list);
+
+      // Update state message
+      setSaveStatus(`✓ Student centre moved to ${getCentreName(newCentreId)} successfully.`);
+      setTimeout(() => setSaveStatus(''), 4000);
+      document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err: any) {
+      alert('Error moving student centre: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // Dynamically calculate total
   const getPackageTotal = () => {
@@ -318,10 +387,19 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
         </div>
 
         <div>
-          <select className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none">
-            <option>All centres</option>
-            <option>Bay Avenue</option>
-            <option>JLT</option>
+          <select 
+            value={selectedCentreId}
+            onChange={e => {
+              setSelectedCentreId(e.target.value);
+              setSelectedStudentId('');
+              setStudentSearchQuery('');
+            }}
+            className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none"
+          >
+            <option value="All">All centres</option>
+            {centres.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
           </select>
         </div>
       </div>
@@ -341,6 +419,24 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-ink">Centre Filter *</label>
+              <select 
+                value={selectedCentreId}
+                onChange={e => {
+                  setSelectedCentreId(e.target.value);
+                  setSelectedStudentId('');
+                  setStudentSearchQuery('');
+                }}
+                className="bg-white border border-line rounded-lg px-3 py-2.5 text-xs text-ink outline-none"
+              >
+                <option value="All">All Centres</option>
+                {centres.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-ink">Primary Student *</label>
               <input 
                 type="text"
@@ -357,14 +453,33 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
               >
                 <option value="">Select Student...</option>
                 {students
-                  .filter(s => s.name.toLowerCase().includes(studentSearchQuery.toLowerCase()))
+                  .filter(s => s.id === selectedStudentId || s.name.toLowerCase().includes(studentSearchQuery.toLowerCase()))
                   .map(s => <option key={s.id} value={s.id}>{s.name.toUpperCase()}</option>)}
               </select>
               {selectedStudentId && (
-                <div className="mt-1 text-[10px] text-muted-custom">
-                  {students.find(s => s.id === selectedStudentId)?.parent_name ? (
-                    <>Parent Contact: <span className="font-semibold text-ink">{students.find(s => s.id === selectedStudentId)?.parent_name}</span></>
-                  ) : 'No parent contact logged'}
+                <div className="mt-1 text-[10px] text-muted-custom space-y-1">
+                  {students.find(s => s.id === selectedStudentId)?.parent_name && (
+                    <div>Parent Contact: <span className="font-semibold text-ink">{students.find(s => s.id === selectedStudentId)?.parent_name}</span></div>
+                  )}
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span>Current Centre: <span className="font-semibold text-ink">{getCentreName(students.find(s => s.id === selectedStudentId)?.centre_id)}</span></span>
+                    <span className="text-muted-custom">·</span>
+                    <span>Move to:</span>
+                    <select
+                      value={students.find(s => s.id === selectedStudentId)?.centre_id || ''}
+                      onChange={async (e) => {
+                        const newCentreId = e.target.value;
+                        if (confirm(`Are you sure you want to move this student to ${getCentreName(newCentreId)}?`)) {
+                          await handleMoveStudentCentre(selectedStudentId, newCentreId);
+                        }
+                      }}
+                      className="bg-white border border-line rounded px-1.5 py-0.5 text-[10px] text-ink outline-none font-medium cursor-pointer"
+                    >
+                      {centres.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               )}
             </div>
@@ -516,7 +631,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
                     <div className="flex-1 min-w-[180px]">
                       <div className="font-semibold text-xs text-ink">{student?.name?.toUpperCase() || 'STUDENT'}</div>
                       <div className="text-[10px] text-muted-custom">
-                        Level: {student?.level || 'Beginner'} · Centre: {student?.centre_id || 'Main'}
+                        Level: {student?.level || 'Beginner'} · Centre: {getCentreName(student?.centre_id)}
                       </div>
                     </div>
 
@@ -569,7 +684,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
                   .filter(s => !siblingAllocations.some(a => a.studentId === s.id))
                   .map(s => (
                     <option key={s.id} value={s.id}>
-                      {s.name.toUpperCase()} ({s.parent_name ? `Parent: ${s.parent_name}` : s.centre_id})
+                      {s.name.toUpperCase()} ({s.parent_name ? `Parent: ${s.parent_name}` : getCentreName(s.centre_id)})
                     </option>
                   ))}
               </select>

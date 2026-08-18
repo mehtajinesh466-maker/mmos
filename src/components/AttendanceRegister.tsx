@@ -22,6 +22,8 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
   const [filterCoach, setFilterCoach] = useState<string>('All coaches');
   const [filterSegment, setFilterSegment] = useState<string>('All segments');
   const [filterEngagement, setFilterEngagement] = useState<string>('All engagement');
+  const [filterDate, setFilterDate] = useState<string>('');
+  const [filterMonth, setFilterMonth] = useState<string>('All months');
   const [search, setSearch] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'students' | 'logs'>('students');
 
@@ -30,12 +32,16 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
     setFilterCoach('All coaches');
     setFilterSegment('All segments');
     setFilterEngagement('All engagement');
+    setFilterDate('');
+    setFilterMonth('All months');
     setSearch('');
   };
 
   // Sorting
   const [sortCol, setSortCol] = useState<string>('studentName');
   const [sortAsc, setSortAsc] = useState<boolean>(true);
+  const [logSortCol, setLogSortCol] = useState<string>('date');
+  const [logSortAsc, setLogSortAsc] = useState<boolean>(false);
 
   // Editing state
   const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
@@ -196,6 +202,23 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
     if (filterEngagement !== 'All engagement') {
       rows = rows.filter(r => r.engagement === filterEngagement);
     }
+    if (filterDate) {
+      rows = rows.filter(s => {
+        return attendance.some(a => a.student_id === s.id && new Date(a.date).toISOString().split('T')[0] === filterDate);
+      });
+    }
+    if (filterMonth !== 'All months') {
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      rows = rows.filter(s => {
+        return attendance.some(a => {
+          if (a.student_id !== s.id) return false;
+          const d = new Date(a.date);
+          const m = monthNames[d.getUTCMonth()];
+          const y = d.getUTCFullYear().toString().slice(-2);
+          return `${m}-${y}` === filterMonth;
+        });
+      });
+    }
     if (search) {
       const q = search.toLowerCase();
       rows = rows.filter(r => 
@@ -218,7 +241,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       if (av > bv) return sortAsc ? 1 : -1;
       return 0;
     });
-  }, [enriched, filterCentre, filterCoach, filterSegment, filterEngagement, search, sortCol, sortAsc]);
+  }, [enriched, filterCentre, filterCoach, filterSegment, filterEngagement, filterDate, filterMonth, attendance, search, sortCol, sortAsc]);
 
   // Memoized consolidated logs list of all days
   const filteredLogs = useMemo(() => {
@@ -246,6 +269,18 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
     if (filterCoach !== 'All coaches') {
       rows = rows.filter(r => r.coachName.toUpperCase() === filterCoach.toUpperCase());
     }
+    if (filterDate) {
+      rows = rows.filter(r => new Date(r.date).toISOString().split('T')[0] === filterDate);
+    }
+    if (filterMonth !== 'All months') {
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      rows = rows.filter(r => {
+        const d = new Date(r.date);
+        const m = monthNames[d.getUTCMonth()];
+        const y = d.getUTCFullYear().toString().slice(-2);
+        return `${m}-${y}` === filterMonth;
+      });
+    }
     if (search) {
       const q = search.toLowerCase();
       rows = rows.filter(r => 
@@ -254,9 +289,28 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       );
     }
 
-    // Sort by date descending
-    return rows.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [attendance, students, coaches, centres, filterCentre, filterCoach, search]);
+    // Sort dynamically
+    return rows.sort((a, b) => {
+      let av = a[logSortCol as keyof typeof a];
+      let bv = b[logSortCol as keyof typeof b];
+
+      if (av === null || av === undefined) return 1;
+      if (bv === null || bv === undefined) return -1;
+
+      if (logSortCol === 'date') {
+        const dateA = new Date(av as string).getTime();
+        const dateB = new Date(bv as string).getTime();
+        return logSortAsc ? dateA - dateB : dateB - dateA;
+      }
+
+      if (typeof av === 'string') av = av.toLowerCase();
+      if (typeof bv === 'string') bv = bv.toLowerCase();
+
+      if (av < bv) return logSortAsc ? -1 : 1;
+      if (av > bv) return logSortAsc ? 1 : -1;
+      return 0;
+    });
+  }, [attendance, students, coaches, centres, filterCentre, filterCoach, filterDate, filterMonth, search, logSortCol, logSortAsc]);
 
   const toggleSort = (col: string) => {
     if (sortCol === col) {
@@ -273,6 +327,24 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       className={`text-[9px] font-bold text-muted-custom tracking-widest uppercase py-3 px-4 cursor-pointer select-none hover:text-ink whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}
     >
       {children}{sortCol === col ? (sortAsc ? ' ↑' : ' ↓') : ''}
+    </th>
+  );
+
+  const toggleLogSort = (col: string) => {
+    if (logSortCol === col) {
+      setLogSortAsc(!logSortAsc);
+    } else {
+      setLogSortCol(col);
+      setLogSortAsc(col === 'date' ? false : true);
+    }
+  };
+
+  const LogSortTh = ({ col, children, right }: { col: string; children: React.ReactNode; right?: boolean }) => (
+    <th
+      onClick={() => toggleLogSort(col)}
+      className={`text-[9px] font-bold text-muted-custom tracking-widest uppercase py-3 px-4 cursor-pointer select-none hover:text-ink whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}
+    >
+      {children}{logSortCol === col ? (logSortAsc ? ' ↑' : ' ↓') : ''}
     </th>
   );
 
@@ -300,6 +372,22 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
   const uniqueSegments = useMemo(() => {
     return [...new Set(enriched.map(r => r.segment))].sort();
   }, [enriched]);
+
+  const uniqueMonths = useMemo(() => {
+    const monthsSet = new Set<string>();
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    attendance.forEach(a => {
+      const d = new Date(a.date);
+      if (!isNaN(d.getTime())) {
+        const m = monthNames[d.getUTCMonth()];
+        const y = d.getUTCFullYear().toString().slice(-2);
+        monthsSet.add(`${m}-${y}`);
+      }
+    });
+    return Array.from(monthsSet).sort((a, b) => {
+      return new Date('01-' + a).getTime() - new Date('01-' + b).getTime();
+    });
+  }, [attendance]);
 
   const parentChild = useMemo(() => {
     return students[0] || null;
@@ -475,6 +563,23 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
             {uniqueCoaches.map(coach => <option key={coach} value={coach}>{coach}</option>)}
           </select>
 
+          <select
+            value={filterMonth}
+            onChange={e => setFilterMonth(e.target.value)}
+            className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none cursor-pointer"
+          >
+            <option value="All months">All months</option>
+            {uniqueMonths.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+
+          <input
+            type="date"
+            value={filterDate}
+            onChange={e => setFilterDate(e.target.value)}
+            className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none cursor-pointer"
+            title="Filter by specific day"
+          />
+
           {activeTab === 'students' && (
             <>
               <select
@@ -505,7 +610,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
             className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
           />
 
-          {(filterCentre !== 'All centres' || filterCoach !== 'All coaches' || filterSegment !== 'All segments' || filterEngagement !== 'All engagement' || search !== '') && (
+          {(filterCentre !== 'All centres' || filterCoach !== 'All coaches' || filterSegment !== 'All segments' || filterEngagement !== 'All engagement' || filterDate !== '' || filterMonth !== 'All months' || search !== '') && (
             <button
               onClick={handleResetFilters}
               className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[10px] px-2.5 py-1 rounded transition-all cursor-pointer"
@@ -652,13 +757,13 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
               <thead className="border-b border-line bg-canvas">
                 <tr className="text-left text-muted-custom text-[9px] uppercase tracking-wider font-bold">
                   <th className="py-2.5 px-4 w-12">S.No</th>
-                  <th className="py-2.5 px-4">Date</th>
-                  <th className="py-2.5 px-4">Student</th>
-                  <th className="py-2.5 px-4">Centre</th>
-                  <th className="py-2.5 px-4">Coach</th>
-                  <th className="py-2.5 px-4">Topic / Lesson</th>
-                  <th className="py-2.5 px-4">Duration</th>
-                  <th className="py-2.5 px-4">Status</th>
+                  <LogSortTh col="date">Date</LogSortTh>
+                  <LogSortTh col="studentName">Student</LogSortTh>
+                  <LogSortTh col="centreName">Centre</LogSortTh>
+                  <LogSortTh col="coachName">Coach</LogSortTh>
+                  <LogSortTh col="topic">Topic / Lesson</LogSortTh>
+                  <LogSortTh col="duration">Duration</LogSortTh>
+                  <LogSortTh col="status">Status</LogSortTh>
                   <th className="py-2.5 px-4 text-center w-24">Actions</th>
                 </tr>
               </thead>
@@ -777,6 +882,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
                             <option value="present">Present</option>
                             <option value="absent">Absent</option>
                             <option value="informed">Informed</option>
+                            <option value="makeup">Makeup</option>
                           </select>
                           <button
                             onClick={() => handleDeleteLog(log.id)}

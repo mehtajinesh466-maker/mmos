@@ -351,6 +351,18 @@ export const Attendance: React.FC<AttendanceProps> = ({
     const slot = slots.find(s => s.id === slotId);
     if (!slot) return;
 
+    const hasExisting = attendance.some(a => {
+      if (a.slot_id !== slotId) return false;
+      const d = new Date(a.date);
+      const isoDate = !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : '';
+      const localDate = !isNaN(d.getTime()) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
+      return isoDate === selectedDate || localDate === selectedDate || (typeof a.date === 'string' && a.date.includes(selectedDate));
+    });
+
+    if (hasExisting) {
+      if (!window.confirm("You are entering twice- are you sure?")) return;
+    }
+
     const rosterStudentIds = new Set(getSlotRoster(slot).map(s => s.id));
     const slotMarkings = Object.keys(markings).filter(key =>
       key.startsWith(slotId) && markings[key] !== null && rosterStudentIds.has(key.substring(slotId.length + 1))
@@ -403,7 +415,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
         const status = markings[key];
         if (!status) continue;
 
-        const duration = status === 'informed' ? 0 : (billedHours[key] ?? getDefaultDuration(slot));
+        const duration = status === 'informed' ? 0 : getDefaultDuration(slot);
         const record: AttendanceType = {
           id: `att-${slot.id}-${studentId}-${selectedDate}`,
           student_id: studentId,
@@ -617,6 +629,17 @@ export const Attendance: React.FC<AttendanceProps> = ({
                             ☀️ Summer Camp
                           </span>
                         )}
+                        {attendance.some(a => {
+                          if (a.slot_id !== slot.id) return false;
+                          const d = new Date(a.date);
+                          const isoDate = !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : '';
+                          const localDate = !isNaN(d.getTime()) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
+                          return isoDate === selectedDate || localDate === selectedDate || (typeof a.date === 'string' && a.date.includes(selectedDate));
+                        }) && (
+                          <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-0.5">
+                            ✓ Attendance Completed
+                          </span>
+                        )}
                       </h4>
                       <p className="text-[10px] text-muted-custom mt-0.5">
                         {getCentreName(slot.centre_id)} · {roster.length} student{roster.length > 1 ? 's' : ''}
@@ -732,23 +755,20 @@ export const Attendance: React.FC<AttendanceProps> = ({
                                     );
                                   })}
                                 </div>
-                                {(currentUser.role === 'owner' || currentUser.role === 'front_desk') && (currentStatus === 'present' || currentStatus === 'makeup') && (
-                                  <select
-                                    value={billedHours[key] ?? getDefaultDuration(slot)}
-                                    onChange={e => setBilledHours(prev => ({ ...prev, [key]: Number(e.target.value) }))}
-                                    className="bg-white border border-line rounded px-1.5 py-0.5 text-[9px] text-ink outline-none cursor-pointer focus:border-forest"
-                                  >
-                                    <option value={1}>1 Class</option>
-                                    <option value={1.5}>1.5 Classes</option>
-                                    <option value={2}>2 Classes</option>
-                                    <option value={2.5}>2.5 Classes</option>
-                                    <option value={3}>3 Classes</option>
-                                    <option value={4}>4 Classes</option>
-                                    <option value={5}>5 Classes</option>
-                                  </select>
+                                {currentStatus && (
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase font-mono ${
+                                    currentStatus === 'present'
+                                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                      : currentStatus === 'absent'
+                                      ? 'bg-red-50 border-red-200 text-red-800'
+                                      : currentStatus === 'informed'
+                                      ? 'bg-blue-50 border-blue-200 text-blue-800'
+                                      : 'bg-amber-50 border-amber-200 text-amber-800'
+                                  }`}>
+                                    {currentStatus === 'informed' ? '0 hrs' : `${getDefaultDuration(slot)} hrs`}
+                                  </span>
                                 )}
                               </div>
-
                             </div>
                           );
                         })

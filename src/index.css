@@ -89,7 +89,7 @@
     border: none !important;
   }
 
-  .overflow-x-auto, .overflow-y-auto {
+  .overflow-x-auto, .overflow-y-auto, .max-h-72, .max-h-\[500px\] {
     overflow: visible !important;
     height: auto !important;
     max-height: none !important;
