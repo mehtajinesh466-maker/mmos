@@ -1665,6 +1665,15 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
     }
 
 
+    // Fetch unbilled packages BEFORE creating the new package so we can
+    // deduct any overrun classes from the new package's opening balance.
+    const unbilledPkgs = await prisma.package.findMany({
+      where: { student_id: student.id, kind: 'unbilled' }
+    });
+    // Total classes the student consumed beyond their previous package(s)
+    const arrearsClasses = unbilledPkgs.reduce((sum, p) => sum + Math.abs(Math.min(p.classes_remaining, 0)), 0);
+    // Opening balance = new package size minus what they already owe (min 0)
+    const openingBalance = Math.max(classesTotal - arrearsClasses, 0);
 
     // Reactivate student if they were inactive or departed
     if (student.status !== 'active') {
@@ -1681,7 +1690,7 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
         tier_id: tier.id,
         kind: kind,
         classes_total: classesTotal,
-        classes_remaining: classesTotal,
+        classes_remaining: openingBalance,
         discount_pct: discount,
         is_family_shared: isFamilyShared,
         start_date: new Date(),
@@ -1691,9 +1700,7 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
     });
 
     // Fetch unbilled packages so we can settle them below
-    const unbilledPkgs = await prisma.package.findMany({
-      where: { student_id: student.id, kind: 'unbilled' }
-    });
+    // (unbilledPkgs constant reused from above)
 
     // Auto-generate invoice for billing ledger (new package price only)
     const tierPrice = (customClasses && customRate) ? customClasses * customRate : (Number(tier.price) || 1000);
