@@ -126,26 +126,9 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
     const rate = parseFloat(ratePerClass) || 100;
     const baseTotal = classes * rate;
     const discountPct = discount === 'Sibling (10%)' ? 0.1 : 0;
-    
-    // Fetch outstanding arrears
-    const student = db.getStudents().find(s => s.id === selectedStudentId);
-    const unpaidValue = student?.flags?.unpaid_value ? Number(student.flags.unpaid_value) : 0;
-    const unpaidClasses = student?.flags?.unpaid_classes ? Number(student.flags.unpaid_classes) : 0;
-    
-    const total = baseTotal * (1 - discountPct) + unpaidValue;
-    
-    let text = `Total: AED ${total.toLocaleString()} · ${classes} × AED ${rate} · VAT tracked separately`;
-    if (unpaidValue > 0) {
-      text += ` (Includes AED ${unpaidValue} outstanding arrears for ${unpaidClasses} unbilled classes)`;
-    }
-    
-    return {
-      classes,
-      total,
-      text,
-      unpaidValue,
-      unpaidClasses
-    };
+    const total = baseTotal * (1 - discountPct);
+    const text = `Total: AED ${total.toLocaleString()} · ${classes} × AED ${rate} · VAT tracked separately`;
+    return { classes, total, text };
   };
 
   const calculatedDetails = getPackageTotal();
@@ -732,39 +715,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
           </div>
         )}
 
-        {/* OUTSTANDING CHECK SECTION */}
-        <div className="space-y-4">
-          <h3 className="text-xs font-bold text-[#C4A249] tracking-wider uppercase border-b border-line pb-2">OUTSTANDING CHECK</h3>
-          
-          {selectedStudentId ? (() => {
-            const student = db.getStudents().find(s => s.id === selectedStudentId);
-            const unpaidClasses = student?.flags?.unpaid_classes ? Number(student.flags.unpaid_classes) : 0;
-            const unpaidValue = student?.flags?.unpaid_value ? Number(student.flags.unpaid_value) : 0;
 
-            if (unpaidClasses > 0) {
-              return (
-                <div className="p-4 rounded-xl bg-red-50 border border-red-200 border-l-4 border-l-hot-custom text-xs leading-relaxed text-ink/90 space-y-1">
-                  <div className="font-bold text-hot-custom">⚠️ Outstanding Arrears Identified</div>
-                  <div>Student has <b>{unpaidClasses} unbilled classes</b> yielding <b>AED {unpaidValue.toLocaleString()}</b> in outstanding arrears.</div>
-                  <div className="text-[11px] text-ink/80 mt-1">
-                    <b>Arrears added to invoice:</b> The total renewal amount has been adjusted to include these arrears. A new package will be activated and the balance cleared upon receipt.
-                  </div>
-                </div>
-              );
-            } else {
-              return (
-                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 border-l-4 border-l-forest text-xs leading-relaxed text-ink/90">
-                  <div className="font-bold text-forest">✅ Ledger Clear</div>
-                  <div>No unbilled classes found. Ready for package renewal.</div>
-                </div>
-              );
-            }
-          })() : (
-            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 border-l-4 border-l-[#C4A249] text-xs leading-relaxed text-ink/90">
-              Select a student to run outstanding check.
-            </div>
-          )}
-        </div>
 
         {/* Action Buttons Row */}
         <div className="flex justify-end gap-3 pt-4 border-t border-line">

@@ -1664,26 +1664,7 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
        if (match) classesTotal = parseInt(match[1], 10);
     }
 
-    // Arrears calculations
-    let arrearsAmount = 0;
-    const unbilledPkgs = await prisma.package.findMany({
-      where: { student_id: student.id, kind: 'unbilled' }
-    });
-    const totalArrearsClasses = unbilledPkgs.reduce((sum, p) => sum + Math.abs(p.classes_remaining), 0);
-    if (totalArrearsClasses > 0) {
-      let studentRate = 100;
-      const lastPkg = await prisma.package.findFirst({
-        where: { student_id: student.id, NOT: { kind: { in: ['unbilled', 'settled'] } } },
-        orderBy: { start_date: 'desc' }
-      });
-      if (lastPkg) {
-        const lastInvoice = await prisma.invoice.findFirst({ where: { package_id: lastPkg.id } });
-        if (lastInvoice && lastInvoice.amount) {
-          studentRate = Math.round(Number(lastInvoice.amount) / lastPkg.classes_total);
-        }
-      }
-      arrearsAmount = totalArrearsClasses * studentRate;
-    }
+
 
     // Reactivate student if they were inactive or departed
     if (student.status !== 'active') {
@@ -1709,9 +1690,14 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
       }
     });
 
-    // Auto-generate invoice for billing ledger (includes arrears)
+    // Fetch unbilled packages so we can settle them below
+    const unbilledPkgs = await prisma.package.findMany({
+      where: { student_id: student.id, kind: 'unbilled' }
+    });
+
+    // Auto-generate invoice for billing ledger (new package price only)
     const tierPrice = (customClasses && customRate) ? customClasses * customRate : (Number(tier.price) || 1000);
-    const finalAmount = Math.round(tierPrice * (1 - discount / 100)) + arrearsAmount;
+    const finalAmount = Math.round(tierPrice * (1 - discount / 100));
 
     await prisma.invoice.create({
       data: {
