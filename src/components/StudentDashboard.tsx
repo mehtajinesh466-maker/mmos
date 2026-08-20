@@ -27,6 +27,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
   const [notifications, setNotifications] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [centres, setCentres] = useState<Centre[]>([]);
+  const [slots, setSlots] = useState<any[]>([]);
+  const [enrollments, setEnrollments] = useState<any[]>([]);
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
@@ -78,6 +80,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
     setNotifications(notifs);
     setCoaches(cochs);
     setCentres(cents);
+    setSlots(db.getScheduleSlots ? db.getScheduleSlots() : []);
+    setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
     setLoading(false);
 
     if (stds.length > 0 && !selectedStudentId) {
@@ -793,6 +797,51 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser,
               </div>
             </div>
 
+          </div>
+
+          {/* Student Schedule Calendar Grid */}
+          <div className="bg-surface border border-line rounded-[14px] p-5 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
+                <span className="text-[#C4A249]">📅</span> Student Schedule
+              </h3>
+              <p className="text-[10px] text-muted-custom mt-0.5">Weekly class enrollments and timings.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
+              {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => {
+                const studentEnrollments = enrollments.filter(e => e.student_id === activeStudent.id);
+                const daySlots = slots.filter(s => 
+                  studentEnrollments.some(e => e.slot_id === s.id) &&
+                  (s.day.toLowerCase() === day.toLowerCase() || s.day.toLowerCase().startsWith(day.toLowerCase().slice(0, 3)))
+                );
+                
+                return (
+                  <div key={day} className="bg-canvas/20 rounded-xl p-3 border border-line flex flex-col min-h-[100px] space-y-2">
+                    <span className="text-xs font-bold text-[#173F35] border-b border-line pb-1 mb-1 block">
+                      {day}
+                    </span>
+                    {daySlots.length === 0 ? (
+                      <span className="text-[10px] text-muted-custom italic">No classes</span>
+                    ) : (
+                      daySlots.map(slot => {
+                        const coach = coaches.find(c => c.id === slot.coach_id);
+                        const coachName = coach ? coach.name : 'Coach';
+                        const centre = centres.find(c => c.id === slot.centre_id);
+                        const centreName = centre ? (centre.name === 'Bay Avenue' ? 'BAY' : centre.name === 'JLT' ? 'JLT' : centre.name) : 'Centre';
+                        return (
+                          <div key={slot.id} className="bg-white border border-[#173F35]/15 p-2 rounded-lg shadow-sm space-y-1">
+                            <div className="font-mono font-bold text-[10px] text-ink">{slot.time?.split('::')[0]}</div>
+                            <div className="text-[9px] font-semibold text-[#173F35] truncate">{slot.level}</div>
+                            <div className="text-[8px] text-muted-custom truncate">{coachName} · {centreName}</div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Package History */}

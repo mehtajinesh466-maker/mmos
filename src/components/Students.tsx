@@ -75,7 +75,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   useEffect(() => {
     if (selected) {
       setEditName(selected.name);
-      setEditLevel(selected.level || 'Beginner');
+      setEditLevel(selected.level || 'Beginner 1');
       setEditStatus(selected.status);
       setEditFideId(selected.fide_id || '');
       setEditDob(selected.dob ? new Date(selected.dob).toISOString().split('T')[0] : '');

@@ -1000,9 +1000,14 @@ export async function updateStudentFlags(studentId: string, pkgId?: string, upda
   });
 
   // Reset paid packages to their full initial entitlement
+  // Note: settled packages represent resolved arrears and have 0 available entitlement of their own (they are debited from the subsequent package)
   for (const p of paidPkgs) {
-    const initialEntitlement = p.classes_total + (p.bonus_classes || 0);
-    p.classes_remaining = initialEntitlement;
+    if (p.kind === 'settled') {
+      p.classes_remaining = 0;
+    } else {
+      const initialEntitlement = p.classes_total + (p.bonus_classes || 0);
+      p.classes_remaining = initialEntitlement;
+    }
   }
 
   // 2. Fetch all attendance logs for the student AND all siblings

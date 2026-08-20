@@ -16,6 +16,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
 
   const [students, setStudents] = useState<any[]>([]);
   const [tiers, setTiers] = useState<any[]>([]);
+  const [packages, setPackages] = useState<any[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState(studentIdParam);
   const [packageType, setPackageType] = useState('Renewal');
   const [packageSize, setPackageSize] = useState('12');
@@ -40,11 +41,12 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
   const [centres, setCentres] = useState<any[]>([]);
   const [selectedCentreId, setSelectedCentreId] = useState<string>('All');
 
-  // Fetch active students, centres, and tiers on mount
+  // Fetch active students, centres, tiers, packages on mount
   useEffect(() => {
     const allCentres = db.getCentres();
     setCentres(allCentres);
     setTiers(db.getTiers());
+    setPackages(db.getPackages());
   }, []);
 
   // Sync selectedCentreId with activeCentre prop if it changes
@@ -70,6 +72,16 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
       setSelectedStudentId('');
     }
   }, [selectedCentreId, studentIdParam]);
+
+  // Auto-detect first package: if student has no prior real packages, force 'New'
+  useEffect(() => {
+    if (!selectedStudentId) return;
+    const allPkgs = db.getPackages();
+    const studentPkgs = allPkgs.filter(
+      p => p.student_id === selectedStudentId && p.kind !== 'unbilled' && p.kind !== 'settled'
+    );
+    setPackageType(studentPkgs.length === 0 ? 'New' : 'Renewal');
+  }, [selectedStudentId]);
 
   const getCentreName = (centreId?: string) => {
     if (!centreId) return 'Unassigned';
@@ -483,14 +495,32 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-ink">Type *</label>
-              <select 
-                value={packageType} 
-                onChange={e => setPackageType(e.target.value)}
-                className="bg-white border border-line rounded-lg px-3 py-2.5 text-xs text-ink outline-none"
-              >
-                <option value="Renewal">Renewal</option>
-                <option value="New">New</option>
-              </select>
+              {(() => {
+                const studentPkgs = selectedStudentId
+                  ? (db.getPackages() as any[]).filter(
+                      p => p.student_id === selectedStudentId && p.kind !== 'unbilled' && p.kind !== 'settled'
+                    )
+                  : [];
+                const isFirstPkg = selectedStudentId && studentPkgs.length === 0;
+                return isFirstPkg ? (
+                  <div className="flex items-center gap-2">
+                    <span className="bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-bold px-3 py-2 rounded-lg">
+                      ✦ New (First Package — auto-detected)
+                    </span>
+                    <input type="hidden" value="New" />
+                  </div>
+                ) : (
+                  <select
+                    value={packageType}
+                    onChange={e => setPackageType(e.target.value)}
+                    className="bg-white border border-line rounded-lg px-3 py-2.5 text-xs text-ink outline-none"
+                  >
+                    <option value="Renewal">Renewal</option>
+                    <option value="New">New</option>
+                    <option value="Tournament">Tournament</option>
+                  </select>
+                );
+              })()}
             </div>
 
             <div className="flex flex-col gap-1.5">

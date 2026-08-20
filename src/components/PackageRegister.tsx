@@ -125,9 +125,9 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
         .filter(a => a.student_id === s.id && a.status === 'present')
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-      // Get all student's packages sorted by start_date asc (exclude settled), stably using ID fallback
+      // Get all student's packages sorted by start_date asc (including settled), stably using ID fallback
       const studentPkgs = packages
-        .filter(p => p.student_id === s.id && p.kind !== 'settled')
+        .filter(p => p.student_id === s.id)
         .sort((a, b) => {
           const dateA = a.start_date ? new Date(a.start_date).getTime() : 0;
           const dateB = b.start_date ? new Date(b.start_date).getTime() : 0;

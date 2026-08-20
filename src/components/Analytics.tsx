@@ -62,6 +62,9 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
   const [filterLevel, setFilterLevel] = useState('All');
   const [diceBy, setDiceBy] = useState('By Centre');
   const [chartType, setChartType] = useState<'bar' | 'line' | 'donut' | 'table'>('bar');
+  const [dateFilterType, setDateFilterType] = useState<string>('This Month');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
 
   // Report Builder State
   interface ReportSection {
@@ -856,15 +859,79 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
       drawBuilderCharts();
     }
     return () => destroyCharts();
-  }, [activeTab, filterCentre, filterSegment, filterEngagement, filterLevel, diceBy, chartType, sections, globalFilterCentre, loading]);
+  }, [activeTab, filterCentre, filterSegment, filterEngagement, filterLevel, diceBy, chartType, sections, globalFilterCentre, loading, dateFilterType, startDate, endDate]);
 
 
+
+  // Zoho-style date range computation
+  const dateRange = useMemo(() => {
+    const today = new Date();
+    let start = new Date(0); // far past
+    let end = new Date(9999, 11, 31); // far future
+
+    if (dateFilterType === 'Today') {
+      start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+    } else if (dateFilterType === 'This Week') {
+      const day = today.getDay();
+      const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+      start = new Date(today.setDate(diff));
+      start.setHours(0,0,0,0);
+      end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+    } else if (dateFilterType === 'This Month') {
+      start = new Date(today.getFullYear(), today.getMonth(), 1);
+      end = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
+    } else if (dateFilterType === 'Last Month') {
+      start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      end = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59, 999);
+    } else if (dateFilterType === 'This Quarter') {
+      const q = Math.floor(today.getMonth() / 3);
+      start = new Date(today.getFullYear(), q * 3, 1);
+      end = new Date(today.getFullYear(), (q + 1) * 3, 0, 23, 59, 59, 999);
+    } else if (dateFilterType === 'This Year') {
+      start = new Date(today.getFullYear(), 0, 1);
+      end = new Date(today.getFullYear(), 11, 31, 23, 59, 59, 999);
+    } else if (dateFilterType === 'Custom' && startDate && endDate) {
+      start = new Date(startDate);
+      start.setHours(0,0,0,0);
+      end = new Date(endDate);
+      end.setHours(23,59,59,999);
+    }
+    return { start, end };
+  }, [dateFilterType, startDate, endDate]);
 
   // Variables calculated from database
   const totalStudents = students.length;
 
-  // KPIs depending on scope
-  const scopeStudents = isFiltered ? filteredStudents : students;
+  // Filter students based on slice/dice AND date selection
+  const scopeStudents = useMemo(() => {
+    const base = isFiltered ? filteredStudents : students;
+    if (dateFilterType === 'All') return base;
+    return base.filter(s => {
+      // 1. Joined in date range
+      if (s.join_date) {
+        const joinDate = new Date(s.join_date);
+        if (joinDate >= dateRange.start && joinDate <= dateRange.end) return true;
+      }
+      // 2. Had attendance in date range
+      const hasAtt = attendance.some(a => {
+        if (a.student_id !== s.id) return false;
+        const attDate = new Date(a.date);
+        return attDate >= dateRange.start && attDate <= dateRange.end;
+      });
+      if (hasAtt) return true;
+      // 3. Had invoice in date range
+      const hasInv = invoices.some(i => {
+        if (i.student_id !== s.id) return false;
+        const invDate = i.created_at ? new Date(i.created_at) : new Date(0);
+        return invDate >= dateRange.start && invDate <= dateRange.end;
+      });
+      if (hasInv) return true;
+
+      return false;
+    });
+  }, [isFiltered, filteredStudents, students, dateFilterType, dateRange, attendance, invoices]);
+
   const scopeTotalStudents = scopeStudents.length;
 
   const activeStudentsCount = scopeStudents.filter(s => s.status === 'active').length;
@@ -886,9 +953,24 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
   const prevMonthStr = prevMonthDate.toISOString().slice(0, 7);
   const newEnrolmentsPrevMonth = scopeStudents.filter(s => s.join_date && new Date(s.join_date).toISOString().slice(0, 7) === prevMonthStr).length;
 
+  // New enrolments in selected date range
+  const newEnrolmentsInPeriod = scopeStudents.filter(s => {
+    if (!s.join_date) return false;
+    const joinDate = new Date(s.join_date);
+    return joinDate >= dateRange.start && joinDate <= dateRange.end;
+  }).length;
+
   const totalCollected = invoices.filter(i => i.status === 'paid' && scopeStudents.some(s => s.id === i.student_id)).reduce((sum, i) => sum + Number(i.amount), 0);
   const totalCollectedM = (totalCollected / 1000000).toFixed(2);
   const totalCollectedK = (totalCollected / 1000).toFixed(0);
+
+  // Period specific collection
+  const periodCollected = invoices.filter(i => {
+    if (i.status !== 'paid') return false;
+    const invDate = i.created_at ? new Date(i.created_at) : new Date(0);
+    if (invDate < dateRange.start || invDate > dateRange.end) return false;
+    return scopeStudents.some(s => s.id === i.student_id);
+  }).reduce((sum, i) => sum + Number(i.amount), 0);
 
   const lifetimePaid = totalCollected;
   
@@ -1047,6 +1129,51 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
           
+          {/* Zoho-style Date Filter Bar */}
+          <div className="bg-[#173F35] text-white border border-[#122F28] rounded-[14px] p-4 shadow-sm flex flex-wrap items-center justify-between gap-4 text-xs">
+            <div className="flex items-center gap-3">
+              <span className="font-bold text-[#9DDDCB] uppercase tracking-wider text-[10px]">Date Filter</span>
+              <div className="flex bg-[#122f28] rounded-lg p-0.5 border border-white/10">
+                {['All', 'Today', 'This Week', 'This Month', 'Last Month', 'This Quarter', 'This Year', 'Custom'].map(type => (
+                  <button
+                    key={type}
+                    onClick={() => setDateFilterType(type)}
+                    className={`px-3 py-1 rounded-md font-semibold text-xs transition-all cursor-pointer ${
+                      dateFilterType === type 
+                        ? 'bg-[#286957] text-white shadow-sm' 
+                        : 'text-[#CFE3DC] hover:text-white'
+                    }`}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {dateFilterType === 'Custom' && (
+              <div className="flex items-center gap-2 animate-fadeIn">
+                <span className="text-[#CFE3DC]">From:</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                  className="bg-[#122f28] border border-white/20 rounded px-2 py-1 text-white text-xs outline-none focus:border-white/40"
+                />
+                <span className="text-[#CFE3DC]">To:</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  className="bg-[#122f28] border border-white/20 rounded px-2 py-1 text-white text-xs outline-none focus:border-white/40"
+                />
+              </div>
+            )}
+
+            <div className="text-[10px] text-[#CFE3DC] italic">
+              Showing records from {dateFilterType === 'All' ? 'Beginning of time' : dateRange.start.toLocaleDateString()} to {dateFilterType === 'All' ? 'End of time' : dateRange.end.toLocaleDateString()}
+            </div>
+          </div>
+
           {/* Slice and Dice Controls bar */}
           <div className="bg-surface border border-line rounded-[14px] p-3 shadow-sm flex items-center justify-between gap-4 overflow-x-auto whitespace-nowrap text-xs">
             <div className="flex items-center gap-2">
@@ -1178,15 +1305,15 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
                 }
               ]),
               { 
-                label: 'ENROLMENTS', 
-                value: `${newEnrolmentsThisMonth}`, 
-                desc: isFiltered ? 'in this scope' : `MTD · ${newEnrolmentsPrevMonth} prev month` 
+                label: dateFilterType === 'All' ? 'ENROLMENTS' : `ENROLMENTS (${dateFilterType.toUpperCase()})`, 
+                value: `${dateFilterType === 'All' ? newEnrolmentsThisMonth : newEnrolmentsInPeriod}`, 
+                desc: dateFilterType === 'All' ? (isFiltered ? 'in this scope' : `MTD · ${newEnrolmentsPrevMonth} prev month`) : `new students in range` 
               },
               ...(currentUser?.role === 'front_desk' ? [] : [
                 { 
-                  label: 'LIFETIME COLLECTED', 
-                  value: isFiltered ? `AED ${totalCollectedK}K` : `AED ${totalCollectedM}M`, 
-                  desc: isFiltered ? 'in this scope' : 'zero external capital' 
+                  label: dateFilterType === 'All' ? 'LIFETIME COLLECTED' : `REVENUE (${dateFilterType.toUpperCase()})`, 
+                  value: dateFilterType === 'All' ? (isFiltered ? `AED ${totalCollectedK}K` : `AED ${totalCollectedM}M`) : (periodCollected >= 1000 ? `AED ${(periodCollected / 1000).toFixed(1)}K` : `AED ${periodCollected}`), 
+                  desc: dateFilterType === 'All' ? (isFiltered ? 'in this scope' : 'zero external capital') : 'paid invoices in range' 
                 }
               ])
             ].map((kpi, idx) => (
