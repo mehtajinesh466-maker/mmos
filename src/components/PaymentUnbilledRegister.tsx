@@ -224,6 +224,7 @@ export const PaymentUnbilledRegister: React.FC<PaymentUnbilledRegisterProps> = (
       let av = a[sortCol];
       let bv = b[sortCol];
 
+      if (av === bv) return 0;
       if (av === null || av === undefined) return 1;
       if (bv === null || bv === undefined) return -1;
 

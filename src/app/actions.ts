@@ -323,15 +323,16 @@ export async function enrollStudent(studentId: string, slotId: string) {
     }
   });
   if (existing) {
-    return existing;
+    return { success: true, id: existing.id };
   }
 
-  return await prisma.enrollment.create({
+  const created = await prisma.enrollment.create({
     data: {
       student_id: studentId,
       slot_id: cleanSlotId
     }
   });
+  return { success: true, id: created.id };
 }
 
 export async function unenrollStudent(studentId: string, slotId: string) {
@@ -345,12 +346,15 @@ export async function unenrollStudent(studentId: string, slotId: string) {
       throw new Error("Unauthorized");
     }
   }
-  return await prisma.enrollment.deleteMany({
+  // Ensure slotId is a clean UUID
+  const cleanSlotId = slotId.startsWith('slot-') ? slotId.replace('slot-', '') : slotId;
+  await prisma.enrollment.deleteMany({
     where: {
       student_id: studentId,
-      slot_id: slotId
+      slot_id: cleanSlotId
     }
   });
+  return { success: true };
 }
 
 export async function logProgress(studentId: string, coachId: string, focusArea: string, evaluation: number, notes: string, dateStr?: string) {
@@ -458,6 +462,41 @@ export async function syncDatabaseToClient() {
     }
   } catch (migErr) {
     console.error("Custom ID self-healing migration failed:", migErr);
+  }
+
+  // Database Self-Healing Migration for Package Numbers
+  try {
+    const allStudents = await prisma.student.findMany({
+      include: { packages: true }
+    });
+    const pkgsToUpdate = [];
+    for (const s of allStudents) {
+      const sorted = [...s.packages].sort((a, b) => {
+        const dateA = a.start_date ? new Date(a.start_date).getTime() : 0;
+        const dateB = b.start_date ? new Date(b.start_date).getTime() : 0;
+        if (dateA !== dateB) return dateA - dateB;
+        return a.id.localeCompare(b.id);
+      });
+      
+      for (let i = 0; i < sorted.length; i++) {
+        const expectedNo = i + 1;
+        if (sorted[i].package_number !== expectedNo) {
+          pkgsToUpdate.push({ id: sorted[i].id, package_number: expectedNo });
+        }
+      }
+    }
+    if (pkgsToUpdate.length > 0) {
+      await Promise.all(
+        pkgsToUpdate.map(item =>
+          prisma.package.update({
+            where: { id: item.id },
+            data: { package_number: item.package_number }
+          })
+        )
+      );
+    }
+  } catch (pkgMigErr) {
+    console.error("Package number self-healing migration failed:", pkgMigErr);
   }
 
   if (role === 'owner') {
@@ -1290,6 +1329,16 @@ export async function saveStudentDB(studentData: any) {
       } else {
         // If owner is marking inactive immediately, close packages & classes
         await closeStudentPackagesAndClasses(studentData.id);
+      }
+    }
+
+    if (studentData.centre_id && studentData.centre_id !== existing.centre_id) {
+      const newCentre = await prisma.centre.findUnique({ where: { id: studentData.centre_id } });
+      const prefix = (newCentre?.name || 'BAY').slice(0, 3).toUpperCase();
+      const flags = typeof studentData.flags === 'object' && studentData.flags ? { ...studentData.flags } : {};
+      if (flags.custom_student_id) {
+        flags.custom_student_id = flags.custom_student_id.replace(/^[A-Z]{3}/, prefix);
+        studentData.flags = flags;
       }
     }
 

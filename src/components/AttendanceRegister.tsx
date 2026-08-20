@@ -231,6 +231,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       let av = a[sortCol];
       let bv = b[sortCol];
 
+      if (av === bv) return 0;
       if (av === null || av === undefined) return 1;
       if (bv === null || bv === undefined) return -1;
 
@@ -294,12 +295,14 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       let av = a[logSortCol as keyof typeof a];
       let bv = b[logSortCol as keyof typeof b];
 
+      if (av === bv) return 0;
       if (av === null || av === undefined) return 1;
       if (bv === null || bv === undefined) return -1;
 
       if (logSortCol === 'date') {
-        const dateA = new Date(av as string).getTime();
-        const dateB = new Date(bv as string).getTime();
+        const dateA = new Date(av as string).getTime() || 0;
+        const dateB = new Date(bv as string).getTime() || 0;
+        if (dateA === dateB) return 0;
         return logSortAsc ? dateA - dateB : dateB - dateA;
       }
 
@@ -385,7 +388,11 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       }
     });
     return Array.from(monthsSet).sort((a, b) => {
-      return new Date('01-' + a).getTime() - new Date('01-' + b).getTime();
+      const [mA, yA] = a.split('-');
+      const [mB, yB] = b.split('-');
+      const valA = (parseInt(yA, 10) || 0) * 12 + monthNames.indexOf(mA);
+      const valB = (parseInt(yB, 10) || 0) * 12 + monthNames.indexOf(mB);
+      return valA - valB;
     });
   }, [attendance]);
 

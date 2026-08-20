@@ -139,8 +139,9 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
 
       studentPkgs.forEach((pkg, index) => {
         const pkgNo = pkg.package_number || (index + 1);
-        const classesPaid = pkg.classes_total;
-        const used = (pkg.classes_total + (pkg.bonus_classes || 0)) - pkg.classes_remaining;
+        const totalEntitlement = pkg.classes_total + (pkg.bonus_classes || 0);
+        const classesPaid = totalEntitlement;
+        const used = totalEntitlement - pkg.classes_remaining;
         const balance = pkg.classes_remaining;
 
         // Determine paid on date
@@ -150,8 +151,8 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
         const paidOn = paidOnDate ? new Date(paidOnDate).toISOString().split('T')[0] : '-';
 
         // Map attendances to this package
-        const pkgAtts = studentAtts.slice(attCursor, attCursor + classesPaid);
-        attCursor += classesPaid;
+        const pkgAtts = studentAtts.slice(attCursor, attCursor + totalEntitlement);
+        attCursor += totalEntitlement;
 
         const dynamicFirstClass = pkgAtts.length > 0 ? new Date(pkgAtts[0].date).toISOString().split('T')[0] : (pkg.start_date ? new Date(pkg.start_date).toISOString().split('T')[0] : '-');
         const firstClass = pkg.first_class_date ? new Date(pkg.first_class_date).toISOString().split('T')[0] : dynamicFirstClass;
@@ -236,6 +237,10 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
     return rows.sort((a, b) => {
       let av = a[sortCol];
       let bv = b[sortCol];
+
+      if (av === bv) return 0;
+      if (av === null || av === undefined) return 1;
+      if (bv === null || bv === undefined) return -1;
 
       if (typeof av === 'string') av = av.toLowerCase();
       if (typeof bv === 'string') bv = bv.toLowerCase();
