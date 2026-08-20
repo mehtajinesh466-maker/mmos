@@ -693,6 +693,18 @@ export const Attendance: React.FC<AttendanceProps> = ({
                           const currentStatus = markings[key] || null;
                           const isZero = isZeroBalance(student.id);
 
+                          // Check if this student already has a saved record for this date/slot
+                          const isAlreadySaved = attendance.some(a => {
+                            if (a.student_id !== student.id || a.slot_id !== slot.id) return false;
+                            const d = new Date(a.date);
+                            const iso = !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : '';
+                            const local = !isNaN(d.getTime()) ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : '';
+                            return iso === selectedDate || local === selectedDate || (typeof a.date === 'string' && a.date.includes(selectedDate));
+                          });
+
+                          // Coaches see locked buttons for already-saved rows
+                          const isLockedForCoach = currentUser.role === 'coach' && isAlreadySaved;
+
                           return (
                             <div key={student.id} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
                               
@@ -731,6 +743,21 @@ export const Attendance: React.FC<AttendanceProps> = ({
                               </div>
 
                               <div className="flex items-center gap-2.5">
+                                {isLockedForCoach ? (
+                                  // Locked for coach: show saved status badge, no editable buttons
+                                  <div className="flex items-center gap-2">
+                                    <span className={`px-3 py-1 text-[10px] font-bold rounded-lg border uppercase font-mono ${
+                                      currentStatus === 'present' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+                                      currentStatus === 'absent'  ? 'bg-red-100 text-red-800 border-red-300' :
+                                      currentStatus === 'informed' ? 'bg-blue-100 text-blue-800 border-blue-300' :
+                                      currentStatus === 'makeup'  ? 'bg-amber-100 text-amber-800 border-amber-300' :
+                                      'bg-canvas text-muted-custom border-line'
+                                    }`}>
+                                      {currentStatus ? currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1) : '—'}
+                                    </span>
+                                    <span className="text-[9px] text-muted-custom font-semibold tracking-wide">🔒 Saved</span>
+                                  </div>
+                                ) : (
                                 <div className="flex gap-1.5">
                                   {(['present', 'absent', 'informed', 'makeup'] as const).map(st => {
                                     const isMarked = currentStatus === st;
@@ -755,6 +782,7 @@ export const Attendance: React.FC<AttendanceProps> = ({
                                     );
                                   })}
                                 </div>
+                                )}
                                 {currentStatus && (
                                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase font-mono ${
                                     currentStatus === 'present'

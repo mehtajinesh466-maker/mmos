@@ -1206,12 +1206,21 @@ export async function logAttendance(studentId: string, status: string | null, co
 
   if (existing) {
     if (!status) {
+      // Coaches cannot delete existing attendance records
+      if (session.user.role === 'coach') {
+        return existing;
+      }
       const deletedRecord = await prisma.attendance.delete({
         where: { id: existing.id }
       });
       await updateStudentFlags(studentId);
       await logAuditDB(session.user.id, 'DELETE_ATTENDANCE', 'attendance', existing, null);
       return deletedRecord;
+    }
+
+    // Coaches cannot override attendance once it has been saved
+    if (session.user.role === 'coach') {
+      return existing;
     }
 
     if (existing.status === status && existing.duration === duration && (topic === undefined || existing.topic === topic)) {
