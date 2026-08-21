@@ -16,6 +16,17 @@ export interface User {
   centre_id?: string;
 }
 
+export interface ClassSession {
+  id: string;
+  slot_id: string;
+  student_id: string;
+  scheduled_date: string;
+  original_date?: string | null;
+  status: 'scheduled' | 'completed' | 'rescheduled' | 'cancelled';
+  note?: string | null;
+  created_at: string;
+}
+
 export interface Coach {
   id: string;
   user_id: string;
@@ -91,6 +102,8 @@ export interface Enrollment {
   student_id: string;
   slot_id: string;
   enrolled_at?: string;
+  start_date?: string | null;
+  end_date?: string | null;
 }
 
 export interface ScheduleSlot {
@@ -189,6 +202,7 @@ function initStorage() {
     localStorage.setItem('mmos_offline_queue', JSON.stringify([]));
     localStorage.setItem('mmos_notifications', JSON.stringify([]));
     localStorage.setItem('mmos_tournament_reports', JSON.stringify([]));
+    localStorage.setItem('mmos_class_sessions', JSON.stringify([]));
     localStorage.setItem('mmos_initialized', 'true');
   }
 }
@@ -218,6 +232,7 @@ export const db = {
     if (data.enrollments) this.save('enrollments', data.enrollments);
     if (data.notifications) this.save('notifications', data.notifications);
     if (data.tournamentReports) this.save('tournament_reports', data.tournamentReports);
+    if (data.classSessions) this.save('class_sessions', data.classSessions);
     if (data.auditLogs) this.save('audit_log', data.auditLogs);
     window.dispatchEvent(new Event('db-synced'));
   },
@@ -270,6 +285,10 @@ export const db = {
   // centres
   getCentres(): Centre[] {
     return this.get<Centre>('centres');
+  },
+
+  getClassSessions(): ClassSession[] {
+    return this.get<ClassSession>('class_sessions');
   },
 
   // Users & Coaches

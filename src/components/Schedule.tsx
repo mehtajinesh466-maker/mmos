@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '../lib/db';
 import type { User, Student, Package, ScheduleSlot, Attendance, Coach } from '../lib/db';
-import { logAttendance, syncDatabaseToClient, createScheduleSlot, notifyEnrolledStudents, enrollStudent, unenrollStudent, toggleSummerCampSlot } from '../app/actions';
+import { logAttendance, syncDatabaseToClient, createScheduleSlot, notifyEnrolledStudents, enrollStudent, unenrollStudent, toggleSummerCampSlot, rescheduleSession, cancelSession } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
 
 interface ScheduleProps {
@@ -30,8 +30,17 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [centres, setCentres] = useState<any[]>([]);
+  const [classSessions, setClassSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<string>('');
+
+  const [scheduleTab, setScheduleTab] = useState<'planner' | 'calendar'>('planner');
+  const [calendarViewMode, setCalendarViewMode] = useState<'day' | 'week' | 'month' | 'term'>('week');
+  const [anchorCalendarDate, setAnchorCalendarDate] = useState<Date>(new Date());
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [rescheduleSessionId, setRescheduleSessionId] = useState<string>('');
+  const [rescheduleDate, setRescheduleDate] = useState<string>('');
+  const [rescheduleNote, setRescheduleNote] = useState<string>('');
   
   // Drawer state for Roster Enrollment Management
   const [rosterModalSlot, setRosterModalSlot] = useState<ScheduleSlot | null>(null);
@@ -50,6 +59,32 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   const [newSlotCoachId, setNewSlotCoachId] = useState('');
   const [newSlotIsSummerCamp, setNewSlotIsSummerCamp] = useState(false);
 
+  // Helper to format a local Date object as YYYY-MM-DD
+  const formatLocalDate = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  // Helper to format a DB date (which could be string or Date object) as YYYY-MM-DD
+  const formatDbDate = (val: any): string => {
+    if (!val) return '';
+    if (typeof val === 'string') return val.slice(0, 10);
+    if (val instanceof Date) {
+      const y = val.getUTCFullYear();
+      const m = String(val.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(val.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+    const parsed = new Date(val);
+    if (isNaN(parsed.getTime())) return '';
+    const y = parsed.getUTCFullYear();
+    const m = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
   const loadData = () => {
     const stds = db.getStudents();
     const pkgs = db.getPackages();
@@ -66,6 +101,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     setAttendance(atts);
     setEnrollments(enrs);
     setCentres(cens);
+    setClassSessions(db.getClassSessions ? db.getClassSessions() : []);
     setLoading(false);
 
     if (coas.length > 0 && !selectedCoachId) {
@@ -118,7 +154,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
 
   // Get dynamic dates for the current week (Monday to Sunday)
   const weekDates = useMemo(() => {
-    const current = new Date(); // Represents today (2026-07-17)
+    const current = new Date(anchorCalendarDate); // Represents selected anchor date
     const day = current.getDay();
     const distanceToMonday = day === 0 ? -6 : 1 - day; // Monday is 1, Sunday is 0
     
@@ -141,7 +177,125 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
       });
     }
     return dates;
-  }, []);
+  }, [anchorCalendarDate]);
+
+  const getDayNumber = (day: string): number => {
+    const map: Record<string, number> = {
+      'sunday': 0, 'sun': 0,
+      'monday': 1, 'mon': 1,
+      'tuesday': 2, 'tue': 2,
+      'wednesday': 3, 'wed': 3,
+      'thursday': 4, 'thu': 4,
+      'friday': 5, 'fri': 5,
+      'saturday': 6, 'sat': 6
+    };
+    return map[day.toLowerCase()] ?? 1;
+  };
+
+  const handleNavigateCalendar = (direction: number) => {
+    setAnchorCalendarDate(prev => {
+      const d = new Date(prev);
+      if (calendarViewMode === 'day') {
+        d.setDate(prev.getDate() + direction);
+      } else if (calendarViewMode === 'week') {
+        d.setDate(prev.getDate() + direction * 7);
+      } else if (calendarViewMode === 'month') {
+        d.setMonth(prev.getMonth() + direction);
+      }
+      return d;
+    });
+  };
+
+  const getCalendarTitle = () => {
+    if (calendarViewMode === 'day') {
+      return anchorCalendarDate.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    } else if (calendarViewMode === 'week') {
+      const start = new Date(anchorCalendarDate);
+      const day = start.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      start.setDate(start.getDate() + diff);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      return `${start.getDate()} ${start.toLocaleDateString(undefined, {month:'short'})} - ${end.getDate()} ${end.toLocaleDateString(undefined, {month:'short'})} ${end.getFullYear()}`;
+    } else if (calendarViewMode === 'month') {
+      return anchorCalendarDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+    } else {
+      return "All Projected Term Roster Sessions";
+    }
+  };
+
+  const coachSessions = useMemo(() => {
+    const coachSlots = slots.filter(s => s.coach_id === activeCoachId);
+    const coachSlotIds = new Set(coachSlots.map(s => s.id));
+    return classSessions.filter(s => coachSlotIds.has(s.slot_id));
+  }, [classSessions, slots, activeCoachId]);
+
+  const monthSessionsCount = useMemo(() => {
+    const year = anchorCalendarDate.getFullYear();
+    const month = anchorCalendarDate.getMonth();
+    return coachSessions.filter(s => {
+      if (!s.scheduled_date) return false;
+      const d = new Date(s.scheduled_date);
+      return d.getFullYear() === year && d.getMonth() === month;
+    }).length;
+  }, [coachSessions, anchorCalendarDate]);
+
+  const monthCells = useMemo(() => {
+    const year = anchorCalendarDate.getFullYear();
+    const month = anchorCalendarDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+
+    const cells: { date: Date; isCurrentMonth: boolean }[] = [];
+
+    const startDayOfWeek = firstDay.getDay();
+    const offset = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+    for (let i = offset; i > 0; i--) {
+      const d = new Date(year, month, 1 - i);
+      cells.push({ date: d, isCurrentMonth: false });
+    }
+
+    for (let i = 1; i <= lastDay.getDate(); i++) {
+      const d = new Date(year, month, i);
+      cells.push({ date: d, isCurrentMonth: true });
+    }
+
+    const totalCells = Math.ceil(cells.length / 7) * 7;
+    const remaining = totalCells - cells.length;
+    for (let i = 1; i <= remaining; i++) {
+      const d = new Date(year, month + 1, i);
+      cells.push({ date: d, isCurrentMonth: false });
+    }
+
+    return cells;
+  }, [anchorCalendarDate]);
+
+  const handleReschedule = async () => {
+    if (!rescheduleSessionId || !rescheduleDate) return;
+    try {
+      await rescheduleSession(rescheduleSessionId, rescheduleDate, rescheduleNote);
+      const freshData = await syncDatabaseToClient();
+      db.syncFromNeon(freshData);
+      loadData();
+      setShowRescheduleModal(false);
+      alert("✓ Class session rescheduled successfully.");
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    }
+  };
+
+  const handleCancel = async (sessionId: string) => {
+    if (!window.confirm("Are you sure you want to cancel this class session?")) return;
+    try {
+      await cancelSession(sessionId, "Cancelled by coach/desk");
+      const freshData = await syncDatabaseToClient();
+      db.syncFromNeon(freshData);
+      loadData();
+      alert("✓ Class session cancelled.");
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    }
+  };
 
   // Load markings from DB for the current week's dates
   useEffect(() => {
@@ -494,17 +648,39 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
           <h1 className="text-2xl font-bold font-display text-ink mt-0.5">Weekly Schedule</h1>
         </div>
 
-        <select 
-          value={selectedCentre}
-          onChange={e => setSelectedCentre(e.target.value)}
-          className="bg-white border border-line rounded-lg px-3 py-1.5 text-xs text-ink outline-none cursor-pointer"
-        >
-          <option value="All">All centres</option>
-          {centres.map(c => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-3">
+          <div className="flex border border-line rounded-lg overflow-hidden bg-white text-xs">
+            <button
+              onClick={() => setScheduleTab('planner')}
+              className={`px-4 py-2 font-semibold transition-all cursor-pointer ${
+                scheduleTab === 'planner' ? 'bg-[#173F35] text-white' : 'text-muted-custom hover:bg-canvas'
+              }`}
+            >
+              Planner Timetable
+            </button>
+            <button
+              onClick={() => setScheduleTab('calendar')}
+              className={`px-4 py-2 font-semibold transition-all cursor-pointer ${
+                scheduleTab === 'calendar' ? 'bg-[#173F35] text-white' : 'text-muted-custom hover:bg-canvas'
+              }`}
+            >
+              📅 Coach Calendar
+            </button>
+          </div>
+
+          <select 
+            value={selectedCentre}
+            onChange={e => setSelectedCentre(e.target.value)}
+            className="bg-white border border-line rounded-lg px-3 py-2 text-xs text-ink outline-none cursor-pointer font-semibold"
+          >
+            <option value="All">All centres</option>
+            {centres.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
       </div>
+
 
       <p className="text-xs text-muted-custom">
         {weekRangeText} · {activeCoach?.name.toUpperCase()} · {stats.classesCount} classes · {stats.totalPlaces} student-places
@@ -561,7 +737,9 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
         </div>
       )}
 
-      {/* Zero Balance Warning Notice */}
+      {scheduleTab === 'planner' && (
+        <>
+          {/* Zero Balance Warning Notice */}
       {stats.zeroBalancePlaces > 0 && (
         <div className="p-4 rounded-[12px] bg-[#FBEEEA] border border-[#FBEEEA] border-l-4 border-l-hot-custom flex gap-3 text-xs leading-relaxed">
           <span className="text-xl">⚏</span>
@@ -987,6 +1165,465 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
           </table>
         </div>
       </div>
+        </>
+      )}
+
+      {/* COACH CALENDAR TAB */}
+      {scheduleTab === 'calendar' && (
+        <div className="space-y-6">
+          
+          {/* Calendar Toolbar */}
+          <div className="bg-surface border border-line rounded-xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-4 text-xs">
+            <div className="flex items-center gap-3">
+              <div className="flex bg-canvas rounded-lg p-0.5 border border-line">
+                {(['day', 'week', 'month', 'term'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setCalendarViewMode(mode)}
+                    className={`px-3.5 py-1.5 rounded-md font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
+                      calendarViewMode === mode 
+                        ? 'bg-[#173F35] text-white shadow-sm' 
+                        : 'text-muted-custom hover:text-ink'
+                    }`}
+                  >
+                    {mode === 'term' ? 'Term-wise' : mode}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => handleNavigateCalendar(-1)}
+                  className="bg-white border border-line hover:bg-canvas text-ink p-1.5 rounded-lg font-bold text-xs"
+                >
+                  ◀ Prev
+                </button>
+                <button
+                  onClick={() => setAnchorCalendarDate(new Date())}
+                  className="bg-white border border-line hover:bg-canvas text-ink px-3 py-1.5 rounded-lg font-bold text-xs"
+                >
+                  Today
+                </button>
+                <button
+                  onClick={() => handleNavigateCalendar(1)}
+                  className="bg-white border border-line hover:bg-canvas text-ink p-1.5 rounded-lg font-bold text-xs"
+                >
+                  Next ▶
+                </button>
+              </div>
+            </div>
+
+            <div className="text-sm font-bold font-display text-ink uppercase tracking-wider">
+              {getCalendarTitle()}
+            </div>
+          </div>
+
+          {/* Day View */}
+          {calendarViewMode === 'day' && (
+            <div className="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-sm max-w-xl mx-auto font-medium text-ink">
+              <div className="text-xs font-bold text-ink border-b border-line pb-2 flex justify-between">
+                <span>Class Timetable</span>
+                <span className="font-mono text-muted-custom">{anchorCalendarDate.toLocaleDateString()}</span>
+              </div>
+              {(() => {
+                const dateStr = formatLocalDate(anchorCalendarDate);
+                const daySessions = coachSessions.filter(s => formatDbDate(s.scheduled_date) === dateStr);
+                if (daySessions.length === 0) {
+                  return <p className="text-xs text-muted-custom italic text-center py-12">No classes scheduled for this day.</p>;
+                }
+                return (
+                  <div className="space-y-3 font-medium text-ink">
+                    {daySessions.map(sess => {
+                      const slot = slots.find(s => s.id === sess.slot_id);
+                      const student = students.find(s => s.id === sess.student_id);
+                      if (!student || !slot) return null;
+                      return (
+                        <div key={sess.id} className="bg-canvas border border-line rounded-xl p-4 flex items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <span className="font-mono font-bold text-sm text-ink">{slot.time?.split('::')[0]}</span>
+                            <h4 className="font-bold text-ink text-sm">{student.name}</h4>
+                            <p className="text-[10px] text-muted-custom">{slot.level} · {slot.day}</p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${
+                              sess.status === 'completed' ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                              : sess.status === 'cancelled' ? 'bg-red-100 text-red-700 border-red-200'
+                              : sess.status === 'rescheduled' ? 'bg-amber-100 text-amber-700 border-amber-200'
+                              : 'bg-blue-100 text-blue-700 border-blue-200'
+                            }`}>
+                              {sess.status}
+                            </span>
+                            {sess.status === 'scheduled' && (
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => {
+                                    setRescheduleSessionId(sess.id);
+                                    setRescheduleDate(formatDbDate(sess.scheduled_date));
+                                    setRescheduleNote('');
+                                    setShowRescheduleModal(true);
+                                  }}
+                                  className="bg-white border border-line text-amber-700 font-semibold px-2.5 py-1 rounded text-xs hover:bg-canvas"
+                                >
+                                  Reschedule
+                                </button>
+                                <button
+                                  onClick={() => handleCancel(sess.id)}
+                                  className="bg-white border border-line text-red-700 font-semibold px-2.5 py-1 rounded text-xs hover:bg-canvas"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Week View */}
+          {calendarViewMode === 'week' && (
+            <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-sm">
+              <table className="w-full text-xs border-collapse min-w-[1000px] table-fixed">
+                <thead>
+                  <tr className="bg-canvas border-b border-line text-[10px] font-bold text-muted-custom uppercase tracking-wider">
+                    <th className="py-3 px-2 border-r border-line w-36 text-center bg-canvas/60">Time Slot</th>
+                    {(() => {
+                      const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                      return daysOfWeek.map((dayName, idx) => {
+                        const startOfWeek = new Date(anchorCalendarDate);
+                        const day = startOfWeek.getDay();
+                        const diff = day === 0 ? -6 : 1 - day;
+                        startOfWeek.setDate(startOfWeek.getDate() + diff + idx);
+                        const dayNum = startOfWeek.getDate();
+                        const monthName = startOfWeek.toLocaleDateString(undefined, { month: 'short' });
+                        
+                        return (
+                          <th key={dayName} className="py-3 px-2 border-r border-line last:border-r-0 text-left w-[13.5%]">
+                            <div className="font-extrabold text-ink">{dayName}</div>
+                            <div className="text-[9px] text-muted-custom mt-0.5 normal-case font-medium">
+                              {dayNum} {monthName}
+                            </div>
+                          </th>
+                        );
+                      });
+                    })()}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line align-top">
+                  {(() => {
+                    const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                    const daysData = daysOfWeek.map((dayName, idx) => {
+                      const startOfWeek = new Date(anchorCalendarDate);
+                      const day = startOfWeek.getDay();
+                      const diff = day === 0 ? -6 : 1 - day;
+                      startOfWeek.setDate(startOfWeek.getDate() + diff + idx);
+                      const dateStr = formatLocalDate(startOfWeek);
+                      return { dayName, dateStr };
+                    });
+
+                    // Hourly row hours from 8:00 AM (8) to 8:00 PM (20)
+                    const rowHours = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+
+                    const formatHourLabel = (h: number) => {
+                      const start = h % 12 === 0 ? 12 : h % 12;
+                      const end = (h + 1) % 12 === 0 ? 12 : (h + 1) % 12;
+                      const startAmPm = h >= 12 ? 'PM' : 'AM';
+                      const endAmPm = (h + 1) >= 12 ? 'PM' : 'AM';
+                      return `${start}:00 ${startAmPm} - ${end}:00 ${endAmPm}`;
+                    };
+
+                    return rowHours.map(hour => {
+                      return (
+                        <tr key={hour} className="hover:bg-canvas/5 align-top transition-colors">
+                          <td className="py-4 px-2 border-r border-line font-bold text-[#173F35] text-xs text-center bg-canvas/20 w-36 align-middle">
+                            {formatHourLabel(hour)}
+                          </td>
+                          {daysData.map(({ dayName, dateStr }) => {
+                            const daySessions = coachSessions.filter(s => formatDbDate(s.scheduled_date) === dateStr);
+                            const cellSessions = daySessions.filter(sess => {
+                              const slot = slots.find(sl => sl.id === sess.slot_id);
+                              if (!slot) return false;
+                              const cleanTime = slot.time.split('::')[0];
+                              const startHour = parseInt(cleanTime.split(':')[0], 10);
+                              return startHour === hour;
+                            });
+
+                            return (
+                              <td key={dayName} className="p-2 border-r border-line last:border-r-0 align-top space-y-1.5 min-h-[70px]">
+                                {cellSessions.map(sess => {
+                                  const slot = slots.find(s => s.id === sess.slot_id);
+                                  const student = students.find(s => s.id === sess.student_id);
+                                  if (!student || !slot) return null;
+
+                                  return (
+                                    <div key={sess.id} className="bg-canvas border border-[#173F35]/15 p-2 rounded-lg space-y-1 relative group hover:shadow-sm transition-all">
+                                      <div className="font-mono font-bold text-[9px] text-[#C4A249] flex items-center justify-between">
+                                        <span>{slot.time?.split('::')[0]}</span>
+                                      </div>
+                                      <div className="text-[10px] font-bold text-[#173F35] truncate">{student.name}</div>
+                                      <div className="text-[9px] text-muted-custom truncate">Level: {slot.level}</div>
+                                      <div className="flex justify-between items-center pt-1 border-t border-line mt-1">
+                                        <span className={`text-[7px] font-bold px-1 py-0.2 rounded uppercase ${
+                                          sess.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                          : sess.status === 'cancelled' ? 'bg-red-50 text-red-700 border border-red-200'
+                                          : sess.status === 'rescheduled' ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                          : 'bg-blue-50 text-blue-700 border border-blue-200'
+                                        }`}>
+                                          {sess.status}
+                                        </span>
+                                        {sess.status === 'scheduled' && (
+                                          <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button
+                                              onClick={() => {
+                                                setRescheduleSessionId(sess.id);
+                                                setRescheduleDate(formatDbDate(sess.scheduled_date));
+                                                setRescheduleNote('');
+                                                setShowRescheduleModal(true);
+                                              }}
+                                              title="Reschedule"
+                                              className="text-amber-600 hover:text-amber-800 text-[9px] font-bold cursor-pointer"
+                                            >
+                                              ✎
+                                            </button>
+                                            <button
+                                              onClick={() => handleCancel(sess.id)}
+                                              title="Cancel"
+                                              className="text-red-600 hover:text-red-800 text-[9px] font-bold cursor-pointer"
+                                            >
+                                              ✗
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Month View */}
+          {calendarViewMode === 'month' && (
+            <div className="space-y-4">
+              {/* Month Summary Card */}
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between shadow-sm">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">📊</span>
+                  <div>
+                    <h4 className="font-bold text-ink text-xs uppercase tracking-wider">Month Summary</h4>
+                    <p className="text-[10px] text-muted-custom">Classes scheduled in this month</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-2xl font-bold text-[#173F35] font-mono">{monthSessionsCount}</span>
+                  <span className="text-[10px] text-muted-custom font-bold uppercase tracking-wider block">Total Classes</span>
+                </div>
+              </div>
+
+              <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-sm font-medium text-ink">
+                <div className="grid grid-cols-7 border-b border-line bg-canvas text-center py-2 text-xs font-bold text-ink uppercase">
+                  {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => <span key={d}>{d}</span>)}
+                </div>
+                <div className="grid grid-cols-7 text-xs">
+                  {monthCells.map((cell, idx) => {
+                    const dateStr = formatLocalDate(cell.date);
+                    const daySessions = coachSessions.filter(s => formatDbDate(s.scheduled_date) === dateStr);
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`min-h-[100px] border-b border-r border-line p-2 flex flex-col justify-between transition-all hover:bg-canvas/5 ${
+                          cell.isCurrentMonth ? 'bg-white' : 'bg-canvas/40 text-muted-custom'
+                        }`}
+                      >
+                        <span className="font-mono font-bold text-[10px] self-end text-ink">{cell.date.getDate()}</span>
+                        
+                        {daySessions.length > 0 && (
+                          <div className="flex-1 flex flex-col justify-end mt-1 space-y-1">
+                            <div className="text-[9px] font-extrabold bg-[#173F35]/10 text-[#173F35] px-1.5 py-0.5 rounded text-center border border-[#173F35]/15">
+                              {daySessions.length} {daySessions.length === 1 ? 'Class' : 'Classes'}
+                            </div>
+                            <div className="space-y-0.5 max-h-[45px] overflow-hidden">
+                              {daySessions.slice(0, 2).map(sess => {
+                                const student = students.find(s => s.id === sess.student_id);
+                                if (!student) return null;
+                                return (
+                                  <div key={sess.id} className="text-[8px] text-muted-custom font-semibold truncate">
+                                    • {student.name}
+                                  </div>
+                                );
+                              })}
+                              {daySessions.length > 2 && (
+                                <div className="text-[7px] text-[#C4A249] font-bold text-center">
+                                  + {daySessions.length - 2} more
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Term View */}
+          {calendarViewMode === 'term' && (
+            <div className="space-y-4 font-medium text-ink">
+              {(() => {
+                const studentSessions: Record<string, typeof coachSessions> = {};
+                coachSessions.forEach(s => {
+                  if (!studentSessions[s.student_id]) studentSessions[s.student_id] = [];
+                  studentSessions[s.student_id].push(s);
+                });
+
+                const activeStudentIds = Object.keys(studentSessions);
+                if (activeStudentIds.length === 0) {
+                  return <div className="p-12 text-center bg-surface border border-line rounded-2xl text-muted-custom text-xs">No active projected sessions for this coach.</div>;
+                }
+
+                return activeStudentIds.map(stId => {
+                  const student = students.find(s => s.id === stId);
+                  if (!student) return null;
+                  const sessions = [...studentSessions[stId]].sort((a,b) => new Date(a.scheduled_date).getTime() - new Date(b.scheduled_date).getTime());
+
+                  return (
+                    <div key={stId} className="bg-surface border border-line rounded-xl p-5 shadow-sm space-y-4">
+                      <div className="border-b border-line pb-2 flex justify-between items-center">
+                        <div>
+                          <h3 className="font-bold text-ink text-sm">{student.name}</h3>
+                          <p className="text-[10px] text-muted-custom">{student.level} · {getCentreName(student.centre_id)}</p>
+                        </div>
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border border-line bg-canvas text-muted-custom uppercase">
+                          {sessions.length} sessions projected
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                        {sessions.map((sess, index) => {
+                          const dateObj = new Date(sess.scheduled_date);
+                          const displayDate = dateObj.toLocaleDateString(undefined, {month:'short', day:'numeric'});
+                          return (
+                            <div key={sess.id} className="bg-canvas border border-line p-2.5 rounded-lg space-y-1.5 relative group">
+                              <div className="flex justify-between items-center">
+                                <span className="text-[8px] font-bold text-muted-custom font-mono">Class {index + 1}</span>
+                                <span className={`text-[7px] font-bold px-1 rounded uppercase ${
+                                  sess.status === 'completed' ? 'bg-emerald-50 text-emerald-700'
+                                  : sess.status === 'cancelled' ? 'bg-red-50 text-red-700'
+                                  : sess.status === 'rescheduled' ? 'bg-amber-50 text-amber-700'
+                                  : 'bg-blue-50 text-blue-700'
+                                }`}>
+                                  {sess.status === 'rescheduled' ? 'resch.' : sess.status}
+                                </span>
+                              </div>
+                              <div className="font-mono font-bold text-[10px] text-ink">{displayDate}</div>
+                              {sess.note && <div className="text-[7px] text-muted-custom italic truncate" title={sess.note}>{sess.note}</div>}
+
+                              {sess.status === 'scheduled' && (
+                                <div className="flex gap-2 border-t border-line/50 pt-1.5 mt-1.5 justify-end">
+                                  <button
+                                    onClick={() => {
+                                      setRescheduleSessionId(sess.id);
+                                      setRescheduleDate(formatDbDate(sess.scheduled_date));
+                                      setRescheduleNote('');
+                                      setShowRescheduleModal(true);
+                                    }}
+                                    className="text-amber-700 hover:text-amber-900 text-[9px] font-bold"
+                                  >
+                                    Reschedule
+                                  </button>
+                                  <button
+                                    onClick={() => handleCancel(sess.id)}
+                                    className="text-red-700 hover:text-red-900 text-[9px] font-bold"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* Reschedule Modal */}
+      {showRescheduleModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-surface w-full max-w-md rounded-2xl shadow-2xl border border-line p-6 space-y-5 animate-fadeIn">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h3 className="font-bold text-ink text-base flex items-center gap-2 font-display">
+                <span className="text-forest">✎</span> Reschedule Class Session
+              </h3>
+              <button
+                onClick={() => setShowRescheduleModal(false)}
+                className="w-7 h-7 rounded-full bg-canvas border border-line flex items-center justify-center text-ink font-bold hover:bg-line text-xs"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="font-bold text-ink text-xs">New Scheduled Date</label>
+                <input
+                  type="date"
+                  value={rescheduleDate}
+                  onChange={e => setRescheduleDate(e.target.value)}
+                  className="bg-white border border-[#173F35]/20 rounded-lg px-3 py-2 text-ink outline-none text-xs focus:border-forest"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="font-bold text-ink text-xs">Reason / Note</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Rescheduled due to travel..."
+                  value={rescheduleNote}
+                  onChange={e => setRescheduleNote(e.target.value)}
+                  className="bg-white border border-[#173F35]/20 rounded-lg px-3 py-2 text-ink outline-none text-xs focus:border-forest"
+                />
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-line flex gap-3">
+              <button
+                onClick={handleReschedule}
+                className="flex-1 bg-[#173F35] hover:bg-[#122f28] text-white font-bold py-2.5 rounded-xl transition-all text-xs"
+              >
+                Reschedule Session
+              </button>
+              <button
+                onClick={() => setShowRescheduleModal(false)}
+                className="bg-white border border-line text-ink font-bold px-4 py-2.5 rounded-xl hover:bg-canvas text-xs"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Manage Roster Drawer Modal */}
       {rosterModalSlot && (

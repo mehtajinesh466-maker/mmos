@@ -106,6 +106,7 @@ model Student {
   coach              Coach?             @relation(fields: [coach_id], references: [id])
   family             Family?            @relation(fields: [family_id], references: [id])
   tournamentReports  TournamentReport[]
+  classSessions      ClassSession[]
 
   @@map("students")
 }
@@ -157,6 +158,7 @@ model ScheduleSlot {
   enrollments    Enrollment[]
   centre         Centre       @relation(fields: [centre_id], references: [id])
   coach          Coach        @relation(fields: [coach_id], references: [id])
+  classSessions      ClassSession[]
 
   @@map("schedule_slots")
 }
@@ -166,6 +168,8 @@ model Enrollment {
   student_id  String       @db.Uuid
   slot_id     String       @db.Uuid
   enrolled_at DateTime     @default(now()) @db.Timestamptz(6)
+  start_date  DateTime?    @db.Date
+  end_date    DateTime?    @db.Date
   slot        ScheduleSlot @relation(fields: [slot_id], references: [id])
   student     Student      @relation(fields: [student_id], references: [id])
 
@@ -310,3 +314,19 @@ model TournamentReport {
 
   @@map("tournament_reports")
 }
+
+model ClassSession {
+  id             String       @id @default(uuid()) @db.Uuid
+  slot_id        String       @db.Uuid
+  student_id     String       @db.Uuid
+  scheduled_date DateTime     @db.Date
+  original_date  DateTime?    @db.Date
+  status         String       @default("scheduled")
+  note           String?
+  created_at     DateTime     @default(now()) @db.Timestamptz
+  slot           ScheduleSlot @relation(fields: [slot_id], references: [id])
+  student        Student      @relation(fields: [student_id], references: [id])
+
+  @@map("class_sessions")
+}
+

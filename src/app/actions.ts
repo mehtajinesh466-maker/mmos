@@ -253,6 +253,63 @@ export async function deleteCentreDB(centreId: string) {
 // Module 3 & 4: Scheduling and Progress
 // -------------------------------------------------------------
 
+function parseTimeRange(timeStr: string): { start: number; end: number } {
+  let clean = timeStr.replace(/\s+/g, '');
+  
+  let startStr = '';
+  let endStr = '';
+  
+  if (clean.includes('::')) {
+    const parts = clean.split('::');
+    startStr = parts[0] || '00:00';
+    endStr = parts[1];
+  } else if (clean.includes('-')) {
+    const parts = clean.split('-');
+    startStr = parts[0] || '00:00';
+    endStr = parts[1];
+  } else {
+    startStr = clean;
+  }
+  
+  const startMatch = startStr.match(/^(\d{1,2}):(\d{2})/);
+  if (!startMatch) {
+    return { start: 0, end: 0 };
+  }
+  const startH = parseInt(startMatch[1], 10);
+  const startM = parseInt(startMatch[2], 10);
+  const startMin = startH * 60 + startM;
+  
+  let endMin = startMin + 60; // default to 1 hour
+  
+  if (endStr) {
+    const endMatch = endStr.match(/^(\d{1,2}):(\d{2})/);
+    if (endMatch) {
+      const endH = parseInt(endMatch[1], 10);
+      const endM = parseInt(endMatch[2], 10);
+      endMin = endH * 60 + endM;
+    } else {
+      const hr = parseInt(endStr, 10);
+      if (!isNaN(hr)) {
+        if (hr > startH && hr <= 24) {
+          endMin = hr * 60;
+        } else if (hr >= 1 && hr <= 5) {
+          endMin = startMin + hr * 60;
+        }
+      }
+    }
+  }
+  
+  if (endMin <= startMin) {
+    endMin = startMin + 60;
+  }
+  
+  return { start: startMin, end: endMin };
+}
+
+function rangesOverlap(r1: { start: number; end: number }, r2: { start: number; end: number }): boolean {
+  return r1.start < r2.end && r2.start < r1.end;
+}
+
 export async function createScheduleSlot(centreId: string, coachId: string, day: string, time: string, level: string, capacity: number = 10, isSummerCamp: boolean = false, explicitId?: string) {
   const session = await verifySession();
   if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
@@ -262,6 +319,24 @@ export async function createScheduleSlot(centreId: string, coachId: string, day:
     const coachRecord = await prisma.coach.findFirst({ where: { user_id: session.user.id } });
     if (!coachRecord || coachRecord.id !== coachId) {
       throw new Error("Unauthorized");
+    }
+  }
+
+  // Check for conflict: coach cannot have overlapping classes on the same day
+  const cleanId = explicitId ? (explicitId.startsWith('slot-') ? explicitId.replace('slot-', '') : explicitId) : undefined;
+  const existingSlots = await prisma.scheduleSlot.findMany({
+    where: {
+      coach_id: coachId,
+      day: day,
+      id: cleanId ? { not: cleanId } : undefined
+    }
+  });
+
+  const newRange = parseTimeRange(time);
+  for (const slot of existingSlots) {
+    const range = parseTimeRange(slot.time);
+    if (rangesOverlap(newRange, range)) {
+      throw new Error(`Conflict: Coach already has a scheduled class on ${day} at ${slot.time.replace('::', '-')}`);
     }
   }
 
@@ -276,7 +351,7 @@ export async function createScheduleSlot(centreId: string, coachId: string, day:
   };
   
   if (explicitId) {
-    data.id = explicitId.startsWith('slot-') ? explicitId.replace('slot-', '') : explicitId;
+    data.id = cleanId;
   }
 
   return await prisma.scheduleSlot.create({
@@ -332,6 +407,9 @@ export async function enrollStudent(studentId: string, slotId: string) {
       slot_id: cleanSlotId
     }
   });
+  await generateSessionsForEnrollment(studentId, cleanSlotId).catch(err => 
+    console.warn("Failed to generate class sessions:", err)
+  );
   return { success: true, id: created.id };
 }
 
@@ -354,6 +432,20 @@ export async function unenrollStudent(studentId: string, slotId: string) {
       slot_id: cleanSlotId
     }
   });
+  const today = new Date();
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  await prisma.classSession.updateMany({
+    where: {
+      student_id: studentId,
+      slot_id: cleanSlotId,
+      status: 'scheduled',
+      scheduled_date: { gte: todayMidnight }
+    },
+    data: {
+      status: 'cancelled',
+      note: 'Student unenrolled'
+    }
+  }).catch(err => console.warn("Failed to cancel future class sessions:", err));
   return { success: true };
 }
 
@@ -499,6 +591,23 @@ export async function syncDatabaseToClient() {
     console.error("Package number self-healing migration failed:", pkgMigErr);
   }
 
+  // Database Self-Healing Migration for Class Sessions (for existing enrollments)
+  try {
+    const allEnrollments = await prisma.enrollment.findMany();
+    for (const en of allEnrollments) {
+      const hasSessions = await prisma.classSession.count({
+        where: { student_id: en.student_id, slot_id: en.slot_id }
+      });
+      if (hasSessions === 0) {
+        await generateSessionsForEnrollment(en.student_id, en.slot_id, 12).catch(err => 
+          console.warn("Failed backfill for enrollment:", en.id, err)
+        );
+      }
+    }
+  } catch (sessMigErr) {
+    console.error("ClassSession self-healing backfill failed:", sessMigErr);
+  }
+
   if (role === 'owner') {
     const [
       centres,
@@ -516,6 +625,7 @@ export async function syncDatabaseToClient() {
       progressLogsRaw,
       notifications,
       tournamentReports,
+      classSessions,
       auditLogsRaw
     ] = await Promise.all([
       prisma.centre.findMany(),
@@ -539,6 +649,7 @@ export async function syncDatabaseToClient() {
       prisma.progressLog.findMany(),
       prisma.notification.findMany(),
       prisma.tournamentReport.findMany(),
+      prisma.classSession.findMany(),
       prisma.auditLog.findMany({
         orderBy: { at: 'desc' },
         take: 200,
@@ -588,6 +699,7 @@ export async function syncDatabaseToClient() {
       progressLogs,
       notifications,
       tournamentReports,
+      classSessions,
       auditLogs
     }));
   }
@@ -608,7 +720,8 @@ export async function syncDatabaseToClient() {
       enrollments,
       progressLogsRaw,
       notifications,
-      tournamentReports
+      tournamentReports,
+      classSessions
     ] = await Promise.all([
       prisma.centre.findMany(),
       prisma.user.findMany(),
@@ -630,7 +743,8 @@ export async function syncDatabaseToClient() {
       prisma.enrollment.findMany(),
       prisma.progressLog.findMany(),
       prisma.notification.findMany(),
-      prisma.tournamentReport.findMany()
+      prisma.tournamentReport.findMany(),
+      prisma.classSession.findMany()
     ]);
 
     const coaches = coachesRaw.map(c => ({
@@ -664,7 +778,8 @@ export async function syncDatabaseToClient() {
       enrollments,
       progressLogs,
       notifications,
-      tournamentReports
+      tournamentReports,
+      classSessions
     }));
   }
 
@@ -716,7 +831,8 @@ export async function syncDatabaseToClient() {
       enrollments,
       progressLogsRaw,
       notifications,
-      tournamentReports
+      tournamentReports,
+      classSessions
     ] = await Promise.all([
       prisma.centre.findMany({ where: { status: 'active' } }),
       prisma.user.findMany({
@@ -751,6 +867,9 @@ export async function syncDatabaseToClient() {
         where: { student_id: { in: allVisibleStudentIds } }
       }),
       prisma.tournamentReport.findMany({
+        where: { student_id: { in: allVisibleStudentIds } }
+      }),
+      prisma.classSession.findMany({
         where: { student_id: { in: allVisibleStudentIds } }
       })
     ]);
@@ -787,7 +906,8 @@ export async function syncDatabaseToClient() {
       enrollments,
       progressLogs,
       notifications,
-      tournamentReports
+      tournamentReports,
+      classSessions
     }));
   }
 
@@ -821,7 +941,8 @@ export async function syncDatabaseToClient() {
       attendance,
       invoices,
       notifications,
-      tournamentReports
+      tournamentReports,
+      classSessions
     ] = await Promise.all([
       prisma.centre.findMany({
         where: { id: { in: centreIds } }
@@ -851,6 +972,9 @@ export async function syncDatabaseToClient() {
       }),
       prisma.tournamentReport.findMany({
         where: { student_id: { in: studentIds } }
+      }),
+      prisma.classSession.findMany({
+        where: { student_id: { in: studentIds } }
       })
     ]);
 
@@ -871,7 +995,8 @@ export async function syncDatabaseToClient() {
       attendance,
       invoices,
       notifications,
-      tournamentReports
+      tournamentReports,
+      classSessions
     }));
   }
 
@@ -1218,6 +1343,18 @@ export async function logAttendance(studentId: string, status: string | null, co
       const deletedRecord = await prisma.attendance.delete({
         where: { id: existing.id }
       });
+      // Revert the matching class session back to scheduled status
+      if (existing.slot_id) {
+        await prisma.classSession.updateMany({
+          where: {
+            student_id: studentId,
+            slot_id: existing.slot_id,
+            scheduled_date: targetDateMidnight,
+            status: 'completed'
+          },
+          data: { status: 'scheduled' }
+        }).catch(err => console.warn("Failed to revert matching class session to scheduled:", err));
+      }
       await updateStudentFlags(studentId);
       await logAuditDB(session.user.id, 'DELETE_ATTENDANCE', 'attendance', existing, null);
       return deletedRecord;
@@ -1258,6 +1395,18 @@ export async function logAttendance(studentId: string, status: string | null, co
     }
   });
 
+  // Link to matching projected class session and mark completed
+  if (slotId) {
+    await prisma.classSession.updateMany({
+      where: {
+        student_id: studentId,
+        slot_id: slotId,
+        scheduled_date: targetDateMidnight,
+        status: { in: ['scheduled', 'rescheduled'] }
+      },
+      data: { status: 'completed' }
+    }).catch(err => console.warn("Failed to mark class session completed:", err));
+  }
   await logAuditDB(session.user.id, 'CREATE_ATTENDANCE', 'attendance', null, newRecord);
   await updateStudentFlags(studentId);
   return newRecord;
@@ -1638,6 +1787,41 @@ export async function registerStudent(data: any) {
         }
       }).catch(err => console.warn("Auto invoice generation skipped:", err));
       
+      if (data.slotsData && Array.isArray(data.slotsData)) {
+        for (const item of data.slotsData) {
+          const cleanId = item.slotId.startsWith('slot-') ? item.slotId.replace('slot-', '') : item.slotId;
+          await prisma.enrollment.create({
+            data: {
+              student_id: student.id,
+              slot_id: cleanId,
+              start_date: item.startDate ? new Date(item.startDate) : null,
+              end_date: item.endDate ? new Date(item.endDate) : null
+            }
+          }).catch(err => console.warn("Auto enrollment skipped:", err));
+        }
+        let earliestStart = data.start_date;
+        for (const item of data.slotsData) {
+          if (item.startDate) {
+            if (!earliestStart || item.startDate < earliestStart) {
+              earliestStart = item.startDate;
+            }
+          }
+        }
+        await generateSessionsForStudentPackage(student.id, grandTotal, earliestStart || new Date().toISOString()).catch(err =>
+          console.warn("Failed to generate class sessions in registerStudent:", err)
+        );
+      } else if (data.slotIds && Array.isArray(data.slotIds)) {
+        for (const sId of data.slotIds) {
+          const cleanId = sId.startsWith('slot-') ? sId.replace('slot-', '') : sId;
+          await prisma.enrollment.create({
+            data: { student_id: student.id, slot_id: cleanId }
+          }).catch(err => console.warn("Auto enrollment skipped:", err));
+        }
+        await generateSessionsForStudentPackage(student.id, grandTotal, data.start_date || new Date().toISOString()).catch(err =>
+          console.warn("Failed to generate class sessions in registerStudent:", err)
+        );
+      }
+      
       await updateStudentFlags(student.id);
     }
   }
@@ -1645,7 +1829,18 @@ export async function registerStudent(data: any) {
   return student;
 }
 
-export async function renewPackage(studentId: string, tierId: string, kind: 'renewal' | 'tournament' | 'new' = 'renewal', isFamilyShared: boolean = false, customClasses?: number, customRate?: number, paymentMethod?: string, paymentRemarks?: string) {
+export async function renewPackage(
+  studentId: string, 
+  tierId: string, 
+  kind: 'renewal' | 'tournament' | 'new' = 'renewal', 
+  isFamilyShared: boolean = false, 
+  customClasses?: number, 
+  customRate?: number, 
+  paymentMethod?: string, 
+  paymentRemarks?: string, 
+  slotIds?: string[],
+  slotsData?: { slotId: string; startDate?: string | null; endDate?: string | null }[]
+) {
   try {
     const session = await verifySession();
     if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
@@ -1748,6 +1943,48 @@ export async function renewPackage(studentId: string, tierId: string, kind: 'ren
         });
       }
     }
+
+    if (slotsData && Array.isArray(slotsData)) {
+      await prisma.enrollment.deleteMany({
+        where: { student_id: studentId }
+      });
+      for (const item of slotsData) {
+        const cleanId = item.slotId.startsWith('slot-') ? item.slotId.replace('slot-', '') : item.slotId;
+        await prisma.enrollment.create({
+          data: {
+            student_id: studentId,
+            slot_id: cleanId,
+            start_date: item.startDate ? new Date(item.startDate) : null,
+            end_date: item.endDate ? new Date(item.endDate) : null
+          }
+        }).catch(err => console.warn("Auto enrollment skipped in renewPackage:", err));
+      }
+    } else if (slotIds && Array.isArray(slotIds)) {
+      await prisma.enrollment.deleteMany({
+        where: { student_id: studentId }
+      });
+      for (const sId of slotIds) {
+        const cleanId = sId.startsWith('slot-') ? sId.replace('slot-', '') : sId;
+        await prisma.enrollment.create({
+          data: { student_id: studentId, slot_id: cleanId }
+        }).catch(err => console.warn("Auto enrollment skipped in renewPackage:", err));
+      }
+    }
+
+    let earliestStart: string | undefined = undefined;
+    if (slotsData && Array.isArray(slotsData)) {
+      for (const item of slotsData) {
+        if (item.startDate) {
+          if (!earliestStart || item.startDate < earliestStart) {
+            earliestStart = item.startDate;
+          }
+        }
+      }
+    }
+
+    await generateSessionsForStudentPackage(studentId, classesTotal, earliestStart || pkg.start_date || new Date()).catch(err =>
+      console.warn("Failed to generate class sessions in renewPackage:", err)
+    );
 
     await updateStudentFlags(student.id);
 
@@ -2408,3 +2645,329 @@ export async function purgeTestStudents() {
 
   return { success: true, purgedCount, purgedNames: testStudents.map(s => s.name) };
 }
+
+function getDayNumber(day: string): number {
+  const map: Record<string, number> = {
+    'sunday': 0, 'sun': 0,
+    'monday': 1, 'mon': 1,
+    'tuesday': 2, 'tue': 2,
+    'wednesday': 3, 'wed': 3,
+    'thursday': 4, 'thu': 4,
+    'friday': 5, 'fri': 5,
+    'saturday': 6, 'sat': 6
+  };
+  return map[day.toLowerCase()] ?? 1; // default Monday
+}
+
+export async function generateSessionsForEnrollment(studentId: string, slotId: string, customCount?: number) {
+  const slot = await prisma.scheduleSlot.findUnique({
+    where: { id: slotId }
+  });
+  if (!slot) return;
+
+  // Decide count based on active package classes_remaining (max 24)
+  let count = customCount || 12;
+  if (!customCount) {
+    const activePkgs = await prisma.package.findMany({
+      where: {
+        student_id: studentId,
+        frozen: false,
+        kind: { notIn: ['unbilled', 'settled'] },
+        classes_remaining: { gt: 0 }
+      }
+    });
+    const totalRemaining = activePkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
+    count = Math.min(Math.max(totalRemaining, 12), 24);
+  }
+
+  const dayNum = getDayNumber(slot.day);
+  const today = new Date();
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dates: Date[] = [];
+  let curr = new Date(todayMidnight.getTime());
+
+  while (dates.length < count) {
+    if (curr.getDay() === dayNum) {
+      dates.push(new Date(curr.getTime()));
+    }
+    curr.setDate(curr.getDate() + 1);
+  }
+
+  // Skip generating duplicates
+  for (const targetDate of dates) {
+    const existing = await prisma.classSession.findFirst({
+      where: {
+        student_id: studentId,
+        slot_id: slotId,
+        scheduled_date: targetDate
+      }
+    });
+    if (!existing) {
+      await prisma.classSession.create({
+        data: {
+          student_id: studentId,
+          slot_id: slotId,
+          scheduled_date: targetDate,
+          status: 'scheduled'
+        }
+      });
+    }
+  }
+}
+
+export async function rescheduleSession(sessionId: string, newDateStr: string, note?: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk' && session.user.role !== 'coach') {
+    throw new Error("Unauthorized");
+  }
+
+  const existing = await prisma.classSession.findUnique({
+    where: { id: sessionId }
+  });
+  if (!existing) throw new Error("Session not found");
+
+  const newDate = new Date(newDateStr);
+  const newDateMidnight = new Date(newDate.getFullYear(), newDate.getMonth(), newDate.getDate());
+
+  await prisma.classSession.update({
+    where: { id: sessionId },
+    data: {
+      scheduled_date: newDateMidnight,
+      original_date: existing.original_date || existing.scheduled_date,
+      status: 'rescheduled',
+      note: note || existing.note
+    }
+  });
+
+  return { success: true };
+}
+
+export async function cancelSession(sessionId: string, note?: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk' && session.user.role !== 'coach') {
+    throw new Error("Unauthorized");
+  }
+
+  await prisma.classSession.update({
+    where: { id: sessionId },
+    data: {
+      status: 'cancelled',
+      note: note || 'Cancelled'
+    }
+  });
+
+  return { success: true };
+}
+
+export async function generateSessionsForStudentPackage(
+  studentId: string,
+  totalClasses: number,
+  startDateStr?: string | Date
+) {
+  // 1. Get student enrollments
+  const enrollments = await prisma.enrollment.findMany({
+    where: { student_id: studentId },
+    include: { slot: true }
+  });
+
+  if (enrollments.length === 0) return;
+
+  const startDate = startDateStr ? new Date(startDateStr) : new Date();
+  const startMidnight = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+
+  // Determine the clearing date (earliest of startMidnight or any enrollment's start_date)
+  let earliestDate = new Date(startMidnight.getTime());
+  for (const enr of enrollments) {
+    if (enr.start_date) {
+      const enrStart = new Date(enr.start_date);
+      const enrStartMid = new Date(enrStart.getFullYear(), enrStart.getMonth(), enrStart.getDate());
+      if (enrStartMid < earliestDate) {
+        earliestDate = enrStartMid;
+      }
+    }
+  }
+
+  // 2. Generate future candidate dates for each slot's day
+  const candidateSessions: Array<{ date: Date; slotId: string }> = [];
+
+  for (const enr of enrollments) {
+    const slot = enr.slot;
+    const dayNum = getDayNumber(slot.day);
+    
+    const slotStartDate = enr.start_date ? new Date(enr.start_date) : startMidnight;
+    const slotStartMidnight = new Date(slotStartDate.getFullYear(), slotStartDate.getMonth(), slotStartDate.getDate());
+    const slotEndDate = enr.end_date ? new Date(enr.end_date) : null;
+    const slotEndMidnight = slotEndDate ? new Date(slotEndDate.getFullYear(), slotEndDate.getMonth(), slotEndDate.getDate()) : null;
+
+    let curr = new Date(slotStartMidnight.getTime());
+    for (let w = 0; w < 52; w++) {
+      const currDay = curr.getDay();
+      let diff = dayNum - currDay;
+      if (diff < 0) diff += 7;
+      
+      const targetDate = new Date(curr.getTime());
+      targetDate.setDate(curr.getDate() + diff);
+      
+      if (slotEndMidnight && targetDate > slotEndMidnight) {
+        break;
+      }
+      
+      candidateSessions.push({
+        date: targetDate,
+        slotId: slot.id
+      });
+      
+      curr.setDate(curr.getDate() + 7);
+    }
+  }
+
+  // 3. Sort candidates chronologically
+  candidateSessions.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  // 4. Delete future scheduled sessions (status = 'scheduled') starting from the earliest date
+  await prisma.classSession.deleteMany({
+    where: {
+      student_id: studentId,
+      scheduled_date: { gte: earliestDate },
+      status: 'scheduled'
+    }
+  });
+
+  // 5. Select the first `totalClasses` candidate sessions and create them
+  const sessionsToCreate = candidateSessions.slice(0, totalClasses);
+
+  for (const item of sessionsToCreate) {
+    const existing = await prisma.classSession.findFirst({
+      where: {
+        student_id: studentId,
+        slot_id: item.slotId,
+        scheduled_date: item.date
+      }
+    });
+
+    if (!existing) {
+      await prisma.classSession.create({
+        data: {
+          student_id: studentId,
+          slot_id: item.slotId,
+          scheduled_date: item.date,
+          status: 'scheduled'
+        }
+      });
+    }
+  }
+}
+
+export async function updateStudentSlots(
+  studentId: string,
+  slotsInput: string[] | { slotId: string; startDate?: string | null; endDate?: string | null }[]
+) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+
+  // 1. Clear old enrollments and insert new ones
+  await prisma.enrollment.deleteMany({
+    where: { student_id: studentId }
+  });
+
+  const slotsData = Array.isArray(slotsInput) && typeof slotsInput[0] === 'string'
+    ? (slotsInput as string[]).map(id => ({ slotId: id, startDate: null, endDate: null }))
+    : (slotsInput as { slotId: string; startDate?: string | null; endDate?: string | null }[]);
+
+  for (const item of slotsData) {
+    const cleanId = item.slotId.startsWith('slot-') ? item.slotId.replace('slot-', '') : item.slotId;
+    await prisma.enrollment.create({
+      data: {
+        student_id: studentId,
+        slot_id: cleanId,
+        start_date: item.startDate ? new Date(item.startDate) : null,
+        end_date: item.endDate ? new Date(item.endDate) : null
+      }
+    });
+  }
+
+  // 2. Find active packages for this student and count remaining classes
+  const activePackages = await prisma.package.findMany({
+    where: {
+      student_id: studentId,
+      frozen: false,
+      kind: { notIn: ['unbilled', 'settled'] },
+      classes_remaining: { gt: 0 }
+    }
+  });
+
+  const totalRemaining = activePackages.reduce((sum, p) => sum + p.classes_remaining, 0);
+
+  // 3. Re-generate sessions for the remaining balance starting from today
+  if (totalRemaining > 0) {
+    let earliestStart: string | undefined = undefined;
+    for (const item of slotsData) {
+      if (item.startDate) {
+        if (!earliestStart || item.startDate < earliestStart) {
+          earliestStart = item.startDate;
+        }
+      }
+    }
+    await generateSessionsForStudentPackage(studentId, totalRemaining, earliestStart);
+  }
+
+  return { success: true };
+}
+
+export async function deleteScheduleSlot(slotId: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  const cleanId = slotId.startsWith('slot-') ? slotId.replace('slot-', '') : slotId;
+  
+  // Clean up any enrollments pointing to this slot
+  await prisma.enrollment.deleteMany({
+    where: { slot_id: cleanId }
+  });
+
+  return await prisma.scheduleSlot.delete({
+    where: { id: cleanId }
+  });
+}
+
+export async function updateScheduleSlot(slotId: string, payload: any) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+  const cleanId = slotId.startsWith('slot-') ? slotId.replace('slot-', '') : slotId;
+
+  // Check for conflicts: find all slots for this coach on the same day except the current slot
+  const existingSlots = await prisma.scheduleSlot.findMany({
+    where: {
+      coach_id: payload.coach_id,
+      day: payload.day,
+      id: { not: cleanId }
+    }
+  });
+
+  const newRange = parseTimeRange(payload.time);
+  for (const slot of existingSlots) {
+    const range = parseTimeRange(slot.time);
+    if (rangesOverlap(newRange, range)) {
+      throw new Error(`Conflict: Coach already has a scheduled class on ${payload.day} at ${slot.time.replace('::', '-')}`);
+    }
+  }
+
+  return await prisma.scheduleSlot.update({
+    where: { id: cleanId },
+    data: {
+      centre_id: payload.centre_id,
+      coach_id: payload.coach_id,
+      day: payload.day,
+      time: payload.time,
+      level: payload.level,
+      capacity: payload.capacity || 10,
+      is_summer_camp: payload.is_summer_camp || false
+    }
+  });
+}
+

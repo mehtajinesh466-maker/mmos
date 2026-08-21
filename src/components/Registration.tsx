@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/db';
-import { registerStudent, syncDatabaseToClient } from '../app/actions';
+import { registerStudent, syncDatabaseToClient, createScheduleSlot, deleteScheduleSlot, updateScheduleSlot } from '../app/actions';
 import { useSearchParams } from 'next/navigation';
 
 interface RegistrationProps {
@@ -14,6 +14,25 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
   const centres = db.getCentres();
   const coaches = db.getCoaches();
   const searchParams = useSearchParams();
+  const [localSlots, setLocalSlots] = useState<any[]>([]);
+  const [slotDateRanges, setSlotDateRanges] = useState<{ [slotId: string]: { startDate: string; endDate: string } }>({});
+
+  // Slot Management Modal state
+  const [showSlotModal, setShowSlotModal] = useState(false);
+  const [editingSlot, setEditingSlot] = useState<any>(null); // null for "Add", slot object for "Edit"
+  const [slotForm, setSlotForm] = useState({
+    day: 'Mon',
+    startTime: '16:00',
+    endTime: '17:00',
+    level: 'Beginner 1',
+    capacity: 10,
+    coachId: '',
+    isSummerCamp: false
+  });
+
+  useEffect(() => {
+    setLocalSlots(db.getScheduleSlots ? db.getScheduleSlots() : []);
+  }, []);
 
   const bayCentre = centres.find(c => c.name === 'Bay Avenue');
   const jltCentre = centres.find(c => c.name === 'JLT');
@@ -80,7 +99,14 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
+  const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]);
   const [studentIdAuto, setStudentIdAuto] = useState('BAY-363 (auto)');
+  
+  const handleToggleSlot = (slotId: string) => {
+    setSelectedSlotIds(prev => 
+      prev.includes(slotId) ? prev.filter(id => id !== slotId) : [...prev, slotId]
+    );
+  };
 
   const [photoUrl, setPhotoUrl] = useState('');
   const [regFormUrl, setRegFormUrl] = useState('');
@@ -141,6 +167,94 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
 
   const filteredCoaches = formData.centre_id ? coaches.filter(c => c.centre_id === formData.centre_id) : coaches;
 
+  const availableSlots = localSlots.filter(s => 
+    s.centre_id === formData.centre_id && 
+    (!formData.coach_id || s.coach_id === formData.coach_id)
+  );
+
+  const openAddSlot = () => {
+    setEditingSlot(null);
+    setSlotForm({
+      day: 'Mon',
+      startTime: '16:00',
+      endTime: '17:00',
+      level: formData.level || 'Beginner 1',
+      capacity: 10,
+      coachId: formData.coach_id || (filteredCoaches[0]?.id || ''),
+      isSummerCamp: false
+    });
+    setShowSlotModal(true);
+  };
+
+  const openEditSlot = (slot: any) => {
+    const times = slot.time.split('::');
+    setEditingSlot(slot);
+    setSlotForm({
+      day: slot.day,
+      startTime: times[0] || '16:00',
+      endTime: times[1] || '17:00',
+      level: slot.level,
+      capacity: slot.capacity || 10,
+      coachId: slot.coach_id,
+      isSummerCamp: !!slot.is_summer_camp
+    });
+    setShowSlotModal(true);
+  };
+
+  const handleDeleteSlotClick = async (slotId: string) => {
+    if (!confirm('Are you sure you want to delete this class slot? This will remove all student enrollments in it.')) return;
+    try {
+      await deleteScheduleSlot(slotId);
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      setLocalSlots(db.getScheduleSlots ? db.getScheduleSlots() : []);
+      setSelectedSlotIds(prev => prev.filter(id => id !== slotId));
+      alert('✓ Slot deleted successfully.');
+    } catch (e: any) {
+      alert('Error deleting slot: ' + e.message);
+    }
+  };
+
+  const handleSaveSlot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const finalTime = `${slotForm.startTime}::${slotForm.endTime}`;
+    try {
+      if (editingSlot) {
+        // Edit existing slot
+        await updateScheduleSlot(editingSlot.id, {
+          centre_id: formData.centre_id,
+          coach_id: slotForm.coachId,
+          day: slotForm.day,
+          time: finalTime,
+          level: slotForm.level,
+          capacity: Number(slotForm.capacity),
+          is_summer_camp: slotForm.isSummerCamp
+        });
+        alert('✓ Slot updated successfully.');
+      } else {
+        // Add new slot
+        const newSlot = await createScheduleSlot(
+          formData.centre_id,
+          slotForm.coachId,
+          slotForm.day,
+          finalTime,
+          slotForm.level,
+          Number(slotForm.capacity),
+          slotForm.isSummerCamp
+        );
+        // Automatically check the newly added slot
+        setSelectedSlotIds(prev => [...prev, newSlot.id]);
+        alert('✓ Slot created successfully.');
+      }
+      const fresh = await syncDatabaseToClient();
+      db.syncFromNeon(fresh);
+      setLocalSlots(db.getScheduleSlots ? db.getScheduleSlots() : []);
+      setShowSlotModal(false);
+    } catch (e: any) {
+      alert('Error saving slot: ' + e.message);
+    }
+  };
+
   // Auto student ID calculation based on centre selection
   useEffect(() => {
     const prefix = formData.centre_id === jltCentre?.id ? 'JLT' : 'BAY';
@@ -157,6 +271,10 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
     const nextNum = maxNum + 1;
     setStudentIdAuto(`${prefix}-${nextNum} (auto)`);
   }, [formData.centre_id, jltCentre]);
+
+  useEffect(() => {
+    setSelectedSlotIds([]);
+  }, [formData.centre_id, formData.coach_id]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -219,6 +337,12 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       payment_method: formData.payment_method,
       payment_status: formData.payment_status || 'paid',
       payment_remarks: formData.payment_remarks,
+      slotIds: selectedSlotIds,
+      slotsData: selectedSlotIds.map(slotId => ({
+        slotId,
+        startDate: slotDateRanges[slotId]?.startDate || formData.start_date || new Date().toISOString().split('T')[0],
+        endDate: slotDateRanges[slotId]?.endDate || null
+      })),
       flags: {
         custom_student_id: studentIdAuto.replace(' (auto)', ''),
         reg_form_url: regFormUrl,
@@ -234,6 +358,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       
       const freshData = await syncDatabaseToClient();
       db.syncFromNeon(freshData);
+      setLocalSlots(db.getScheduleSlots ? db.getScheduleSlots() : []);
 
       // T4: compute display ID (centre prefix + fide_id or id numeric part)
       const allCentres = db.getCentres();
@@ -251,6 +376,7 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
       setEmiratesIdUrl('');
       setSelectedFamilyId('');
       setSelectedSiblingName('');
+      setSelectedSlotIds([]);
 
       // M14: Full form reset — clear ALL fields so next registration is blank
       setDobYear('');
@@ -471,6 +597,127 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
               />
             </div>
           </div>
+
+          {/* Day / Slot Upfront Selection */}
+          <div className="mt-6 border-t border-line pt-4 space-y-2">
+            <div className="flex justify-between items-center">
+              <label className="text-xs font-bold text-ink flex items-center gap-1.5">
+                <span>📅</span> Choose Days and Timings Upfront
+              </label>
+              <button
+                type="button"
+                onClick={openAddSlot}
+                className="bg-forest hover:bg-emerald-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer"
+              >
+                + Add New Slot
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-custom">
+              Select one or more weekly class timings for this student. Future sessions will be generated automatically matching the package duration.
+            </p>
+            {availableSlots.length === 0 ? (
+              <p className="text-xs italic text-amber-600 bg-amber-50 p-2.5 rounded-lg border border-amber-200">
+                ⚠️ No slots available for the selected Centre and Coach. Create a slot here or in the Schedule panel.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1.5">
+                {availableSlots.map(slot => {
+                  const slotCoach = coaches.find(c => c.id === slot.coach_id);
+                  const coachName = slotCoach ? slotCoach.name : 'Unknown';
+                  const isChecked = selectedSlotIds.includes(slot.id);
+                  return (
+                    <div 
+                      key={slot.id}
+                      className={`flex flex-col p-3 rounded-lg border transition-all ${
+                        isChecked 
+                          ? 'bg-forest/5 border-forest text-ink' 
+                          : 'bg-white border-line hover:bg-canvas text-ink'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between w-full">
+                        <label className="flex items-start gap-2.5 cursor-pointer select-none flex-1">
+                          <input 
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSlot(slot.id)}
+                            className="rounded border-line text-forest focus:ring-forest mt-0.5 w-4 h-4 cursor-pointer"
+                          />
+                          <div className="text-xs space-y-0.5">
+                            <div className="font-bold flex items-center gap-1.5 text-ink">
+                              <span>{slot.day}</span>
+                              <span className="font-mono text-[10px] bg-canvas px-1.5 py-0.2 rounded border border-line">{slot.time.split('::')[0]}</span>
+                            </div>
+                            <div className="text-[9px] text-muted-custom">Level: {slot.level}</div>
+                            <div className="text-[9px] text-muted-custom">Coach: {coachName}</div>
+                          </div>
+                        </label>
+                        <div className="flex items-center gap-1.5 ml-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditSlot(slot)}
+                            title="Edit Slot"
+                            className="p-1 text-xs hover:bg-canvas rounded transition-all cursor-pointer"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSlotClick(slot.id)}
+                            title="Delete Slot"
+                            className="p-1 text-xs hover:bg-canvas rounded text-red-600 transition-all cursor-pointer"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {isChecked && (
+                        <div className="mt-2.5 pt-2 border-t border-line/50 grid grid-cols-2 gap-2" onClick={e => e.stopPropagation()}>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[8px] font-bold text-muted-custom uppercase">Start Date</span>
+                            <input 
+                              type="date"
+                              value={slotDateRanges[slot.id]?.startDate || formData.start_date || new Date().toISOString().split('T')[0]}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setSlotDateRanges(prev => ({
+                                  ...prev,
+                                  [slot.id]: {
+                                    startDate: val,
+                                    endDate: prev[slot.id]?.endDate || ''
+                                  }
+                                }));
+                              }}
+                              className="bg-white border border-line rounded px-1 py-0.5 text-[9px] text-ink outline-none"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[8px] font-bold text-muted-custom uppercase">End Date (Opt)</span>
+                            <input 
+                              type="date"
+                              value={slotDateRanges[slot.id]?.endDate || ''}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setSlotDateRanges(prev => ({
+                                  ...prev,
+                                  [slot.id]: {
+                                    startDate: prev[slot.id]?.startDate || formData.start_date || new Date().toISOString().split('T')[0],
+                                    endDate: val
+                                  }
+                                }));
+                              }}
+                              className="bg-white border border-line rounded px-1 py-0.5 text-[9px] text-ink outline-none"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
         </div>
 
         {/* PARENT / GUARDIAN SECTION */}
@@ -917,6 +1164,135 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
         </div>
 
       </form>
+
+      {showSlotModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-surface border border-line rounded-[14px] p-6 max-w-sm w-full shadow-lg space-y-4">
+            <div className="flex justify-between items-center border-b border-line pb-2.5">
+              <h4 className="text-sm font-bold text-ink">
+                {editingSlot ? '✏️ Edit Class Slot' : '📅 Add New Class Slot'}
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowSlotModal(false)}
+                className="text-muted-custom hover:text-ink text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <form onSubmit={handleSaveSlot} className="space-y-3.5">
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-muted-custom uppercase">Day of Week</span>
+                <select
+                  value={slotForm.day}
+                  onChange={e => setSlotForm(prev => ({ ...prev, day: e.target.value }))}
+                  className="bg-white border border-line rounded-lg px-2.5 py-1.5 text-xs text-ink outline-none"
+                >
+                  <option value="Mon">Monday</option>
+                  <option value="Tue">Tuesday</option>
+                  <option value="Wed">Wednesday</option>
+                  <option value="Thu">Thursday</option>
+                  <option value="Fri">Friday</option>
+                  <option value="Sat">Saturday</option>
+                  <option value="Sun">Sunday</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-muted-custom uppercase">Start Time</span>
+                  <input
+                    type="text"
+                    value={slotForm.startTime}
+                    onChange={e => setSlotForm(prev => ({ ...prev, startTime: e.target.value }))}
+                    placeholder="e.g. 16:00"
+                    className="bg-white border border-line rounded-lg px-2.5 py-1.5 text-xs text-ink outline-none"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-muted-custom uppercase">End Time</span>
+                  <input
+                    type="text"
+                    value={slotForm.endTime}
+                    onChange={e => setSlotForm(prev => ({ ...prev, endTime: e.target.value }))}
+                    placeholder="e.g. 17:00"
+                    className="bg-white border border-line rounded-lg px-2.5 py-1.5 text-xs text-ink outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-muted-custom uppercase">Level</span>
+                <select
+                  value={slotForm.level}
+                  onChange={e => setSlotForm(prev => ({ ...prev, level: e.target.value }))}
+                  className="bg-white border border-line rounded-lg px-2.5 py-1.5 text-xs text-ink outline-none"
+                >
+                  <option value="Beginner 1">Beginner 1</option>
+                  <option value="Beginner 2">Beginner 2</option>
+                  <option value="Intermediate 1">Intermediate 1</option>
+                  <option value="Intermediate 2">Intermediate 2</option>
+                  <option value="Advanced">Advanced</option>
+                  <option value="FIDE">FIDE</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-muted-custom uppercase">Coach</span>
+                <select
+                  value={slotForm.coachId}
+                  onChange={e => setSlotForm(prev => ({ ...prev, coachId: e.target.value }))}
+                  required
+                  className="bg-white border border-line rounded-lg px-2.5 py-1.5 text-xs text-ink outline-none"
+                >
+                  <option value="">Select Coach...</option>
+                  {filteredCoaches.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-muted-custom uppercase">Capacity</span>
+                  <input
+                    type="number"
+                    value={slotForm.capacity}
+                    onChange={e => setSlotForm(prev => ({ ...prev, capacity: Number(e.target.value) }))}
+                    className="bg-white border border-line rounded-lg px-2.5 py-1.5 text-xs text-ink outline-none"
+                  />
+                </div>
+                <label className="flex items-center gap-2 select-none mt-4 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={slotForm.isSummerCamp}
+                    onChange={e => setSlotForm(prev => ({ ...prev, isSummerCamp: e.target.checked }))}
+                    className="rounded border-line text-forest focus:ring-forest w-4 h-4"
+                  />
+                  <span className="text-xs text-ink font-semibold">Summer Camp</span>
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-line">
+                <button
+                  type="button"
+                  onClick={() => setShowSlotModal(false)}
+                  className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-4 py-2 rounded-lg transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="bg-forest hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all"
+                >
+                  {editingSlot ? 'Save Changes' : 'Create Slot'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

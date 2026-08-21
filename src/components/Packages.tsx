@@ -29,6 +29,10 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
   const [isFamilyShared, setIsFamilyShared] = useState(false);
+  const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]);
+  const [slots, setSlots] = useState<any[]>([]);
+  const [enrollments, setEnrollments] = useState<any[]>([]);
+  const [coaches, setCoaches] = useState<any[]>([]);
 
   // Sibling tagging and class/amount split state
   const [siblingAllocations, setSiblingAllocations] = useState<Array<{ studentId: string; classes: number; amount: number }>>([]);
@@ -47,7 +51,26 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
     setCentres(allCentres);
     setTiers(db.getTiers());
     setPackages(db.getPackages());
+    setSlots(db.getScheduleSlots ? db.getScheduleSlots() : []);
+    setEnrollments(db.getEnrollments ? db.getEnrollments() : []);
+    setCoaches(db.getCoaches ? db.getCoaches() : []);
   }, []);
+
+  // Sync selectedSlotIds when selectedStudentId changes
+  useEffect(() => {
+    if (selectedStudentId && enrollments.length > 0) {
+      const studentEnrs = enrollments.filter(e => e.student_id === selectedStudentId);
+      setSelectedSlotIds(studentEnrs.map(e => e.slot_id));
+    } else {
+      setSelectedSlotIds([]);
+    }
+  }, [selectedStudentId, enrollments]);
+
+  const handleToggleSlot = (slotId: string) => {
+    setSelectedSlotIds(prev => 
+      prev.includes(slotId) ? prev.filter(id => id !== slotId) : [...prev, slotId]
+    );
+  };
 
   // Sync selectedCentreId with activeCentre prop if it changes
   useEffect(() => {
@@ -347,7 +370,8 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
           Number(packageSize),
           Number(ratePerClass),
           paymentMethod,
-          paymentRemarks
+          paymentRemarks,
+          selectedSlotIds
         );
         if (res && !res.success) {
           throw new Error(res.error);
@@ -371,6 +395,7 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
         setPaymentRemarks('');
         setIsFamilyShared(false);
         setSiblingAllocations([]);
+        setSelectedSlotIds([]);
 
         // Scroll main panel to top to show success banner
         document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' });
@@ -608,6 +633,68 @@ export const Packages: React.FC<PackagesProps> = ({ currentUser, activeCentre })
               <span className="text-[10px] text-muted-custom">Optional — drives the renewal trigger</span>
             </div>
           </div>
+
+          {selectedStudentId && (
+            <div className="mt-6 border-t border-line pt-4 space-y-2">
+              <label className="text-xs font-bold text-ink flex items-center gap-1.5">
+                <span>📅</span> Class Timings / Days Selection (Upfront)
+              </label>
+              <p className="text-[10px] text-muted-custom">
+                Choose the days and timings for this student. The schedule will automatically generate sessions for the entire duration of the package.
+              </p>
+              {(() => {
+                const selectedStudent = students.find(s => s.id === selectedStudentId);
+                const studentCentreId = selectedStudent ? selectedStudent.centre_id : '';
+                const availableSlots = slots.filter(s => 
+                  s.centre_id === studentCentreId && 
+                  (!selectedStudent?.coach_id || s.coach_id === selectedStudent.coach_id)
+                );
+                
+                if (availableSlots.length === 0) {
+                  return (
+                    <p className="text-xs italic text-amber-600 bg-amber-50 p-2.5 rounded-lg border border-amber-200">
+                      ⚠️ No slots available for the student's centre. Create slots in the Schedule panel first.
+                    </p>
+                  );
+                }
+                
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1.5">
+                    {availableSlots.map(slot => {
+                      const slotCoach = coaches.find(c => c.id === slot.coach_id);
+                      const coachName = slotCoach ? slotCoach.name : 'Unknown';
+                      const isChecked = selectedSlotIds.includes(slot.id);
+                      return (
+                        <label 
+                          key={slot.id}
+                          className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer select-none transition-all ${
+                            isChecked 
+                              ? 'bg-forest/5 border-forest text-ink' 
+                              : 'bg-white border-line hover:bg-canvas text-ink'
+                          }`}
+                        >
+                          <input 
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSlot(slot.id)}
+                            className="rounded border-line text-forest focus:ring-forest mt-0.5 w-4 h-4 cursor-pointer"
+                          />
+                          <div className="text-xs space-y-0.5">
+                            <div className="font-bold flex items-center gap-1.5 text-ink">
+                              <span>{slot.day}</span>
+                              <span className="font-mono text-[10px] bg-canvas px-1.5 py-0.2 rounded border border-line">{slot.time.split('::')[0]}</span>
+                            </div>
+                            <div className="text-[9px] text-muted-custom">Level: {slot.level}</div>
+                            <div className="text-[9px] text-muted-custom">Coach: {coachName}</div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
 
           <div className="flex items-center gap-2 py-2 px-1">
             <input
