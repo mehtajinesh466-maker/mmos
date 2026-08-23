@@ -1935,7 +1935,7 @@ export async function renewPackage(
           where: { id: unbilled.id },
           data: {
             kind: 'settled',
-            classes_total: Math.abs(unbilled.classes_remaining),
+            classes_total: 0, // Treated as 0-class marker to prevent double-counting in paid/used totals
             classes_remaining: 0,
             start_date: renewalDate,
             ended_at: renewalDate
