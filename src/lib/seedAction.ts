@@ -25,6 +25,83 @@ function getRandomDate(daysAgoMin: number, daysAgoMax: number): Date {
   return date
 }
 
+function parseScheduleString(scheduleStr: any) {
+  if (!scheduleStr) return [];
+  const cleanStr = String(scheduleStr).trim();
+  
+  const pattern = /(\d+)(?:-(\d+))?\s*(PM|AM)?\s*\(([^)]+)\)/gi;
+  const results: { day: string; time: string }[] = [];
+  let match: any;
+  
+  const dayMapping: { [key: string]: string } = {
+    'mon': 'Mon', 'monday': 'Mon',
+    'tue': 'Tue', 'tuesday': 'Tue',
+    'wed': 'Wed', 'wednesday': 'Wed',
+    'thu': 'Thu', 'thur': 'Thu', 'thurs': 'Thu', 'thursday': 'Thu',
+    'fri': 'Fri', 'friday': 'Fri',
+    'sat': 'Sat', 'saturday': 'Sat',
+    'sun': 'Sun', 'sunday': 'Sun'
+  };
+
+  const allDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  while ((match = pattern.exec(cleanStr)) !== null) {
+    const startHourRaw = parseInt(match[1]);
+    const amPm = match[3] ? match[3].toUpperCase() : null;
+    const daysRaw = match[4].toLowerCase().trim();
+    
+    let startHour = startHourRaw;
+    if (amPm === 'PM' && startHour < 12) {
+      startHour += 12;
+    } else if (amPm === 'AM' && startHour === 12) {
+      startHour = 0;
+    } else if (!amPm) {
+      if (startHour < 9) {
+        startHour += 12;
+      }
+    }
+    
+    const formattedTime = `${String(startHour).padStart(2, '0')}:00`;
+    
+    let days: string[] = [];
+    if (daysRaw.includes('everyday')) {
+      if (daysRaw.includes('except')) {
+        const exceptDay = daysRaw.replace('everyday except', '').trim();
+        const mappedExcept = dayMapping[exceptDay];
+        days = allDays.filter(d => d !== mappedExcept);
+      } else {
+        days = [...allDays];
+      }
+    } else if (daysRaw.includes(',')) {
+      days = daysRaw.split(',').map(d => dayMapping[d.trim()]).filter(Boolean);
+    } else if (daysRaw.includes('-')) {
+      const parts = daysRaw.split('-');
+      const startDay = dayMapping[parts[0].trim()];
+      const endDay = dayMapping[parts[1].trim()];
+      
+      const startIndex = allDays.indexOf(startDay);
+      const endIndex = allDays.indexOf(endDay);
+      
+      if (startIndex !== -1 && endIndex !== -1) {
+        if (startIndex <= endIndex) {
+          days = allDays.slice(startIndex, endIndex + 1);
+        } else {
+          days = [...allDays.slice(startIndex), ...allDays.slice(0, endIndex + 1)];
+        }
+      }
+    } else {
+      const mapped = dayMapping[daysRaw];
+      if (mapped) days.push(mapped);
+    }
+    
+    days.forEach(day => {
+      results.push({ day, time: formattedTime });
+    });
+  }
+  
+  return results;
+}
+
 export async function runSeed() {
   console.log('Generating rich test data/importing from Excel for Master Moves OS...')
   const startTime = Date.now()
@@ -64,8 +141,552 @@ export async function runSeed() {
   const coachHash = await bcrypt.hash('mastermoves@coach$', 10)
   const parentHash = await bcrypt.hash('password123', 10)
 
-  // We check if the Excel files exist in the public directory
   const publicDir = path.join(process.cwd(), 'public')
+  const newStudentFile = path.join(publicDir, 'Student records-20.xlsx')
+  const newPackageFile = path.join(publicDir, 'All Student Packages-24.xlsx')
+  const newAttendanceFile = path.join(publicDir, 'All Attendance Records-18.xlsx')
+  const newScheduleFile = path.join(publicDir, 'JLT coach schedules.xlsx')
+
+  const hasNewFiles = fs.existsSync(newStudentFile) && fs.existsSync(newPackageFile) && fs.existsSync(newAttendanceFile)
+
+  if (hasNewFiles) {
+    console.log('Found new Excel files. Starting high-performance Master Moves OS Import...')
+    const newStartTime = Date.now()
+
+    // Create centres
+    const centreIds: { [key: string]: string } = {
+      'JLT': crypto.randomUUID(),
+      'Bay Avenue': crypto.randomUUID(),
+      'Town Square': crypto.randomUUID()
+    }
+
+    await prisma.centre.createMany({
+      data: [
+        { id: centreIds['JLT'], name: 'JLT', status: 'active' },
+        { id: centreIds['Bay Avenue'], name: 'Bay Avenue', status: 'active' },
+        { id: centreIds['Town Square'], name: 'Town Square', status: 'inactive' }
+      ]
+    })
+
+    const getCentreId = (name: any) => {
+      if (!name) return centreIds['Bay Avenue']
+      const clean = String(name).trim().toLowerCase()
+      if (clean.includes('jlt')) return centreIds['JLT']
+      if (clean.includes('bay') || clean.includes('mall')) return centreIds['Bay Avenue']
+      return centreIds['Bay Avenue']
+    }
+
+    // Default users (Amit and Sara)
+    const uAmitId = crypto.randomUUID()
+    const uSaraId = crypto.randomUUID()
+    await prisma.user.createMany({
+      data: [
+        { id: uAmitId, name: 'Amit Goyal', role: 'owner', email: 'owner@mastermoves.com', password: ownerHash },
+        { id: uSaraId, name: 'Sara Miller', role: 'front_desk', centre_id: centreIds['Bay Avenue'], email: 'sara@mastermoves.com', password: frontDeskHash }
+      ]
+    })
+
+    // Create coaches
+    const coachMap = new Map<string, { userId: string; coachId: string }>()
+    const usersToCreate: any[] = []
+    const coachesToCreate: any[] = []
+
+    const fallbackCoaches = [
+      'james estrada',
+      'reggie santiago',
+      'john mendoza',
+      'mahri geldiyeva',
+      'brylle arellano',
+      'brett portuguese',
+      'ryan carandang'
+    ]
+
+    fallbackCoaches.forEach(name => {
+      const uId = crypto.randomUUID()
+      const cId = crypto.randomUUID()
+      usersToCreate.push({
+        id: uId,
+        name: name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+        email: `${name.replace(/\s+/g, '')}@mastermoves.com`,
+        password: coachHash,
+        role: 'coach',
+        centre_id: (name.includes('mahri') || name.includes('brylle') || name.includes('brett') || name.includes('ryan')) ? centreIds['JLT'] : centreIds['Bay Avenue']
+      })
+      coachesToCreate.push({
+        id: cId,
+        user_id: uId,
+        centre_id: (name.includes('mahri') || name.includes('brylle') || name.includes('brett') || name.includes('ryan')) ? centreIds['JLT'] : centreIds['Bay Avenue'],
+        title: 'Coach',
+        active: true
+      })
+      coachMap.set(name, { userId: uId, coachId: cId })
+    })
+
+    await prisma.user.createMany({ data: usersToCreate })
+    await prisma.coach.createMany({ data: coachesToCreate })
+
+    const findCoach = (name: string) => {
+      if (!name) return coachMap.get('james estrada')?.coachId || null
+      const clean = name.trim().toLowerCase()
+      if (clean.includes('james')) return coachMap.get('james estrada')?.coachId || null
+      if (clean.includes('reggie')) return coachMap.get('reggie santiago')?.coachId || null
+      if (clean.includes('john')) return coachMap.get('john mendoza')?.coachId || null
+      if (clean.includes('mahri')) return coachMap.get('mahri geldiyeva')?.coachId || null
+      if (clean.includes('brylle') || clean.includes('bryle')) return coachMap.get('brylle arellano')?.coachId || null
+      if (clean.includes('brett')) return coachMap.get('brett portuguese')?.coachId || null
+      if (clean.includes('ryan') || clean.includes('cardelang') || clean.includes('carandang')) return coachMap.get('ryan carandang')?.coachId || null
+
+      for (const [key, val] of coachMap.entries()) {
+        if (clean.includes(key) || key.includes(clean)) {
+          return val.coachId
+        }
+      }
+      return coachMap.get('james estrada')?.coachId || null
+    }
+
+    // Create Tiers
+    const tierIds = {
+      'Mini': crypto.randomUUID(),
+      'Core': crypto.randomUUID(),
+      'Elite': crypto.randomUUID(),
+      'Pro-Track': crypto.randomUUID()
+    }
+    await prisma.tier.createMany({
+      data: [
+        { id: tierIds['Mini'], name: 'Mini', price: 750, inclusions: ['4 classes/month'], active: true },
+        { id: tierIds['Core'], name: 'Core', price: 1000, inclusions: ['8 classes/month'], active: true },
+        { id: tierIds['Elite'], name: 'Elite', price: 1500, inclusions: ['12 classes/month'], active: true },
+        { id: tierIds['Pro-Track'], name: 'Pro-Track', price: 3500, inclusions: ['24 classes/month'], active: true }
+      ]
+    })
+
+    const getTierId = (classesCount: number) => {
+      if (classesCount <= 4) return tierIds['Mini']
+      if (classesCount <= 8) return tierIds['Core']
+      if (classesCount <= 12) return tierIds['Elite']
+      return tierIds['Pro-Track']
+    }
+
+    const parseExcelDate = (val: any): Date | null => {
+      if (!val) return null
+      if (typeof val === 'number') {
+        return new Date(Math.round((val - 25569) * 86400 * 1000))
+      }
+      const d = new Date(val)
+      return isNaN(d.getTime()) ? null : d
+    }
+
+    const cleanName = (name: string): string => {
+      if (!name) return ''
+      return name.trim().toLowerCase().replace(/\s+/g, ' ')
+    }
+
+    // Load sheets
+    const studentRosterWorkbook = XLSX.read(fs.readFileSync(newStudentFile), { type: 'buffer' })
+    const studentRosterData: any[] = []
+    studentRosterWorkbook.SheetNames.forEach(sheetName => {
+      const sheetData: any[] = XLSX.utils.sheet_to_json(studentRosterWorkbook.Sheets[sheetName])
+      studentRosterData.push(...sheetData)
+    })
+
+    const packageWorkbook = XLSX.read(fs.readFileSync(newPackageFile), { type: 'buffer' })
+    const packageData: any[] = XLSX.utils.sheet_to_json(packageWorkbook.Sheets[packageWorkbook.SheetNames[0]])
+
+    const attendanceWorkbook = XLSX.read(fs.readFileSync(newAttendanceFile), { type: 'buffer' })
+    const attendanceData: any[] = XLSX.utils.sheet_to_json(attendanceWorkbook.Sheets[attendanceWorkbook.SheetNames[0]])
+
+    // Process Students & Families
+    const familiesToCreate: any[] = []
+    const studentsToCreate: any[] = []
+    const familiesMap = new Map<string, string>() // phone -> familyId
+    const studentMap = new Map<string, string>() // studentId (lowercase) -> db UUID
+    const studentNameMap = new Map<string, string>() // cleanName -> db UUID
+
+
+    studentRosterData.forEach((row, idx) => {
+      const name = String(row['Name'] || '').trim()
+      if (!name) return
+
+      const clean = cleanName(name)
+      const rawPhone = row['Mobile/Whatsapp'] || ''
+      const phone = String(rawPhone).trim()
+
+      let familyId = crypto.randomUUID()
+      if (phone && phone !== 'undefined' && phone !== '') {
+        if (familiesMap.has(phone)) {
+          familyId = familiesMap.get(phone)!
+        } else {
+          familiesMap.set(phone, familyId)
+          familiesToCreate.push({
+            id: familyId,
+            primary_name: `Parent of ${name}`,
+            phone: phone,
+            email: null,
+            consent_ops: true,
+            consent_mktg: false
+          })
+        }
+      } else {
+        familiesToCreate.push({
+          id: familyId,
+          primary_name: `Parent of ${name}`,
+          phone: null,
+          email: null,
+          consent_ops: true,
+          consent_mktg: false
+        })
+      }
+
+      const sId = crypto.randomUUID()
+      const refId = String(row['Student Id'] || '').trim()
+      if (refId) {
+        studentMap.set(refId.toLowerCase(), sId)
+      }
+      studentNameMap.set(clean, sId)
+
+      const centreId = getCentreId(row['Assigned center'])
+      const coachId = findCoach(row['Coaches Details'])
+      const dob = parseExcelDate(row['Date of birth'])
+      const joinDate = parseExcelDate(row['Date Enrolled']) || new Date('2026-08-01')
+      const level = row['Current Student levels'] || row['Joining Student level'] || 'Beginner'
+      const status = String(row['Status'] || 'Active').trim().toLowerCase() === 'active' ? 'active' : 'inactive'
+
+      studentsToCreate.push({
+        id: sId,
+        family_id: familyId,
+        centre_id: centreId,
+        coach_id: coachId,
+        name,
+        dob,
+        gender: null,
+        school: row['School'] || null,
+        level,
+        status,
+        fide_id: null,
+        join_date: joinDate,
+        last_attended: null,
+        pace_status: 'On track',
+        flags: refId ? { custom_student_id: refId } : {},
+        address: row['Address'] || null,
+        alternate_centre: row['Alternate Center'] || null,
+        resident_status: row['ET /JLT Resident'] || null,
+        category: row['Student category'] || null,
+        notes: row['NOTES'] || 'Imported from Student records-20',
+        referral_source: row['HOW DID YOU HEAR ABOUT US '] || null,
+        parent_name: row['Parent name'] || null
+      })
+    })
+
+    const findStudentId = (ref: string, name: string): string | null => {
+      const clean = cleanName(name)
+      if (clean && studentNameMap.has(clean)) {
+        return studentNameMap.get(clean)!
+      }
+      if (ref && studentMap.has(ref.trim().toLowerCase())) {
+        const sId = studentMap.get(ref.trim().toLowerCase())!
+        if (clean) {
+          studentNameMap.set(clean, sId)
+        }
+        return sId
+      }
+      return null
+    }
+
+    // Process Packages
+    const packagesToCreate: any[] = []
+    const invoicesToCreate: any[] = []
+
+    packageData.forEach(row => {
+      const studentName = String(row['Student'] || '').trim()
+      if (!studentName) return
+      if (cleanName(studentName) === 'aya elimi') return
+
+      let studentId = findStudentId(row['Student Id'], studentName)
+      if (!studentId) {
+        studentId = crypto.randomUUID()
+        const clean = cleanName(studentName)
+        studentNameMap.set(clean, studentId)
+        if (row['Student Id']) {
+          studentMap.set(String(row['Student Id']).trim().toLowerCase(), studentId)
+        }
+
+        const familyId = crypto.randomUUID()
+        familiesToCreate.push({
+          id: familyId,
+          primary_name: `Parent of ${studentName}`,
+          phone: null,
+          email: null,
+          consent_ops: true,
+          consent_mktg: false
+        })
+
+        studentsToCreate.push({
+          id: studentId,
+          family_id: familyId,
+          centre_id: getCentreId(row['Assigned center']),
+          coach_id: findCoach(''),
+          name: studentName,
+          dob: null,
+          gender: null,
+          school: null,
+          level: 'Beginner',
+          status: 'active',
+          join_date: parseExcelDate(row['Student Enroll First']) || new Date(),
+          last_attended: null,
+          flags: {},
+          notes: 'Created dynamically from package logs'
+        })
+      }
+
+      const pkgId = crypto.randomUUID()
+      const totalClasses = Number(row['No of classes']) || 0
+      const completedClasses = Number(row['Completed Classes']) || 0
+      const remainingClasses = totalClasses - completedClasses
+      const price = Number(row['Price']) || 0
+      const dateOfPayment = parseExcelDate(row['Date of payment']) || parseExcelDate(row['Student Enroll First']) || new Date()
+
+      const rawKind = String(row['New/Renewal'] || 'New').toLowerCase()
+      const kind = rawKind.includes('tournament') ? 'tournament' : (rawKind.includes('renewal') ? 'renewal' : 'new')
+
+      packagesToCreate.push({
+        id: pkgId,
+        student_id: studentId,
+        tier_id: getTierId(totalClasses),
+        kind: kind,
+        classes_total: totalClasses,
+        classes_remaining: remainingClasses,
+        discount_pct: 0,
+        frozen: false,
+        start_date: dateOfPayment,
+        expiry_date: null
+      })
+
+      invoicesToCreate.push({
+        id: crypto.randomUUID(),
+        package_id: pkgId,
+        student_id: studentId,
+        amount: price,
+        vat: price * 0.05,
+        status: 'paid',
+        method: row['Mode of payment'] || 'Online',
+        created_at: dateOfPayment
+      })
+    })
+
+    // Process Attendance
+    const attendanceToCreate: any[] = []
+    const studentLastAttended = new Map<string, Date>()
+
+    // Find max date in attendanceData to use as fallback for empty dates
+    let maxAttendanceDate = new Date('2026-08-22')
+    attendanceData.forEach(row => {
+      const d = parseExcelDate(row['Date'])
+      if (d && d > maxAttendanceDate) {
+        maxAttendanceDate = d
+      }
+    })
+
+    attendanceData.forEach(row => {
+      const studentName = String(row['Student'] || '').trim()
+      if (!studentName) return
+      if (cleanName(studentName) === 'aya elimi') return
+
+      let studentId = findStudentId('', studentName)
+      if (!studentId) {
+        studentId = crypto.randomUUID()
+        const clean = cleanName(studentName)
+        studentNameMap.set(clean, studentId)
+
+        const familyId = crypto.randomUUID()
+        familiesToCreate.push({
+          id: familyId,
+          primary_name: `Parent of ${studentName}`,
+          phone: null,
+          email: null,
+          consent_ops: true,
+          consent_mktg: false
+        })
+
+        studentsToCreate.push({
+          id: studentId,
+          family_id: familyId,
+          centre_id: getCentreId(row['Assigned center']),
+          coach_id: findCoach(row['Coaches Details']),
+          name: studentName,
+          dob: null,
+          gender: null,
+          school: null,
+          level: 'Beginner',
+          status: 'inactive',
+          join_date: parseExcelDate(row['Date']) || maxAttendanceDate,
+          last_attended: null,
+          flags: {}
+        })
+      }
+
+      const date = parseExcelDate(row['Date']) || maxAttendanceDate
+      if (date) {
+        const currentLast = studentLastAttended.get(studentId)
+        if (!currentLast || date > currentLast) {
+          studentLastAttended.set(studentId, date)
+        }
+      }
+
+      const status = String(row['Attendance'] || 'Present').trim().toLowerCase()
+      const rawDuration = row['Class duration']
+      const duration = (rawDuration !== undefined && rawDuration !== null && rawDuration !== '') ? Number(rawDuration) : 2
+
+      attendanceToCreate.push({
+        id: crypto.randomUUID(),
+        student_id: studentId,
+        coach_id: findCoach(row['Coaches Details']),
+        date: date,
+        status: status === 'makeup' ? 'makeup' : (status === 'absent' ? 'absent' : 'present'),
+        duration: duration,
+        topic: null,
+        note: 'Imported from Attendance Records'
+      })
+    })
+
+    // Update student last_attended, low_package, and unbilled flags
+    for (const student of studentsToCreate) {
+      if (studentLastAttended.has(student.id)) {
+        student.last_attended = studentLastAttended.get(student.id)
+      }
+
+      const pkgs = packagesToCreate.filter(p => p.student_id === student.id)
+      const totalRemaining = pkgs.reduce((sum, p) => sum + p.classes_remaining, 0)
+      const totalClasses = pkgs.reduce((sum, p) => sum + p.classes_total, 0)
+
+      if (totalClasses > 0 && (totalRemaining / totalClasses <= 0.20 || totalRemaining <= 2)) {
+        student.flags = {
+          ...student.flags,
+          low_package: true
+        }
+      }
+
+      // Calculate unbilled classes
+      const studentAtt = attendanceToCreate.filter(a => a.student_id === student.id && (a.status === 'present' || a.status === 'makeup'))
+      const totalAttended = studentAtt.reduce((sum, a) => sum + a.duration, 0)
+      const unpaidClasses = Math.max(0, totalAttended - totalClasses)
+
+      if (unpaidClasses > 0) {
+        let rate = 125
+        if (pkgs.length > 0) {
+          const sorted = [...pkgs].sort((a, b) => b.start_date.getTime() - a.start_date.getTime())
+          const latestPkg = sorted[0]
+          const invoice = invoicesToCreate.find(inv => inv.package_id === latestPkg.id)
+          const price = invoice ? invoice.amount : 0
+          rate = (price > 0 && latestPkg.classes_total > 0) ? Math.round(price / latestPkg.classes_total) : 125
+        }
+        student.flags = {
+          ...student.flags,
+          unpaid_classes: unpaidClasses,
+          unpaid_value: unpaidClasses * rate
+        }
+      }
+    }
+
+    // Insert to DB
+    await prisma.family.createMany({ data: familiesToCreate })
+    await prisma.student.createMany({ data: studentsToCreate })
+
+    const chunkSize = 500
+    for (let i = 0; i < packagesToCreate.length; i += chunkSize) {
+      await prisma.package.createMany({ data: packagesToCreate.slice(i, i + chunkSize) })
+    }
+    for (let i = 0; i < invoicesToCreate.length; i += chunkSize) {
+      await prisma.invoice.createMany({ data: invoicesToCreate.slice(i, i + chunkSize) })
+    }
+    for (let i = 0; i < attendanceToCreate.length; i += chunkSize) {
+      await prisma.attendance.createMany({ data: attendanceToCreate.slice(i, i + chunkSize) })
+    }
+
+    // Process JLT coach schedules
+    const scheduleSlotsToCreate: any[] = []
+    const enrollmentsToCreate: any[] = []
+    const slotMap = new Map<string, string>()
+
+    if (fs.existsSync(newScheduleFile)) {
+      const wbSchedule = XLSX.read(fs.readFileSync(newScheduleFile), { type: 'buffer' })
+      wbSchedule.SheetNames.forEach(sheetName => {
+        const sheetData: any[] = XLSX.utils.sheet_to_json(wbSchedule.Sheets[sheetName])
+        sheetData.forEach(row => {
+          const name = String(row['Name'] || '').trim()
+          if (!name) return
+
+          const studentId = findStudentId('', name)
+          if (!studentId) return
+
+          const coachName = row['Updated Coach'] || sheetName.replace('Coach ', '')
+          const coachId = findCoach(coachName)
+          if (!coachId) return
+
+          const scheduleStr = row['Schedule'] || row['Remarks']
+          const slots = parseScheduleString(scheduleStr)
+
+          slots.forEach(slot => {
+            const slotKey = `${coachId}_${slot.day}_${slot.time}`
+            let slotId = slotMap.get(slotKey)
+
+            if (!slotId) {
+              slotId = crypto.randomUUID()
+              slotMap.set(slotKey, slotId)
+              scheduleSlotsToCreate.push({
+                id: slotId,
+                centre_id: centreIds['JLT'],
+                coach_id: coachId,
+                day: slot.day,
+                time: slot.time,
+                level: row['Level'] || 'Beginner',
+                capacity: 10,
+                is_summer_camp: false
+              })
+            }
+
+            enrollmentsToCreate.push({
+              id: crypto.randomUUID(),
+              student_id: studentId,
+              slot_id: slotId,
+              enrolled_at: new Date()
+            })
+          })
+        })
+      })
+    }
+
+    // Create default slots for Bay Avenue as a fallback
+    const mockDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const mockTimes = ['16:00', '17:30', '19:00']
+    const mockLevels = ['Beginner', 'Intermediate', 'Advanced', 'Pro-Track']
+
+    for (const day of mockDays) {
+      for (const time of mockTimes) {
+        scheduleSlotsToCreate.push({
+          id: crypto.randomUUID(),
+          centre_id: centreIds['Bay Avenue'],
+          coach_id: findCoach('james estrada')!,
+          day,
+          time,
+          level: mockLevels[Math.floor(Math.random() * mockLevels.length)],
+          capacity: 12,
+          is_summer_camp: false
+        })
+      }
+    }
+
+    await prisma.scheduleSlot.createMany({ data: scheduleSlotsToCreate })
+
+    for (let i = 0; i < enrollmentsToCreate.length; i += chunkSize) {
+      await prisma.enrollment.createMany({ data: enrollmentsToCreate.slice(i, i + chunkSize) })
+    }
+
+    const newEndTime = Date.now()
+    console.log(`New Master Moves OS import completed successfully in ${((newEndTime - newStartTime)/1000).toFixed(2)}s!`)
+    return
+  }
+
+  // We check if the Excel files exist in the public directory
   const studentFile = path.join(publicDir, 'student information.xlsx')
   const packageFile = path.join(publicDir, 'All Student Packages-8.xlsx')
   const attendanceFile = path.join(publicDir, 'All Attendance Records-5.xlsx')

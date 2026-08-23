@@ -14,6 +14,7 @@ interface ScheduleProps {
 
 export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre }) => {
   const router = useRouter();
+  const isSummerCampGloballyActive = typeof window !== 'undefined' && localStorage.getItem('mmos_summer_camp_active') !== 'false';
   const [selectedCoachId, setSelectedCoachId] = useState<string>('');
   const [selectedCentre, setSelectedCentre] = useState<string>('All');
   const [activeDay, setActiveDay] = useState<string>('Monday');
@@ -846,7 +847,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                     <div>
                       <h4 className="font-bold text-ink text-sm flex items-center gap-2">
                         {slot.level || 'Unassigned level'}
-                        {slot.is_summer_camp && (
+                        {slot.is_summer_camp && isSummerCampGloballyActive && (
                           <span className="bg-orange-100 text-orange-800 border border-orange-200 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
                             ☀️ Summer Camp
                           </span>
@@ -997,36 +998,38 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                           {savingSlotId === slot.id ? 'Saving...' : 'Save attendance'}
                         </button>
 
-                        <label className="flex items-center gap-1.5 text-xs font-semibold text-ink cursor-pointer bg-white border border-line px-3 py-2 rounded-lg hover:bg-canvas transition-all select-none">
-                          <input
-                            type="checkbox"
-                            checked={slot.is_summer_camp || false}
-                            onChange={async (e) => {
-                              const checked = e.target.checked;
-                              const existing = db.getScheduleSlots();
-                              const sIdx = existing.findIndex(s => s.id === slot.id);
-                              
-                              const baseTime = slot.time.split('::')[0];
-                              const newTime = checked ? `${baseTime}::1` : baseTime;
-                              
-                              if (sIdx !== -1) {
-                                existing[sIdx].is_summer_camp = checked;
-                                existing[sIdx].time = newTime;
-                                db.save('schedule_slots', existing);
-                                setSlots([...existing]); // Trigger UI update immediately
-                              }
-                              try {
-                                await toggleSummerCampSlot(slot.id, checked, newTime);
-                              } catch (err) {
-                                console.error("Failed to toggle summer camp on server:", err);
-                              }
-                            }}
-                            className="rounded border-line text-forest focus:ring-forest w-4 h-4 cursor-pointer"
-                          />
-                          <span>Summer Camp Class ☀️</span>
-                        </label>
+                        {isSummerCampGloballyActive && (
+                          <label className="flex items-center gap-1.5 text-xs font-semibold text-ink cursor-pointer bg-white border border-line px-3 py-2 rounded-lg hover:bg-canvas transition-all select-none">
+                            <input
+                              type="checkbox"
+                              checked={slot.is_summer_camp || false}
+                              onChange={async (e) => {
+                                const checked = e.target.checked;
+                                const existing = db.getScheduleSlots();
+                                const sIdx = existing.findIndex(s => s.id === slot.id);
+                                
+                                const baseTime = slot.time.split('::')[0];
+                                const newTime = checked ? `${baseTime}::1` : baseTime;
+                                
+                                if (sIdx !== -1) {
+                                  existing[sIdx].is_summer_camp = checked;
+                                  existing[sIdx].time = newTime;
+                                  db.save('schedule_slots', existing);
+                                  setSlots([...existing]); // Trigger UI update immediately
+                                }
+                                try {
+                                  await toggleSummerCampSlot(slot.id, checked, newTime);
+                                } catch (err) {
+                                  console.error("Failed to toggle summer camp on server:", err);
+                                }
+                              }}
+                              className="rounded border-line text-forest focus:ring-forest w-4 h-4 cursor-pointer"
+                            />
+                            <span>Summer Camp Class ☀️</span>
+                          </label>
+                        )}
 
-                        {slot.is_summer_camp && (
+                        {slot.is_summer_camp && isSummerCampGloballyActive && (
                           <div className="flex items-center gap-1.5 bg-orange-50 border border-orange-200 px-2 py-1.5 rounded-lg text-xs">
                             <span className="font-semibold text-ink">Deduct:</span>
                             <input
@@ -1898,19 +1901,21 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
               </div>
 
               <div className="flex flex-col gap-2 py-1">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="newSlotIsSummerCamp"
-                    checked={newSlotIsSummerCamp}
-                    onChange={(e) => setNewSlotIsSummerCamp(e.target.checked)}
-                    className="rounded border-line text-forest focus:ring-forest w-4 h-4 cursor-pointer"
-                  />
-                  <label htmlFor="newSlotIsSummerCamp" className="font-bold text-ink cursor-pointer select-none">
-                    Mark as Summer Camp Class ☀️
-                  </label>
-                </div>
-                {newSlotIsSummerCamp && (
+                {isSummerCampGloballyActive && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="newSlotIsSummerCamp"
+                      checked={newSlotIsSummerCamp}
+                      onChange={(e) => setNewSlotIsSummerCamp(e.target.checked)}
+                      className="rounded border-line text-forest focus:ring-forest w-4 h-4 cursor-pointer"
+                    />
+                    <label htmlFor="newSlotIsSummerCamp" className="font-bold text-ink cursor-pointer select-none">
+                      Mark as Summer Camp Class ☀️
+                    </label>
+                  </div>
+                )}
+                {newSlotIsSummerCamp && isSummerCampGloballyActive && (
                   <div className="flex flex-col gap-1.5 mt-2 ml-6 p-3 bg-orange-50 border border-orange-200 rounded-lg">
                     <label className="font-bold text-ink text-xs">Classes to deduct per attendance</label>
                     <input

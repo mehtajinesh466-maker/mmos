@@ -202,6 +202,19 @@ export async function deleteCoachDB(coachId: string) {
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
   }
+  const coach = await prisma.coach.findUnique({ where: { id: coachId }, include: { user: true } });
+  if (!coach) return null;
+
+  await prisma.pendingDeletion.create({
+    data: {
+      entityType: 'coach',
+      entityId: coachId,
+      entityName: coach.title || coach.user?.name || 'Coach',
+      entityData: JSON.stringify({ coach }),
+      deletedBy: session.user.name || 'Staff'
+    }
+  });
+
   const res = await prisma.coach.update({
     where: { id: coachId },
     data: { active: false }
@@ -2107,6 +2120,57 @@ export async function deleteStudentDB(id: string) {
     throw new Error("Unauthorized");
   }
 
+  const student = await prisma.student.findUnique({ where: { id } });
+  if (!student) return { success: false, message: "Student not found" };
+
+  const [
+    fideRatings,
+    packages,
+    attendance,
+    invoices,
+    enrollments,
+    progressLogs,
+    tournamentReports,
+    studentSkills,
+    notifications,
+    reports
+  ] = await Promise.all([
+    prisma.fideRating.findMany({ where: { student_id: id } }),
+    prisma.package.findMany({ where: { student_id: id } }),
+    prisma.attendance.findMany({ where: { student_id: id } }),
+    prisma.invoice.findMany({ where: { student_id: id } }),
+    prisma.enrollment.findMany({ where: { student_id: id } }),
+    prisma.progressLog.findMany({ where: { student_id: id } }),
+    prisma.tournamentReport.findMany({ where: { student_id: id } }),
+    prisma.studentSkill.findMany({ where: { student_id: id } }),
+    prisma.notification.findMany({ where: { student_id: id } }),
+    prisma.report.findMany({ where: { student_id: id } })
+  ]);
+
+  const entityData = JSON.stringify({
+    student,
+    fideRatings,
+    packages,
+    attendance,
+    invoices,
+    enrollments,
+    progressLogs,
+    tournamentReports,
+    studentSkills,
+    notifications,
+    reports
+  });
+
+  await prisma.pendingDeletion.create({
+    data: {
+      entityType: 'student',
+      entityId: id,
+      entityName: student.name,
+      entityData,
+      deletedBy: session.user.name || 'Staff'
+    }
+  });
+
   await prisma.$transaction([
     prisma.attendance.deleteMany({ where: { student_id: id } }),
     prisma.enrollment.deleteMany({ where: { student_id: id } }),
@@ -2129,6 +2193,19 @@ export async function deletePackageDB(id: string) {
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
   }
+  const pkg = await prisma.package.findUnique({ where: { id }, include: { student: true } });
+  if (!pkg) return null;
+
+  await prisma.pendingDeletion.create({
+    data: {
+      entityType: 'package',
+      entityId: id,
+      entityName: `Package for ${pkg.student?.name || 'Unknown'}`,
+      entityData: JSON.stringify({ package: pkg }),
+      deletedBy: session.user.name || 'Staff'
+    }
+  });
+
   return await prisma.package.delete({
     where: { id }
   });
@@ -2154,7 +2231,19 @@ export async function deleteAttendanceDB(id: string) {
   if (session.user.role !== 'owner' && session.user.role !== 'coach' && session.user.role !== 'front_desk') {
     throw new Error("Unauthorized");
   }
-  const before = await prisma.attendance.findUnique({ where: { id } });
+  const before = await prisma.attendance.findUnique({ where: { id }, include: { student: true } });
+  if (!before) return null;
+
+  await prisma.pendingDeletion.create({
+    data: {
+      entityType: 'attendance',
+      entityId: id,
+      entityName: `Attendance record for ${before.student?.name || 'Unknown'} on ${new Date(before.date).toLocaleDateString()}`,
+      entityData: JSON.stringify({ attendance: before }),
+      deletedBy: session.user.name || 'Staff'
+    }
+  });
+
   const deleted = await prisma.attendance.delete({
     where: { id }
   });
@@ -2187,6 +2276,19 @@ export async function deleteInvoiceDB(id: string) {
   if (session.user.role !== 'owner') {
     throw new Error("Unauthorized");
   }
+  const inv = await prisma.invoice.findUnique({ where: { id }, include: { student: true } });
+  if (!inv) return null;
+
+  await prisma.pendingDeletion.create({
+    data: {
+      entityType: 'invoice',
+      entityId: id,
+      entityName: `Invoice #${inv.invoice_no || inv.id.slice(0, 8)} for ${inv.student?.name || 'Unknown'}`,
+      entityData: JSON.stringify({ invoice: inv }),
+      deletedBy: session.user.name || 'Staff'
+    }
+  });
+
   return await prisma.invoice.delete({
     where: { id }
   });
@@ -2923,6 +3025,21 @@ export async function deleteScheduleSlot(slotId: string) {
   }
   const cleanId = slotId.startsWith('slot-') ? slotId.replace('slot-', '') : slotId;
   
+  const slot = await prisma.scheduleSlot.findUnique({ where: { id: cleanId } });
+  if (!slot) return null;
+
+  const enrollments = await prisma.enrollment.findMany({ where: { slot_id: cleanId } });
+
+  await prisma.pendingDeletion.create({
+    data: {
+      entityType: 'schedule_slot',
+      entityId: cleanId,
+      entityName: `${slot.day} ${slot.time} slot`,
+      entityData: JSON.stringify({ scheduleSlot: slot, enrollments }),
+      deletedBy: session.user.name || 'Staff'
+    }
+  });
+
   // Clean up any enrollments pointing to this slot
   await prisma.enrollment.deleteMany({
     where: { slot_id: cleanId }
@@ -2931,6 +3048,79 @@ export async function deleteScheduleSlot(slotId: string) {
   return await prisma.scheduleSlot.delete({
     where: { id: cleanId }
   });
+}
+
+export async function getActivePendingDeletions() {
+  const limit = new Date(Date.now() - 20 * 1000); // 20 seconds ago
+  return await prisma.pendingDeletion.findMany({
+    where: {
+      deletedAt: { gte: limit },
+      confirmed: false
+    },
+    orderBy: { deletedAt: 'desc' }
+  });
+}
+
+export async function dismissPendingDeletion(id: string) {
+  return await prisma.pendingDeletion.update({
+    where: { id },
+    data: { confirmed: true }
+  });
+}
+
+export async function undoDeletion(id: string) {
+  const session = await verifySession();
+  if (session.user.role !== 'owner' && session.user.role !== 'front_desk') {
+    throw new Error("Unauthorized");
+  }
+
+  const record = await prisma.pendingDeletion.findUnique({
+    where: { id }
+  });
+
+  if (!record) {
+    throw new Error("Pending deletion record not found");
+  }
+
+  const data = JSON.parse(record.entityData);
+
+  if (record.entityType === 'student') {
+    await prisma.$transaction([
+      prisma.student.create({ data: data.student }),
+      ...(data.fideRatings || []).map((x: any) => prisma.fideRating.create({ data: x })),
+      ...(data.packages || []).map((x: any) => prisma.package.create({ data: x })),
+      ...(data.attendance || []).map((x: any) => prisma.attendance.create({ data: x })),
+      ...(data.invoices || []).map((x: any) => prisma.invoice.create({ data: x })),
+      ...(data.enrollments || []).map((x: any) => prisma.enrollment.create({ data: x })),
+      ...(data.progressLogs || []).map((x: any) => prisma.progressLog.create({ data: x })),
+      ...(data.tournamentReports || []).map((x: any) => prisma.tournamentReport.create({ data: x })),
+      ...(data.studentSkills || []).map((x: any) => prisma.studentSkill.create({ data: x })),
+      ...(data.notifications || []).map((x: any) => prisma.notification.create({ data: x })),
+      ...(data.reports || []).map((x: any) => prisma.report.create({ data: x }))
+    ]);
+  } else if (record.entityType === 'package') {
+    await prisma.package.create({ data: data.package });
+  } else if (record.entityType === 'invoice') {
+    await prisma.invoice.create({ data: data.invoice });
+  } else if (record.entityType === 'attendance') {
+    await prisma.attendance.create({ data: data.attendance });
+  } else if (record.entityType === 'coach') {
+    await prisma.coach.update({
+      where: { id: record.entityId },
+      data: { active: true }
+    });
+  } else if (record.entityType === 'schedule_slot') {
+    await prisma.$transaction([
+      prisma.scheduleSlot.create({ data: data.scheduleSlot }),
+      ...(data.enrollments || []).map((x: any) => prisma.enrollment.create({ data: x }))
+    ]);
+  }
+
+  await prisma.pendingDeletion.delete({
+    where: { id }
+  });
+
+  return { success: true };
 }
 
 export async function updateScheduleSlot(slotId: string, payload: any) {

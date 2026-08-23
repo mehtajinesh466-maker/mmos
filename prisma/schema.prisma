@@ -330,3 +330,16 @@ model ClassSession {
   @@map("class_sessions")
 }
 
+model PendingDeletion {
+  id         String   @id @default(uuid()) @db.Uuid
+  entityType String   // 'student' | 'package' | 'attendance' | 'invoice' | 'coach' | 'schedule_slot'
+  entityId   String
+  entityName String
+  entityData String   @db.Text
+  deletedBy  String
+  deletedAt  DateTime @default(now()) @db.Timestamptz(6)
+  confirmed  Boolean  @default(false)
+
+  @@map("pending_deletions")
+}
+

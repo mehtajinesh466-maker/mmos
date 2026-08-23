@@ -22,12 +22,12 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [status, setStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [summerCampDuration, setSummerCampDuration] = useState<number>(2);
+  const [summerCampActive, setSummerCampActive] = useState<boolean>(true);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('mmos_summer_camp_duration');
-      setSummerCampDuration(stored === '2' ? 2 : 1);
+      const activeStored = localStorage.getItem('mmos_summer_camp_active');
+      setSummerCampActive(activeStored !== 'false');
     }
   }, []);
 
@@ -846,42 +846,26 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ currentUser }) => {
       )}
 
       {/* Summer Camp Setting */}
-      <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm mt-6 space-y-4 max-w-4xl">
-        <div className="flex items-center gap-2">
-          <span className="text-sm">☀️</span>
-          <h3 className="font-bold text-sm text-ink uppercase tracking-wider font-display">Summer Camp Settings</h3>
-        </div>
-        <p className="text-[11px] text-muted-custom">
-          Choose the package burn rate (billing duration) when a student attendance status is logged as <b>Present</b> in a Summer Camp class.
-        </p>
-        <div className="flex flex-wrap gap-6 pt-1">
-          <label className="flex items-center gap-2 text-xs font-semibold text-ink cursor-pointer bg-canvas/30 px-4 py-2.5 rounded-xl border border-line hover:bg-canvas/50 transition-all select-none">
+      <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm mt-6 max-w-4xl">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">☀️</span>
+            <h3 className="font-bold text-sm text-ink uppercase tracking-wider font-display">Summer Camp Settings</h3>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer select-none">
+            <span className="text-xs font-semibold text-ink mr-3">Enable Summer Camp Mode Globally</span>
             <input
-              type="radio"
-              name="summerCampDuration"
-              value={1}
-              checked={summerCampDuration === 1}
-              onChange={() => {
-                localStorage.setItem('mmos_summer_camp_duration', '1');
-                setSummerCampDuration(1);
+              type="checkbox"
+              checked={summerCampActive}
+              onChange={(e) => {
+                const active = e.target.checked;
+                localStorage.setItem('mmos_summer_camp_active', active ? 'true' : 'false');
+                setSummerCampActive(active);
+                window.dispatchEvent(new Event('db-synced')); // trigger components refresh
               }}
-              className="text-forest focus:ring-forest cursor-pointer"
+              className="sr-only peer"
             />
-            Deduct 1 Class Credit (e.g. 2-hour summer camp class counts as 1 hour)
-          </label>
-          <label className="flex items-center gap-2 text-xs font-semibold text-ink cursor-pointer bg-canvas/30 px-4 py-2.5 rounded-xl border border-line hover:bg-canvas/50 transition-all select-none">
-            <input
-              type="radio"
-              name="summerCampDuration"
-              value={2}
-              checked={summerCampDuration === 2}
-              onChange={() => {
-                localStorage.setItem('mmos_summer_camp_duration', '2');
-                setSummerCampDuration(2);
-              }}
-              className="text-forest focus:ring-forest cursor-pointer"
-            />
-            Deduct 2 Class Credits (Charge full 2 hours)
+            <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-forest relative"></div>
           </label>
         </div>
       </div>

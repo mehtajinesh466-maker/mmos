@@ -111,7 +111,6 @@ export const PackageReport: React.FC<PackageReportProps> = ({ currentUser, activ
     const classesPaid = studentPkgs.reduce((sum, p) => sum + p.classes_total, 0);
     const classesUsed = studentPkgs.reduce((sum, p) => sum + ((p.classes_total + (p.bonus_classes || 0)) - p.classes_remaining), 0);
     const balance = studentPkgs.reduce((sum, p) => sum + p.classes_remaining, 0);
-
     const totalEntitlement = studentPkgs.reduce((sum, p) => sum + p.classes_total + (p.bonus_classes || 0), 0);
     const utilisation = totalEntitlement > 0 ? Math.round((classesUsed / totalEntitlement) * 100) : 0;
     const owedVal = (activeStudent.flags as any)?.unpaid_value || 0;

@@ -6,6 +6,7 @@ import { Sidebar } from "../../components/Sidebar";
 import { db } from "../../lib/db";
 import { syncDatabaseToClient } from "../actions";
 import { useCentre } from "../../context/CentreContext";
+import { DeleteWarningBanner } from "../../components/DeleteWarningBanner";
 
 export default function DashboardLayout({
   children,
@@ -72,6 +73,7 @@ export default function DashboardLayout({
 
   return (
     <div className="grid grid-cols-[240px_1fr] h-screen w-screen overflow-hidden bg-canvas">
+      <DeleteWarningBanner />
       <Sidebar
         activeCentre={activeCentre}
         setActiveCentre={setActiveCentre}

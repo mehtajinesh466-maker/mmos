@@ -11,6 +11,7 @@ interface RegistrationProps {
 }
 
 export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeCentre }) => {
+  const isSummerCampGloballyActive = typeof window !== 'undefined' && localStorage.getItem('mmos_summer_camp_active') !== 'false';
   const centres = db.getCentres();
   const coaches = db.getCoaches();
   const searchParams = useSearchParams();
@@ -1263,15 +1264,17 @@ export const Registration: React.FC<RegistrationProps> = ({ currentUser, activeC
                     className="bg-white border border-line rounded-lg px-2.5 py-1.5 text-xs text-ink outline-none"
                   />
                 </div>
-                <label className="flex items-center gap-2 select-none mt-4 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={slotForm.isSummerCamp}
-                    onChange={e => setSlotForm(prev => ({ ...prev, isSummerCamp: e.target.checked }))}
-                    className="rounded border-line text-forest focus:ring-forest w-4 h-4"
-                  />
-                  <span className="text-xs text-ink font-semibold">Summer Camp</span>
-                </label>
+                {isSummerCampGloballyActive && (
+                  <label className="flex items-center gap-2 select-none mt-4 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={slotForm.isSummerCamp}
+                      onChange={e => setSlotForm(prev => ({ ...prev, isSummerCamp: e.target.checked }))}
+                      className="rounded border-line text-forest focus:ring-forest w-4 h-4"
+                    />
+                    <span className="text-xs text-ink font-semibold">Summer Camp</span>
+                  </label>
+                )}
               </div>
 
               <div className="flex justify-end gap-2.5 pt-3 border-t border-line">
