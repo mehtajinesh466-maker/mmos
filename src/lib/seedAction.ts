@@ -278,7 +278,11 @@ export async function runSeed() {
 
     const cleanName = (name: string): string => {
       if (!name) return ''
-      return name.trim().toLowerCase().replace(/\s+/g, ' ')
+      const cleaned = name.trim().toLowerCase().replace(/\s+/g, ' ')
+      if (cleaned === 'aya elimi') return 'ayah elimi'
+      if (cleaned === 'aadhya') return 'aadhya siram'
+      if (cleaned === 'hussein al-sarnvaee' || cleaned === 'hussein al-samraie') return 'hussein mohammed alsamraie'
+      return cleaned
     }
 
     // Load sheets
@@ -399,7 +403,6 @@ export async function runSeed() {
     packageData.forEach(row => {
       const studentName = String(row['Student'] || '').trim()
       if (!studentName) return
-      if (cleanName(studentName) === 'aya elimi') return
 
       let studentId = findStudentId(row['Student Id'], studentName)
       if (!studentId) {
@@ -489,7 +492,6 @@ export async function runSeed() {
     attendanceData.forEach(row => {
       const studentName = String(row['Student'] || '').trim()
       if (!studentName) return
-      if (cleanName(studentName) === 'aya elimi') return
 
       let studentId = findStudentId('', studentName)
       if (!studentId) {
@@ -541,7 +543,7 @@ export async function runSeed() {
         student_id: studentId,
         coach_id: findCoach(row['Coaches Details']),
         date: date,
-        status: status === 'makeup' ? 'makeup' : (status === 'absent' ? 'absent' : 'present'),
+        status: status === 'makeup' ? 'makeup' : (status.includes('absent') ? 'absent' : 'present'),
         duration: duration,
         topic: null,
         note: 'Imported from Attendance Records'
@@ -555,6 +557,48 @@ export async function runSeed() {
       }
 
       const pkgs = packagesToCreate.filter(p => p.student_id === student.id)
+      
+      // Reset paid packages to their full initial entitlement on import
+      pkgs.forEach(p => {
+        p.classes_remaining = p.classes_total
+      })
+
+      // Fetch present/makeup attendance logs for the student
+      const studentAtt = attendanceToCreate.filter(a => a.student_id === student.id && (a.status === 'present' || a.status === 'makeup'))
+      
+      // Sort attendance logs chronologically (asc)
+      studentAtt.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+      // Sort packages chronologically (asc) stably by start_date, then by kind order
+      const kindOrder: Record<string, number> = { 'new': 1, 'settled': 2, 'renewal': 3, 'tournament': 4 }
+      pkgs.sort((a, b) => {
+        const dateA = a.start_date ? new Date(a.start_date).getTime() : 0
+        const dateB = b.start_date ? new Date(b.start_date).getTime() : 0
+        if (dateA !== dateB) return dateA - dateB
+        const orderA = kindOrder[a.kind || ''] || 99
+        const orderB = kindOrder[b.kind || ''] || 99
+        if (orderA !== orderB) return orderA - orderB
+        return a.id.localeCompare(b.id)
+      })
+
+      // Chronologically consume package balances
+      let unpaidClasses = 0
+      studentAtt.forEach(att => {
+        let amountToDeduct = 1
+        for (const p of pkgs) {
+          if (amountToDeduct <= 0) break
+          if (p.classes_remaining <= 0) continue
+
+          const deduct = Math.min(p.classes_remaining, amountToDeduct)
+          p.classes_remaining -= deduct
+          amountToDeduct -= deduct
+        }
+
+        if (amountToDeduct > 0) {
+          unpaidClasses += amountToDeduct
+        }
+      })
+
       const totalRemaining = pkgs.reduce((sum, p) => sum + p.classes_remaining, 0)
       const totalClasses = pkgs.reduce((sum, p) => sum + p.classes_total, 0)
 
@@ -564,11 +608,6 @@ export async function runSeed() {
           low_package: true
         }
       }
-
-      // Calculate unbilled classes
-      const studentAtt = attendanceToCreate.filter(a => a.student_id === student.id && (a.status === 'present' || a.status === 'makeup'))
-      const totalAttended = studentAtt.reduce((sum, a) => sum + a.duration, 0)
-      const unpaidClasses = Math.max(0, totalAttended - totalClasses)
 
       if (unpaidClasses > 0) {
         let rate = 125

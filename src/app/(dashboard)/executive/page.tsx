@@ -2,13 +2,13 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Chart, registerables } from 'chart.js';
-import { getReconciliationData } from '../../actions';
+import { getReconciliationData, getMonthlyPerformanceData } from '../../actions';
 import { db } from '../../../lib/db';
 
 Chart.register(...registerables);
 
 export default function ExecutivePage() {
-  const [viewMode, setViewMode] = useState<'overview' | 'diligence' | 'unbilled' | 'reconciliation'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'diligence' | 'unbilled' | 'reconciliation' | 'performance'>('overview');
   const [contradictedStudents, setContradictedStudents] = useState<any[]>([]);
 
   const [students, setStudents] = useState<any[]>([]);
@@ -18,10 +18,12 @@ export default function ExecutivePage() {
   const [centres, setCentres] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [perfData, setPerfData] = useState<any[]>([]);
+  const [perfLoading, setPerfLoading] = useState(false);
 
   const loadData = () => {
     setStudents(db.getStudents());
-    setAttendance(db.getAttendance());
+    setAttendance(db.get<any>('attendance') || []);
     setPackages(db.getPackages());
     setCentres(db.getCentres());
     setCoaches(db.getCoaches());
@@ -40,6 +42,7 @@ export default function ExecutivePage() {
       setContradictedStudents(data);
     });
   }, []);
+
 
   const exportDashboardExcel = () => {
     const data = filteredStudents.map((s, idx) => {
@@ -76,6 +79,40 @@ export default function ExecutivePage() {
     document.body.removeChild(link);
   };
 
+  const exportPerformanceExcel = () => {
+    const csvData = perfData.map((d, idx) => ({
+      Index: idx + 1,
+      Month: d.month,
+      Centre: filterCentre === 'All' ? 'All Centres' : filterCentre,
+      'Active Students': d.activeStudentsCount,
+      'New Enrolments': d.newEnrolments,
+      'Cumulative Enrolments': d.cumulativeEnrolments,
+      'Sessions Count': d.totalClasses,
+      'Class Hours': d.totalHours,
+      'Revenue (AED)': d.revenue
+    }));
+
+    if (csvData.length === 0) {
+      alert("No data to export");
+      return;
+    }
+
+    const headers = Object.keys(csvData[0]);
+    const csvContent = [
+      headers.join(","),
+      ...csvData.map(row => headers.map(fieldName => JSON.stringify((row as any)[fieldName])).join(","))
+    ].join("\r\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `monthly_performance_${filterCentre.replace(/\s+/g, '_')}_export.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Dashboard Slices / Filters
   const [filterCentre, setFilterCentre] = useState('All');
   const [filterSegment, setFilterSegment] = useState('All');
@@ -84,10 +121,22 @@ export default function ExecutivePage() {
   const [diceBy, setDiceBy] = useState('By Centre');
   const [chartType, setChartType] = useState<'bar' | 'line' | 'donut' | 'table'>('bar');
 
+  // Fetch Monthly Performance data directly from server (bypasses localStorage)
+  useEffect(() => {
+    setPerfLoading(true);
+    getMonthlyPerformanceData(filterCentre)
+      .then(data => { setPerfData(data); setPerfLoading(false); })
+      .catch(err => { console.error('Monthly perf fetch failed:', err); setPerfLoading(false); });
+  }, [filterCentre]);
+
   // Chart Refs
   const trendChartRef = useRef<HTMLCanvasElement | null>(null);
   const donutChartRef = useRef<HTMLCanvasElement | null>(null);
   const unbilledChartRef = useRef<HTMLCanvasElement | null>(null);
+  const perfOldNewRef = useRef<HTMLCanvasElement | null>(null);
+  const perfEnrollmentsRef = useRef<HTMLCanvasElement | null>(null);
+  const perfClassesRef = useRef<HTMLCanvasElement | null>(null);
+  const perfRevenueRef = useRef<HTMLCanvasElement | null>(null);
   const chartInstances = useRef<{ [key: string]: Chart | null }>({});
 
   const filteredStudents = useMemo(() => {
@@ -187,6 +236,7 @@ export default function ExecutivePage() {
       monthlyRevenue
     };
   }, [filteredStudents, attendance, invoices, packages, centres]);
+
 
   const destroyCharts = () => {
     Object.keys(chartInstances.current).forEach(key => {
@@ -311,6 +361,132 @@ export default function ExecutivePage() {
               backgroundColor: dicedUnbilledData.backgroundColors,
               borderWidth: 0
             }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { 
+                beginAtZero: true, 
+                grid: { color: '#E4DFD2' },
+                ticks: { callback: v => `AED ${Number(v) / 1000}K` }
+              },
+              x: { grid: { display: false } }
+            }
+          }
+        });
+      }
+    } else if (viewMode === 'performance') {
+      const labels = perfData.map(d => d.month);
+
+      // Chart 1: Old Vs New stacked bar chart
+      if (perfOldNewRef.current) {
+        chartInstances.current.perfOldNew = new Chart(perfOldNewRef.current, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'New Student',
+                data: perfData.map(d => d.newStudentPayments),
+                backgroundColor: '#C4A249'
+              },
+              {
+                label: 'Old Student',
+                data: perfData.map(d => d.oldStudentPayments),
+                backgroundColor: '#286957'
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: true, position: 'top' } },
+            scales: {
+              y: { stacked: true, beginAtZero: true, grid: { color: '#E4DFD2' } },
+              x: { stacked: true, grid: { display: false } }
+            }
+          }
+        });
+      }
+
+      // Chart 2: Monthly Enrollments bar chart
+      if (perfEnrollmentsRef.current) {
+        chartInstances.current.perfEnrollments = new Chart(perfEnrollmentsRef.current, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Enrolled Students',
+                data: perfData.map(d => d.newEnrolments),
+                backgroundColor: '#52907F'
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: '#E4DFD2' } },
+              x: { grid: { display: false } }
+            }
+          }
+        });
+      }
+
+      // Chart 3: Monthly Classes double line chart
+      if (perfClassesRef.current) {
+        chartInstances.current.perfClasses = new Chart(perfClassesRef.current, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Total Class duration (Hours)',
+                data: perfData.map(d => d.totalHours),
+                borderColor: '#C4A249',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                tension: 0.3
+              },
+              {
+                label: 'Sum of attendance (Sessions)',
+                data: perfData.map(d => d.totalClasses),
+                borderColor: '#286957',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                tension: 0.3
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: true, position: 'top' } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: '#E4DFD2' } },
+              x: { grid: { display: false } }
+            }
+          }
+        });
+      }
+
+      // Chart 4: Revenue bar chart
+      if (perfRevenueRef.current) {
+        chartInstances.current.perfRevenue = new Chart(perfRevenueRef.current, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Revenue (AED)',
+                data: perfData.map(d => d.revenue),
+                backgroundColor: '#E57373'
+              }
+            ]
           },
           options: {
             responsive: true,
@@ -664,11 +840,22 @@ export default function ExecutivePage() {
   const inactiveOwingClassesCount = filteredStudents.filter(s => s.status !== 'active').reduce((sum, s) => sum + ((s.flags as any)?.unpaid_classes || 0), 0);
   const inactiveOwingValue = filteredStudents.filter(s => s.status !== 'active').reduce((sum, s) => sum + ((s.flags as any)?.unpaid_value || 0), 0);
 
+  // Monthly Performance aggregations
+  const totalNewReg = perfData.reduce((sum, d) => sum + d.newEnrolments, 0);
+  const totalHoursTaught = perfData.reduce((sum, d) => sum + d.totalHours, 0);
+  const totalRevenue = perfData.reduce((sum, d) => sum + d.revenue, 0);
+  const nonZeroMonths = perfData.filter(d => d.activeStudentsCount > 0);
+  const avgActiveStudents = nonZeroMonths.length > 0 
+    ? Math.round(nonZeroMonths.reduce((sum, d) => sum + d.activeStudentsCount, 0) / nonZeroMonths.length) 
+    : 0;
+  const peakActiveMonth = [...perfData].sort((a, b) => b.activeStudentsCount - a.activeStudentsCount)[0];
+  const peakMonthText = peakActiveMonth ? `${peakActiveMonth.month} (${peakActiveMonth.activeStudentsCount})` : '—';
+
   return (
     <div className="p-8 max-w-7xl mx-auto w-full space-y-6 text-ink">
       
-      {/* Top Header */}
-      <div className="flex justify-between items-start pb-4">
+      {/* Top Header with Navigation Tabs */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center pb-4 border-b border-line gap-4">
         <div>
           {viewMode === 'unbilled' && (
             <>
@@ -688,22 +875,42 @@ export default function ExecutivePage() {
               </p>
             </>
           )}
+          {viewMode === 'performance' && (
+            <>
+              <div className="text-[10px] font-bold tracking-widest text-[#C4A249] uppercase font-display">REPORT · GROWTH</div>
+              <h1 className="text-3xl font-bold font-display text-ink mt-0.5">Monthly Performance</h1>
+              <p className="text-xs text-muted-custom mt-1">
+                Month-by-month student base, growth, and active session engagement metrics by centre.
+              </p>
+            </>
+          )}
           {(viewMode === 'overview' || viewMode === 'diligence') && (
             <>
               <div className="text-[10px] font-bold tracking-widest text-[#C4A249] uppercase">OVERVIEW</div>
-              <h1 className="text-3xl font-bold font-display text-ink mt-0.5">Executive Dashboard</h1>
+              <h1 className="text-3xl font-bold font-display text-ink mt-0.5 font-serif">Executive Dashboard</h1>
+              <p className="text-xs text-muted-custom mt-1">
+                Executive overview of center health, run-rate and unbilled leakages.
+              </p>
             </>
           )}
         </div>
 
-        {viewMode !== 'overview' && (
-          <button 
-            onClick={() => setViewMode('overview')}
-            className="bg-[#C4A249] hover:bg-[#C4A249]/90 text-ink font-semibold text-xs px-4 py-2 rounded-lg transition-all"
-          >
-            ← Back to Overview
-          </button>
-        )}
+        <div className="flex bg-[#F1EFEA] border border-line rounded-xl p-1 text-xs shadow-sm font-semibold whitespace-nowrap self-stretch md:self-auto overflow-x-auto">
+          {[
+            { id: 'overview', label: 'Dashboard' },
+            { id: 'performance', label: 'Monthly Growth' },
+            { id: 'unbilled', label: 'Unbilled / Leak' },
+            { id: 'reconciliation', label: 'Reconciliation' }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setViewMode(tab.id as any)}
+              className={`px-4 py-2 rounded-lg transition-all cursor-pointer ${viewMode === tab.id ? 'bg-[#173F35] text-white shadow-sm font-bold' : 'text-[#173F35]/70 hover:bg-[#F9F8F6]'}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Warning Banners (Only displayed when viewMode is 'overview') */}
@@ -921,6 +1128,24 @@ export default function ExecutivePage() {
             <div key={idx} className="bg-surface border border-line rounded-[14px] p-5 shadow-sm space-y-1">
               <div className="text-[9px] font-bold text-muted-custom tracking-wider uppercase">{kpi.label}</div>
               <div className={`text-2xl font-bold font-display ${kpi.color || 'text-ink'}`}>{kpi.value}</div>
+              <div className="text-[10px] text-muted-custom mt-0.5 leading-tight">{kpi.desc}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {viewMode === 'performance' && (
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          {[
+            { label: 'AVERAGE ACTIVE / MONTH', value: `${avgActiveStudents}`, desc: 'students attending class' },
+            { label: 'PEAK ACTIVE MONTH', value: `${peakMonthText}`, desc: 'highest active engagement' },
+            { label: 'TOTAL NEW ENROLMENTS', value: `${totalNewReg}`, desc: 'in selected range' },
+            { label: 'TOTAL HOURS TAUGHT', value: `${totalHoursTaught.toLocaleString()}`, desc: 'class hours delivered' },
+            { label: 'TOTAL REVENUE', value: `AED ${(totalRevenue / 1000).toFixed(0)}K`, desc: 'paid package value' }
+          ].map((kpi, idx) => (
+            <div key={idx} className="bg-surface border border-line rounded-[14px] p-5 shadow-sm space-y-1">
+              <div className="text-[9px] font-bold text-muted-custom tracking-wider uppercase">{kpi.label}</div>
+              <div className="text-2xl font-bold font-display text-ink">{kpi.value}</div>
               <div className="text-[10px] text-muted-custom mt-0.5 leading-tight">{kpi.desc}</div>
             </div>
           ))}
@@ -1340,6 +1565,93 @@ export default function ExecutivePage() {
                     </td>
                   </tr>
                 </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewMode === 'performance' && (
+        <div className="space-y-6">
+          {/* 4 Charts Grid (2x2) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* Chart 1: Old Vs New Packages */}
+            <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-2">
+              <h3 className="text-sm font-bold font-display text-ink">Old Vs New (Payments)</h3>
+              <p className="text-xs text-muted-custom">Payments count for New vs Renewal packages.</p>
+              <div className="h-60">
+                <canvas ref={perfOldNewRef}></canvas>
+              </div>
+            </div>
+
+            {/* Chart 2: Monthly Enrollments */}
+            <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-2">
+              <h3 className="text-sm font-bold font-display text-ink">Monthly Enrollments</h3>
+              <p className="text-xs text-muted-custom">New student sign-ups by enrollment date.</p>
+              <div className="h-60">
+                <canvas ref={perfEnrollmentsRef}></canvas>
+              </div>
+            </div>
+
+            {/* Chart 3: Monthly Classes */}
+            <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-2">
+              <h3 className="text-sm font-bold font-display text-ink">Monthly Classes</h3>
+              <p className="text-xs text-muted-custom">Attendance sessions vs total class hours taught.</p>
+              <div className="h-60">
+                <canvas ref={perfClassesRef}></canvas>
+              </div>
+            </div>
+
+            {/* Chart 4: Revenue */}
+            <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-2">
+              <h3 className="text-sm font-bold font-display text-ink">Monthly Revenue (AED)</h3>
+              <p className="text-xs text-muted-custom">Total invoice payments received.</p>
+              <div className="h-60">
+                <canvas ref={perfRevenueRef}></canvas>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Detailed table Card */}
+          <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-4">
+            <div className="flex justify-between items-center border-b border-line pb-3">
+              <div>
+                <h3 className="text-base font-bold font-display text-ink font-serif">Monthly Performance Ledger</h3>
+                <p className="text-xs text-muted-custom">Detail metrics breakdown month-by-month.</p>
+              </div>
+              <button onClick={exportPerformanceExcel} className="bg-[#173F35] text-white hover:bg-[#173F35]/90 text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all shadow-sm cursor-pointer">
+                ↓ Export CSV
+              </button>
+            </div>
+
+            <div className="overflow-x-auto pt-2">
+              <table className="w-full border-collapse text-left text-xs">
+                <thead>
+                  <tr className="border-b border-line text-muted-custom font-bold">
+                    <th className="py-2.5">Month</th>
+                    <th className="py-2.5 text-right font-semibold">Active Students</th>
+                    <th className="py-2.5 text-right font-semibold">New Enrolments</th>
+                    <th className="py-2.5 text-right font-semibold">Cumulative</th>
+                    <th className="py-2.5 text-right font-semibold">Sessions</th>
+                    <th className="py-2.5 text-right font-semibold">Hours</th>
+                    <th className="py-2.5 text-right font-semibold">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...perfData].reverse().map((d, idx) => (
+                    <tr key={idx} className="border-b border-line hover:bg-canvas/30 text-ink">
+                      <td className="py-2.5 font-semibold">{d.month}</td>
+                      <td className="py-2.5 text-right font-mono font-bold text-forest">{d.activeStudentsCount}</td>
+                      <td className="py-2.5 text-right font-mono text-[#C4A249]">{d.newEnrolments}</td>
+                      <td className="py-2.5 text-right font-mono text-muted-custom">{d.cumulativeEnrolments}</td>
+                      <td className="py-2.5 text-right font-mono">{d.totalClasses}</td>
+                      <td className="py-2.5 text-right font-mono">{d.totalHours}</td>
+                      <td className="py-2.5 text-right font-mono font-semibold">AED {d.revenue.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
               </table>
             </div>
           </div>

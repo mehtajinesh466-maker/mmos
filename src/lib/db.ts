@@ -220,11 +220,8 @@ export const db = {
     if (data.packages) this.save('packages', data.packages);
     if (data.scheduleSlots) this.save('schedule_slots', data.scheduleSlots);
     if (data.attendance) {
-      // Proactively keep only the last 180 days of attendance locally to save localStorage quota
-      const hundredEightyDaysAgo = new Date();
-      hundredEightyDaysAgo.setDate(hundredEightyDaysAgo.getDate() - 180);
-      const filteredAttendance = data.attendance.filter((a: any) => new Date(a.date).getTime() >= hundredEightyDaysAgo.getTime());
-      this.save('attendance', filteredAttendance);
+      // Save all attendance records - localStorage can handle 17k rows fine
+      this.save('attendance', data.attendance);
     }
     if (data.invoices) this.save('invoices', data.invoices);
     if (data.progressLogs) this.save('progress_logs', data.progressLogs);
@@ -515,8 +512,8 @@ export const db = {
       const beforePkg = targetPkg ? { ...targetPkg } : null;
 
       if (targetPkg) {
-        // Decrement class remaining based on attendance duration
-        const decrementVal = typeof record.duration === 'number' ? record.duration : 1;
+        // Decrement class remaining by 1 unit per session
+        const decrementVal = 1;
         targetPkg.classes_remaining = Math.max(targetPkg.classes_remaining - decrementVal, 0);
         this.save('packages', packages);
         this.logAudit('package_decrement_trigger', 'packages', beforePkg, targetPkg);
@@ -546,9 +543,9 @@ export const db = {
           delete student.flags.low_package;
         }
 
-        // 3) Recalculate unpaid classes and values (including present, absent, makeup; excluding informed)
-        const allStudentAtt = list.filter(a => a.student_id === record.student_id && ['present', 'absent', 'makeup'].includes(a.status));
-        const totalAttended = allStudentAtt.reduce((sum, a) => sum + (a.duration ?? 1), 0);
+        // 3) Recalculate unpaid classes and values (including present, makeup; excluding absent/informed)
+        const allStudentAtt = list.filter(a => a.student_id === record.student_id && ['present', 'makeup'].includes(a.status));
+        const totalAttended = allStudentAtt.length;
 
         const totalPurchased = studentPkgs.reduce((sum, p) => sum + p.classes_total + (p.bonus_classes || 0), 0);
         const unpaidClasses = Math.max(0, totalAttended - totalPurchased);

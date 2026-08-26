@@ -1148,11 +1148,11 @@ export async function updateStudentFlags(studentId: string, pkgId?: string, upda
     }
   }
 
-  // 2. Fetch all attendance logs for the student AND all siblings
+  // 2. Fetch all attendance logs for the student AND all siblings (excluding absent)
   const siblingAtts = await prisma.attendance.findMany({
     where: {
       student_id: { in: studentIds },
-      status: { in: ['present', 'absent', 'makeup'] }
+      status: { in: ['present', 'makeup'] }
     },
     orderBy: { date: 'asc' }
   });
@@ -1163,7 +1163,7 @@ export async function updateStudentFlags(studentId: string, pkgId?: string, upda
   const packageClosingDates: Record<string, Date> = {};
 
   for (const att of siblingAtts) {
-    let amountToDeduct = att.duration || 1;
+    let amountToDeduct = 1;
     const isPrimary = att.student_id === studentId;
 
     // Try to deduct from eligible packages
@@ -3161,3 +3161,112 @@ export async function updateScheduleSlot(slotId: string, payload: any) {
   });
 }
 
+export async function getMonthlyPerformanceData(filterCentre: string = 'All') {
+  noStore();
+
+  const MONTHS = [
+    "Mar 2024","Apr 2024","May 2024","Jun 2024","Jul 2024","Aug 2024",
+    "Sep 2024","Oct 2024","Nov 2024","Dec 2024","Jan 2025","Feb 2025",
+    "Mar 2025","Apr 2025","May 2025","Jun 2025","Jul 2025","Aug 2025",
+    "Sep 2025","Oct 2025","Nov 2025","Dec 2025","Jan 2026","Feb 2026",
+    "Mar 2026","Apr 2026","May 2026","Jun 2026","Jul 2026","Aug 2026"
+  ];
+
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  const getKey = (d: Date) => `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+
+  // Resolve centre filter
+  let centreId: string | null = null;
+  if (filterCentre !== 'All') {
+    const c = await prisma.centre.findFirst({ where: { name: filterCentre } });
+    centreId = c?.id || null;
+  }
+
+  // Fetch all data in parallel
+  const [students, attendance, packages, invoices] = await Promise.all([
+    prisma.student.findMany({
+      select: { id: true, join_date: true, centre_id: true }
+    }),
+    prisma.attendance.findMany({
+      where: { status: { in: ['present', 'makeup'] } },
+      select: { student_id: true, date: true, duration: true, status: true }
+    }),
+    prisma.package.findMany({
+      select: { id: true, student_id: true, start_date: true, kind: true }
+    }),
+    prisma.invoice.findMany({
+      where: { status: 'paid' },
+      select: { id: true, student_id: true, package_id: true, amount: true, created_at: true }
+    })
+  ]);
+
+  // Build student centre lookup
+  const studentCentreMap = new Map<string, string>();
+  students.forEach(s => { if (s.centre_id) studentCentreMap.set(s.id, s.centre_id); });
+
+  // Filter by centre if needed
+  const filteredStudentIds = centreId
+    ? new Set(students.filter(s => s.centre_id === centreId).map(s => s.id))
+    : null;
+
+  const inScope = (studentId: string) => !filteredStudentIds || filteredStudentIds.has(studentId);
+
+  // Package lookup
+  const pkgMap = new Map<string, { start_date: Date; kind: string }>();
+  packages.forEach(p => pkgMap.set(p.id, { start_date: p.start_date, kind: p.kind }));
+
+  let cumulative = 0;
+  const results = MONTHS.map(m => {
+    // New enrolments: students whose join_date falls in this month
+    const newEnrolments = students.filter(s =>
+      inScope(s.id) && s.join_date && getKey(new Date(s.join_date)) === m
+    ).length;
+    cumulative += newEnrolments;
+
+    // Attendance for this month
+    const monthAtts = attendance.filter(a =>
+      inScope(a.student_id) && a.date && getKey(new Date(a.date)) === m
+    );
+    const activeStudentIds = new Set(monthAtts.map(a => a.student_id));
+    const totalClasses = monthAtts.length;
+    const totalHours = monthAtts.reduce((sum, a) => sum + (Number(a.duration) || 1), 0);
+
+    // Revenue: paid invoices whose linked package started this month
+    const monthRevenue = invoices
+      .filter(i => {
+        if (!inScope(i.student_id)) return false;
+        const pkg = pkgMap.get(i.package_id || '');
+        const dateToCheck = pkg ? new Date(pkg.start_date) : new Date(i.created_at);
+        return getKey(dateToCheck) === m;
+      })
+      .reduce((sum, i) => sum + Number(i.amount), 0);
+
+    // New vs Old package payments
+    const monthPkgInvs = invoices.filter(i => {
+      if (!inScope(i.student_id)) return false;
+      const pkg = pkgMap.get(i.package_id || '');
+      const dateToCheck = pkg ? new Date(pkg.start_date) : new Date(i.created_at);
+      return getKey(dateToCheck) === m;
+    });
+    const newStudentPayments = monthPkgInvs.filter(i => {
+      const pkg = pkgMap.get(i.package_id || '');
+      return pkg?.kind === 'new';
+    }).length;
+    const oldStudentPayments = monthPkgInvs.length - newStudentPayments;
+
+    return {
+      month: m,
+      newEnrolments,
+      cumulativeEnrolments: cumulative,
+      activeStudentsCount: activeStudentIds.size,
+      totalClasses,
+      totalHours,
+      revenue: Math.round(monthRevenue),
+      newStudentPayments,
+      oldStudentPayments
+    };
+  });
+
+  return JSON.parse(JSON.stringify(results));
+}
