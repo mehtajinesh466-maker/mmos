@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { Chart, registerables } from 'chart.js';
 import { db } from '../lib/db';
 import type { User, Student, Package, Attendance, ProgressLog } from '../lib/db';
+import { exportTableToCSV, exportToPDF } from '../lib/export';
 
 Chart.register(...registerables);
 
@@ -343,8 +344,8 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
-          <button className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">↓ Excel</button>
-          <button className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">⎙ PDF</button>
+          <button onClick={() => exportTableToCSV('#progress-report-table', `${activeStudent?.name.toLowerCase().replace(/\s+/g, '_')}_progress_report.csv`)} className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">↓ Excel</button>
+          <button onClick={exportToPDF} className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas">⎙ PDF</button>
         </div>
       </div>
 
@@ -427,7 +428,7 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
             <div className="space-y-3">
               <h3 className="text-sm font-bold text-ink">Topics learnt this term</h3>
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-xs">
+                <table id="progress-report-table" className="w-full border-collapse text-xs">
                   <thead>
                     <tr className="border-b border-line text-left">
                       <th className="py-2.5 px-3 text-muted-custom font-bold text-[9px] uppercase">Topic</th>
@@ -501,7 +502,7 @@ export const ProgressReport: React.FC<ProgressReportProps> = ({ currentUser, act
             <button className="bg-forest hover:bg-forest/90 text-white font-bold text-xs px-5 py-2.5 rounded-lg transition-all active:scale-95 shadow">
               Send to parent
             </button>
-            <button className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-5 py-2.5 rounded-lg transition-all flex items-center gap-1">
+            <button onClick={exportToPDF} className="bg-white border border-line hover:bg-canvas text-ink font-bold text-xs px-5 py-2.5 rounded-lg transition-all flex items-center gap-1">
               ⎙ Download PDF
             </button>
           </div>

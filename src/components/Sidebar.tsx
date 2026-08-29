@@ -131,7 +131,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       sections.push({
         title: 'REPORTS',
         items: [
-          { id: 'reports_centre', path: '/reports-centre', label: 'Reports Centre', glyph: '📤' }
+          { id: 'package_report', path: '/package-report', label: 'Package Utilisation', glyph: '▦' },
+          { id: 'progress_report', path: '/progress-report', label: 'Progress Report', glyph: '◔' }
         ]
       });
     } else if (role === 'coach') {

@@ -14,7 +14,7 @@ export default function AnalyticsPage() {
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login");
-    } else if (session?.user?.role !== "owner" && session?.user?.role !== "front_desk") {
+    } else if (session?.user?.role !== "owner") {
       router.push("/");
     }
   }, [status, router, session]);

@@ -9,7 +9,7 @@ export default withAuth(
 
     // Define role-based routing access rules
     const routeAccess: Record<string, string[]> = {
-      "/analytics": ["owner", "front_desk"],
+      "/analytics": ["owner"],
       "/dashboard": ["owner", "front_desk", "coach", "parent"],
       "/executive": ["owner"],
       "/registration": ["owner", "front_desk"],
@@ -25,7 +25,7 @@ export default withAuth(
       "/attendance-register": ["owner", "front_desk", "parent"],
       "/payment-unbilled": ["owner", "front_desk"],
       "/coach-register": ["owner", "front_desk"],
-      "/reports-centre": ["owner", "front_desk"],
+      "/reports-centre": ["owner"],
       "/explorer": ["owner"],
       "/schedule": ["owner", "front_desk", "coach"],
       "/student-dashboard": ["owner", "front_desk", "coach", "parent"],

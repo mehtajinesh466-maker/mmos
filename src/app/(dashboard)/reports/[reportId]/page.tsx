@@ -15,26 +15,10 @@ export default function ReportDetailPage() {
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login");
-    } else if (session?.user?.role !== "owner" && session?.user?.role !== "front_desk") {
+    } else if (session?.user?.role !== "owner") {
       router.push("/");
-    } else if (session?.user?.role === "front_desk") {
-      const restrictedReports = [
-        'revenue-summary',
-        'membership-economics',
-        'lifetime-value',
-        'rate-card',
-        'revenue-contribution',
-        'centre-perf',
-        'growth-trajectory',
-        'new-centre-model',
-        'board-investor-pack',
-        'engagement-report'
-      ];
-      if (restrictedReports.includes(reportId)) {
-        router.push("/reports-centre");
-      }
     }
-  }, [status, router, session, reportId]);
+  }, [status, router, session]);
 
   if (status === "loading" || !session) return null;
 
