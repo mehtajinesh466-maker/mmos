@@ -142,9 +142,9 @@ export async function runSeed() {
   const parentHash = await bcrypt.hash('password123', 10)
 
   const publicDir = path.join(process.cwd(), 'public')
-  const newStudentFile = path.join(publicDir, 'Student records-20.xlsx')
-  const newPackageFile = path.join(publicDir, 'All Student Packages-24.xlsx')
-  const newAttendanceFile = path.join(publicDir, 'All Attendance Records-18.xlsx')
+  const newStudentFile = path.join(publicDir, 'Student records-22.xlsx')
+  const newPackageFile = path.join(publicDir, 'All Student Packages-30.xlsx')
+  const newAttendanceFile = path.join(publicDir, 'All Attendance Records-19.xlsx')
   const newScheduleFile = path.join(publicDir, 'JLT coach schedules.xlsx')
 
   const hasNewFiles = fs.existsSync(newStudentFile) && fs.existsSync(newPackageFile) && fs.existsSync(newAttendanceFile)
@@ -366,7 +366,8 @@ export async function runSeed() {
         school: row['School'] || null,
         level,
         status,
-        fide_id: null,
+        fide_id: row['FIDE ID'] ? String(row['FIDE ID']).trim() : null,
+        fide_country: row['COUNTRY AS PER FIDE '] ? String(row['COUNTRY AS PER FIDE ']).trim() : null,
         join_date: joinDate,
         last_attended: null,
         pace_status: 'On track',
@@ -375,7 +376,7 @@ export async function runSeed() {
         alternate_centre: row['Alternate Center'] || null,
         resident_status: row['ET /JLT Resident'] || null,
         category: row['Student category'] || null,
-        notes: row['NOTES'] || 'Imported from Student records-20',
+        notes: row['NOTES'] || 'Imported from Student records-22',
         referral_source: row['HOW DID YOU HEAR ABOUT US '] || null,
         parent_name: row['Parent name'] || null
       })
@@ -481,7 +482,7 @@ export async function runSeed() {
     const studentLastAttended = new Map<string, Date>()
 
     // Find max date in attendanceData to use as fallback for empty dates
-    let maxAttendanceDate = new Date('2026-08-22')
+    let maxAttendanceDate = new Date('2026-08-28')
     attendanceData.forEach(row => {
       const d = parseExcelDate(row['Date'])
       if (d && d > maxAttendanceDate) {

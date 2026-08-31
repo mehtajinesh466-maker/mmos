@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/db';
-import type { User, Student, Package, Coach, Centre } from '../lib/db';
+import type { User, Student, Package, Coach, Centre, Tier } from '../lib/db';
 import { updatePackageDB, deletePackageDB, syncDatabaseToClient } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
 interface PackageRegisterProps {
@@ -15,6 +15,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
   const [packages, setPackages] = useState<Package[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [centres, setCentres] = useState<Centre[]>([]);
+  const [tiers, setTiers] = useState<Tier[]>([]);
   const [attendance, setAttendance] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
 
@@ -83,6 +84,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
     setPackages(db.getPackages());
     setCoaches(db.getCoaches());
     setCentres(db.getCentres());
+    setTiers(db.getTiers());
     setAttendance(db.getAttendance());
     setInvoices(db.get('invoices') || []);
   };
@@ -144,11 +146,27 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
         const used = totalEntitlement - pkg.classes_remaining;
         const balance = pkg.classes_remaining;
 
-        // Determine paid on date
+        // Determine paid on date and amount
         const pkgInvoice = invoices.find(inv => inv.package_id === pkg.id);
-        const isPaid = pkgInvoice ? pkgInvoice.status === 'paid' : true;
+        const isPaid = pkgInvoice ? pkgInvoice.status === 'paid' : (pkg.kind !== 'unbilled');
         const paidOnDate = isPaid ? (pkgInvoice?.created_at || pkg.start_date || '2025-01-10') : null;
         const paidOn = paidOnDate ? new Date(paidOnDate).toISOString().split('T')[0] : '-';
+
+        // Calculate package amount paid
+        let amount = 0;
+        if (pkgInvoice && pkgInvoice.amount !== undefined && pkgInvoice.amount !== null) {
+          amount = Number(pkgInvoice.amount);
+        } else if (pkg.kind !== 'unbilled') {
+          const tier = tiers.find(t => t.id === pkg.tier_id);
+          if (tier?.price) {
+            amount = Number(tier.price);
+          } else if (pkg.classes_total > 0) {
+            amount = pkg.classes_total * 125;
+          }
+        }
+
+        const paymentMethod = pkgInvoice?.method || (pkg.kind === 'unbilled' ? '-' : 'Online');
+        const ratePerClass = (pkg.classes_total > 0 && amount > 0) ? Math.round(amount / pkg.classes_total) : 0;
 
         // Map attendances to this package
         const pkgAtts = studentAtts.slice(attCursor, attCursor + totalEntitlement);
@@ -188,6 +206,10 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
           engagement,
           pkgNo,
           type: pkg.kind === 'unbilled' ? 'Unbilled' : (pkg.kind ? (pkg.kind.charAt(0).toUpperCase() + pkg.kind.slice(1)) : 'New'),
+          amount,
+          paymentMethod,
+          ratePerClass,
+          invoiceStatus: pkgInvoice?.status || (pkg.kind === 'unbilled' ? 'unpaid' : 'paid'),
           paidOn: pkg.kind === 'unbilled' ? '-' : paidOn,
           firstClass,
           ended,
@@ -202,7 +224,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
     });
 
     return list;
-  }, [students, packages, coaches, centres, attendance, invoices]);
+  }, [students, packages, coaches, centres, attendance, invoices, tiers]);
 
   // Filter and sort the enriched list
   const filtered = useMemo(() => {
@@ -290,6 +312,10 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
     return [...new Set(enriched.map(r => r.segment))].sort();
   }, [enriched]);
 
+  const totalPaidSum = useMemo(() => {
+    return filtered.reduce((sum, r) => sum + (r.type !== 'Unbilled' && r.type !== '>> UNPAID <<' ? (r.amount || 0) : 0), 0);
+  }, [filtered]);
+
   return (
     <div className="p-6 max-w-full mx-auto w-full space-y-4 text-ink">
       
@@ -311,7 +337,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
       </div>
 
       <p className="text-xs text-muted-custom">
-        Raw package register. One row per package — the source of the package-timeline analysis.
+        Raw package register with financial amounts paid and session timeline breakdown. One row per package.
       </p>
 
       {/* Filter Bar */}
@@ -371,15 +397,16 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
           <option>All types</option>
           <option value="Renewal">Renewal</option>
           <option value="New">New</option>
+          <option value="Tournament">Tournament</option>
           <option value="Unbilled">Unbilled</option>
         </select>
 
         <input
           type="text"
-          placeholder="Search..."
+          placeholder="Search student or ID..."
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
+          className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-44"
         />
 
         {(filterCentre !== 'All centres' || filterCoach !== 'All coaches' || filterSegment !== 'All segments' || filterEngagement !== 'All engagement' || filterType !== 'All types' || search !== '') && (
@@ -391,7 +418,11 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
           </button>
         )}
 
-        <div className="ml-auto flex items-center gap-2 no-print">
+        <div className="ml-auto flex items-center gap-2.5 no-print">
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] px-2.5 py-1 rounded-lg font-mono font-bold flex items-center gap-1.5 shadow-2xs">
+            <span className="text-[9px] uppercase tracking-wider text-emerald-600 font-sans font-semibold">Total Paid</span>
+            <span>AED {totalPaidSum.toLocaleString()}</span>
+          </div>
           <span className="text-xs text-muted-custom font-semibold">{filtered.length} rows</span>
           <button 
             onClick={() => exportTableToCSV('#package-table', 'packages_register.csv')}
@@ -420,6 +451,8 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
                 <SortTh col="centreName">Centre</SortTh>
                 <SortTh col="pkgNo">Pkg #</SortTh>
                 <SortTh col="type">Type</SortTh>
+                <SortTh col="amount" right>Amount (AED)</SortTh>
+                <SortTh col="paymentMethod">Method</SortTh>
                 <SortTh col="paidOn">Paid On</SortTh>
                 <SortTh col="firstClass">First Class</SortTh>
                 <SortTh col="ended">Ended</SortTh>
@@ -432,7 +465,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="py-12 text-center text-muted-custom text-xs">
+                  <td colSpan={15} className="py-12 text-center text-muted-custom text-xs">
                     No packages match your filters.
                   </td>
                 </tr>
@@ -447,7 +480,13 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
                           classes_total: row.classesPaid,
                           classes_remaining: row.balance,
                           frozen: packages.find(p => p.id === row.id)?.frozen || false,
-                          studentName: row.studentName
+                          studentName: row.studentName,
+                          amount: row.amount,
+                          paymentMethod: row.paymentMethod,
+                          ratePerClass: row.ratePerClass,
+                          paidOn: row.paidOn,
+                          type: row.type,
+                          status: row.status
                         });
                         setEditTotal(row.classesPaid);
                         setEditRemaining(row.balance);
@@ -486,6 +525,28 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
                         <span className="bg-sky-100 text-sky-800 border border-sky-200 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
                           👪 Family Shared
                         </span>
+                      )}
+                    </td>
+
+                    {/* Amount Paid */}
+                    <td className="py-3 px-4 text-right font-mono font-bold whitespace-nowrap">
+                      {row.type === 'Unbilled' || row.type === '>> UNPAID <<' ? (
+                        <span className="text-muted-custom font-normal">—</span>
+                      ) : (
+                        <span className="text-forest font-semibold">
+                          AED {Number(row.amount || 0).toLocaleString()}
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Method */}
+                    <td className="py-3 px-4 text-muted-custom whitespace-nowrap">
+                      {row.paymentMethod && row.paymentMethod !== '-' ? (
+                        <span className="bg-canvas border border-line text-ink text-[10px] px-2 py-0.5 rounded font-mono">
+                          {row.paymentMethod}
+                        </span>
+                      ) : (
+                        <span className="text-muted-custom/60">—</span>
                       )}
                     </td>
 
@@ -539,6 +600,37 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
 
             {/* Form Body */}
             <div className="p-6 space-y-5 flex-1">
+              {/* Payment Details Card */}
+              <div className="bg-canvas border border-line rounded-xl p-4 space-y-2">
+                <div className="text-[10px] font-bold text-muted-custom uppercase tracking-wider">Payment Information</div>
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <span className="text-[10px] text-muted-custom block">Amount Paid</span>
+                    <span className="text-sm font-bold font-mono text-forest">
+                      {selectedPkg.amount ? `AED ${Number(selectedPkg.amount).toLocaleString()}` : '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted-custom block">Rate per Class</span>
+                    <span className="text-xs font-semibold font-mono text-ink">
+                      {selectedPkg.ratePerClass ? `AED ${selectedPkg.ratePerClass}/class` : '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted-custom block">Payment Method</span>
+                    <span className="text-xs font-mono text-ink">
+                      {selectedPkg.paymentMethod || '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted-custom block">Payment Date</span>
+                    <span className="text-xs font-mono text-muted-custom">
+                      {selectedPkg.paidOn || '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-bold text-ink">Classes Total</label>
                 <input 
@@ -601,3 +693,4 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
     </div>
   );
 };
+
