@@ -62,7 +62,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ activeCentre, currentUser 
   const [filterLevel, setFilterLevel] = useState('All');
   const [diceBy, setDiceBy] = useState('By Centre');
   const [chartType, setChartType] = useState<'bar' | 'line' | 'donut' | 'table'>('bar');
-  const [dateFilterType, setDateFilterType] = useState<string>('This Month');
+  const [dateFilterType, setDateFilterType] = useState<string>('All');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 

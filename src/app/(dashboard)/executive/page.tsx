@@ -4,6 +4,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Chart, registerables } from 'chart.js';
 import { getReconciliationData, getMonthlyPerformanceData } from '../../actions';
 import { db } from '../../../lib/db';
+import { OldVsNewChart } from '../../../components/OldVsNewChart';
+import { ActiveStudentsChart } from '../../../components/ActiveStudentsChart';
+import { MostPopularDayChart } from '../../../components/MostPopularDayChart';
 
 Chart.register(...registerables);
 
@@ -121,15 +124,105 @@ export default function ExecutivePage() {
   const [diceBy, setDiceBy] = useState('By Centre');
   const [chartType, setChartType] = useState<'bar' | 'line' | 'donut' | 'table'>('bar');
 
-  // Fetch Monthly Performance data directly from server (bypasses localStorage)
+  const computeLocalMonthlyPerformance = (centreFilter: string) => {
+    const localStudents = db.getStudents();
+    const localAttendance = db.getAttendance();
+    const localPackages = db.getPackages();
+    const localInvoices = db.get<any>('invoices') || [];
+    const localCentres = db.getCentres();
+
+    let targetCentreId: string | null = null;
+    if (centreFilter !== 'All') {
+      const c = localCentres.find(cn => cn.name.toLowerCase() === centreFilter.toLowerCase());
+      targetCentreId = c?.id || null;
+    }
+
+    const MONTHS = [
+      "Jul 2024","Aug 2024","Sep 2024","Oct 2024","Nov 2024","Dec 2024",
+      "Jan 2025","Feb 2025","Mar 2025","Apr 2025","May 2025","Jun 2025",
+      "Jul 2025","Aug 2025","Sep 2025","Oct 2025","Nov 2025","Dec 2025",
+      "Jan 2026","Feb 2026","Mar 2026","Apr 2026","May 2026","Jun 2026",
+      "Jul 2026","Aug 2026"
+    ];
+    const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    const getKey = (dateStr: string) => {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+    };
+
+    const scopedStudents = targetCentreId
+      ? localStudents.filter(s => s.centre_id === targetCentreId)
+      : localStudents;
+    const scopedStudentIds = new Set(scopedStudents.map(s => s.id));
+    const inScope = (studentId: string) => scopedStudentIds.has(studentId);
+
+    const pkgMap = new Map<string, any>();
+    localPackages.forEach(p => pkgMap.set(p.id, p));
+
+    let cumulative = 0;
+    return MONTHS.map(m => {
+      const newEnrolments = scopedStudents.filter(s => s.join_date && getKey(s.join_date) === m).length;
+      cumulative += newEnrolments;
+
+      const monthAtts = localAttendance.filter(a => inScope(a.student_id) && ['present', 'makeup'].includes(a.status) && a.date && getKey(a.date) === m);
+      const activeStudentIds = new Set(monthAtts.map(a => a.student_id));
+      const totalClasses = monthAtts.length;
+      const totalHours = monthAtts.reduce((sum, a) => sum + (Number(a.duration) || 1), 0);
+
+      const monthPkgInvs = localInvoices.filter(i => {
+        if (!inScope(i.student_id) || i.status !== 'paid') return false;
+        const pkg = pkgMap.get(i.package_id);
+        const dateStr = pkg?.start_date || i.created_at;
+        return dateStr && getKey(dateStr) === m;
+      });
+
+      const revenue = monthPkgInvs.reduce((sum, i) => sum + Number(i.amount || 0), 0);
+      const newStudentPayments = monthPkgInvs.filter(i => {
+        const pkg = pkgMap.get(i.package_id);
+        return pkg?.kind === 'new' || pkg?.package_number === 1;
+      }).length;
+      const oldStudentPayments = Math.max(0, monthPkgInvs.length - newStudentPayments);
+
+      return {
+        month: m,
+        newEnrolments,
+        cumulativeEnrolments: cumulative,
+        activeStudentsCount: activeStudentIds.size,
+        totalClasses,
+        totalHours,
+        revenue: Math.round(revenue),
+        newStudentPayments,
+        oldStudentPayments
+      };
+    });
+  };
+
+  // Fetch Monthly Performance data directly from server with local DB fallback
   useEffect(() => {
     setPerfLoading(true);
     getMonthlyPerformanceData(filterCentre)
-      .then(data => { setPerfData(data); setPerfLoading(false); })
-      .catch(err => { console.error('Monthly perf fetch failed:', err); setPerfLoading(false); });
-  }, [filterCentre]);
+      .then(data => {
+        if (data && data.length > 0 && data.some(d => d.newEnrolments > 0 || d.totalClasses > 0 || d.newStudentPayments > 0 || d.oldStudentPayments > 0 || d.revenue > 0)) {
+          setPerfData(data);
+          setPerfLoading(false);
+        } else {
+          const fallbackData = computeLocalMonthlyPerformance(filterCentre);
+          setPerfData(fallbackData);
+          setPerfLoading(false);
+        }
+      })
+      .catch(err => {
+        console.error('Monthly perf fetch failed, using local DB:', err);
+        const fallbackData = computeLocalMonthlyPerformance(filterCentre);
+        setPerfData(fallbackData);
+        setPerfLoading(false);
+      });
+  }, [filterCentre, students, attendance, packages, invoices]);
 
   // Chart Refs
+  const chartInstances = useRef<{ [key: string]: Chart | null }>({});
   const trendChartRef = useRef<HTMLCanvasElement | null>(null);
   const donutChartRef = useRef<HTMLCanvasElement | null>(null);
   const unbilledChartRef = useRef<HTMLCanvasElement | null>(null);
@@ -137,7 +230,47 @@ export default function ExecutivePage() {
   const perfEnrollmentsRef = useRef<HTMLCanvasElement | null>(null);
   const perfClassesRef = useRef<HTMLCanvasElement | null>(null);
   const perfRevenueRef = useRef<HTMLCanvasElement | null>(null);
-  const chartInstances = useRef<{ [key: string]: Chart | null }>({});
+  const enrichedPackages = useMemo(() => {
+    const list: any[] = [];
+    students.forEach(s => {
+      const centre = centres.find(c => c.id === s.centre_id);
+      const coach = coaches.find(c => c.id === s.coach_id);
+      const centreName = centre?.name || '—';
+      const coachName = coach?.name || 'Unassigned';
+
+      const studentPkgs = packages
+        .filter(p => p.student_id === s.id)
+        .sort((a, b) => {
+          const dateA = a.start_date ? new Date(a.start_date).getTime() : 0;
+          const dateB = b.start_date ? new Date(b.start_date).getTime() : 0;
+          if (dateA !== dateB) return dateA - dateB;
+          return a.id.localeCompare(b.id);
+        });
+
+      studentPkgs.forEach((pkg, index) => {
+        const pkgNo = pkg.package_number || (index + 1);
+        const pkgInvoice = invoices.find(inv => inv.package_id === pkg.id);
+        const isPaid = pkgInvoice ? pkgInvoice.status === 'paid' : (pkg.kind !== 'unbilled');
+        const paidOnDate = isPaid ? (pkgInvoice?.created_at || pkg.start_date || '2025-01-10') : null;
+        const paidOn = paidOnDate ? new Date(paidOnDate).toISOString().split('T')[0] : '-';
+
+        list.push({
+          id: pkg.id,
+          studentName: s.name,
+          studentId: s.id,
+          centreName,
+          coachName,
+          pkgNo,
+          type: pkg.kind === 'unbilled' ? 'Unbilled' : (pkg.kind ? (pkg.kind.charAt(0).toUpperCase() + pkg.kind.slice(1)) : 'New'),
+          paidOn,
+          status: pkg.kind === 'unbilled' ? 'UNBILLED' : (pkg.classes_remaining === 0 ? 'COMPLETED' : 'CURRENT'),
+        });
+      });
+    });
+    return list;
+  }, [students, packages, centres, coaches, invoices]);
+
+  const executiveCentreNames = useMemo(() => centres.map(c => c.name), [centres]);
 
   const filteredStudents = useMemo(() => {
     const bayCentreId = centres.find(c => c.name === 'Bay Avenue')?.id || 'c-1';
@@ -1576,13 +1709,11 @@ export default function ExecutivePage() {
           {/* 4 Charts Grid (2x2) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
-            {/* Chart 1: Old Vs New Packages */}
-            <div className="bg-surface border border-line rounded-[14px] p-6 shadow-sm space-y-2">
-              <h3 className="text-sm font-bold font-display text-ink">Old Vs New (Payments)</h3>
-              <p className="text-xs text-muted-custom">Payments count for New vs Renewal packages.</p>
-              <div className="h-60">
-                <canvas ref={perfOldNewRef}></canvas>
-              </div>
+            {/* Chart 1: Old Vs New Packages with Zoho Filter Controls */}
+            <div className="col-span-1 lg:col-span-2 space-y-6">
+              <OldVsNewChart enrichedPackages={enrichedPackages} centres={executiveCentreNames} />
+              <ActiveStudentsChart attendance={attendance} students={students} coaches={coaches} centres={centres} slots={db.getScheduleSlots()} />
+              <MostPopularDayChart attendance={attendance} students={students} coaches={coaches} centres={centres} />
             </div>
 
             {/* Chart 2: Monthly Enrollments */}

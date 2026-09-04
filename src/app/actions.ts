@@ -649,13 +649,7 @@ export async function syncDatabaseToClient() {
       prisma.tier.findMany(),
       prisma.package.findMany(),
       prisma.scheduleSlot.findMany(),
-      prisma.attendance.findMany({
-        where: {
-          date: {
-            gte: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000)
-          }
-        }
-      }),
+      prisma.attendance.findMany(),
       prisma.invoice.findMany(),
       prisma.enquiry.findMany(),
       prisma.enrollment.findMany(),
@@ -744,13 +738,7 @@ export async function syncDatabaseToClient() {
       prisma.tier.findMany(),
       prisma.package.findMany(),
       prisma.scheduleSlot.findMany(),
-      prisma.attendance.findMany({
-        where: {
-          date: {
-            gte: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000)
-          }
-        }
-      }),
+      prisma.attendance.findMany(),
       prisma.invoice.findMany(),
       prisma.enquiry.findMany(),
       prisma.enrollment.findMany(),
@@ -3269,4 +3257,27 @@ export async function getMonthlyPerformanceData(filterCentre: string = 'All') {
   });
 
   return JSON.parse(JSON.stringify(results));
+}
+
+export async function getAllAttendanceForCharts() {
+  noStore();
+  const atts = await prisma.attendance.findMany({
+    select: {
+      id: true,
+      student_id: true,
+      coach_id: true,
+      slot_id: true,
+      date: true,
+      status: true
+    }
+  });
+
+  return JSON.parse(JSON.stringify(atts.map(a => ({
+    id: a.id,
+    student_id: a.student_id,
+    coach_id: a.coach_id,
+    slot_id: a.slot_id,
+    date: a.date ? a.date.toISOString().split('T')[0] : '',
+    status: a.status
+  }))));
 }

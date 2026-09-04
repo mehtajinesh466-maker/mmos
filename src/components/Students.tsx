@@ -7,6 +7,7 @@ import { exportTableToCSV, exportToPDF } from '../lib/export';
 import { computeStudentStatus, getStatusBadgeClasses, getPackageRate } from '../lib/segmentRules';
 import { saveStudentDB, deleteStudentDB, syncDatabaseToClient, linkSiblingFamily, updateStudentSlots, createScheduleSlot, deleteScheduleSlot, updateScheduleSlot } from '../app/actions';
 import { useSearchParams } from 'next/navigation';
+import { ZohoAutoFilter, ZohoFilterState } from './ZohoAutoFilter';
 
 interface StudentsProps {
   currentUser: User;
@@ -39,31 +40,41 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
     isSummerCamp: false
   });
 
-  // Filters
-  const [filterCentre, setFilterCentre]   = useState<string>('All centres');
-  const [filterCoach, setFilterCoach]     = useState<string>('All coaches');
-  const [filterSegment, setFilterSegment] = useState<string>('All segments');
-  const [filterLevel, setFilterLevel]     = useState<string>('All levels');
-  const [filterEngagement, setFilterEngagement] = useState<string>('All engagement');
-  const [filterStatus, setFilterStatus]   = useState<string>('All');
-  const [filterHeat, setFilterHeat]       = useState<string>('All urgency');
-  const [search, setSearch]               = useState<string>('');
+  // Filters & Sorting state (Zoho Creator style)
+  const [zohoFilters, setZohoFilters] = useState<ZohoFilterState>({
+    dateEnrolled: 'All',
+    category: 'All',
+    level: 'All levels',
+    centre: 'All centres',
+    coach: 'All coaches',
+    status: 'All',
+    school: 'All',
+    engagement: 'All engagement',
+    heat: 'All urgency',
+    search: '',
+    sortCol: 'name',
+    sortAsc: true,
+  });
 
   const handleResetFilters = () => {
-    setFilterCentre('All centres');
-    setFilterCoach('All coaches');
-    setFilterSegment('All segments');
-    setFilterLevel('All levels');
-    setFilterEngagement('All engagement');
-    setFilterStatus('All');
-    setFilterHeat('All urgency');
-    setSearch('');
+    setZohoFilters({
+      dateEnrolled: 'All',
+      category: 'All',
+      level: 'All levels',
+      centre: 'All centres',
+      coach: 'All coaches',
+      status: 'All',
+      school: 'All',
+      engagement: 'All engagement',
+      heat: 'All urgency',
+      search: '',
+      sortCol: 'name',
+      sortAsc: true,
+    });
   };
 
   // Detail panel / Edit
   const [selected, setSelected] = useState<Student | null>(null);
-  const [sortCol, setSortCol]   = useState<string>('name');
-  const [sortAsc, setSortAsc]   = useState<boolean>(true);
   const [selectedSiblingId, setSelectedSiblingId] = useState<string>('');
 
   const [isEditing, setIsEditing] = useState(false);
@@ -411,27 +422,100 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   }, [students, packages, coaches, centres, attendance]);
 
   // Filter + sort
-  // Filter + sort
   const filtered = useMemo(() => {
     let rows = enriched;
-    if (filterStatus !== 'All') {
-      rows = rows.filter(r => r.status?.toLowerCase() === filterStatus.toLowerCase());
-    }
     
     // Apply coach role isolation
     if (currentUser.role === 'coach' && coachRecord) {
       rows = rows.filter(r => r.coach_id === coachRecord.id);
     }
 
-    if (filterCentre !== 'All centres') rows = rows.filter(r => r.centreName === filterCentre);
-    if (filterCoach  !== 'All coaches')  rows = rows.filter(r => r.coachName === filterCoach);
-    if (filterSegment !== 'All segments') rows = rows.filter(r => r.segment === filterSegment);
-    if (filterLevel !== 'All levels') rows = rows.filter(r => r.level === filterLevel);
-    if (filterEngagement !== 'All engagement') rows = rows.filter(r => r.engagement === filterEngagement);
-    if (filterHeat !== 'All urgency') rows = rows.filter(r => r.heat === filterHeat);
-    if (search) rows = rows.filter(r => r.name.toLowerCase().includes(search.toLowerCase()) || r.displayId.toLowerCase().includes(search.toLowerCase()));
+    // 1. Date Enrolled Filter
+    if (zohoFilters.dateEnrolled !== 'All') {
+      const today = new Date();
+      rows = rows.filter(r => {
+        const raw = r.join_date || (r as any).created_at;
+        if (!raw) return false;
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return false;
 
-    // Sorting by recent attendance (daysSince asc) by default for coach, or by column
+        if (zohoFilters.dateEnrolled === 'This Month') {
+          return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+        }
+        if (zohoFilters.dateEnrolled === 'Last Month') {
+          const lm = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+          return d.getMonth() === lm.getMonth() && d.getFullYear() === lm.getFullYear();
+        }
+        if (zohoFilters.dateEnrolled === 'This Year') {
+          return d.getFullYear() === today.getFullYear();
+        }
+        if (zohoFilters.dateEnrolled === 'Last 30 Days') {
+          const diffDays = (today.getTime() - d.getTime()) / 86400000;
+          return diffDays >= 0 && diffDays <= 30;
+        }
+        if (zohoFilters.dateEnrolled === 'Last 90 Days') {
+          const diffDays = (today.getTime() - d.getTime()) / 86400000;
+          return diffDays >= 0 && diffDays <= 90;
+        }
+        const monthStr = d.toLocaleString('default', { month: 'short' });
+        const formatted = `${monthStr} - ${d.getFullYear()}`;
+        return formatted.toLowerCase() === zohoFilters.dateEnrolled.toLowerCase() || String(d.getFullYear()) === zohoFilters.dateEnrolled;
+      });
+    }
+
+    // 2. Status Filter
+    if (zohoFilters.status !== 'All') {
+      rows = rows.filter(r => r.status?.toLowerCase() === zohoFilters.status.toLowerCase());
+    }
+
+    // 3. Centre Filter
+    if (zohoFilters.centre !== 'All centres' && zohoFilters.centre !== 'All') {
+      rows = rows.filter(r => r.centreName?.toLowerCase() === zohoFilters.centre.toLowerCase());
+    }
+
+    // 4. Coach Filter
+    if (zohoFilters.coach !== 'All coaches' && zohoFilters.coach !== 'All') {
+      rows = rows.filter(r => r.coachName?.toLowerCase() === zohoFilters.coach.toLowerCase());
+    }
+
+    // 5. Category Filter
+    if (zohoFilters.category !== 'All') {
+      rows = rows.filter(r => (r.category || r.segment || '').toLowerCase() === zohoFilters.category.toLowerCase());
+    }
+
+    // 6. Level Filter
+    if (zohoFilters.level !== 'All levels' && zohoFilters.level !== 'All') {
+      rows = rows.filter(r => (r.level || '').toLowerCase() === zohoFilters.level.toLowerCase());
+    }
+
+    // 7. Engagement Filter
+    if (zohoFilters.engagement !== 'All engagement' && zohoFilters.engagement !== 'All') {
+      rows = rows.filter(r => (r.engagement || '').toLowerCase() === zohoFilters.engagement.toLowerCase());
+    }
+
+    // 8. Urgency / Heat Filter
+    if (zohoFilters.heat !== 'All urgency' && zohoFilters.heat !== 'All') {
+      rows = rows.filter(r => (r.heat || '').toLowerCase() === zohoFilters.heat.toLowerCase());
+    }
+
+    // 9. School Filter
+    if (zohoFilters.school !== 'All') {
+      rows = rows.filter(r => (r.school || '').toLowerCase() === zohoFilters.school.toLowerCase());
+    }
+
+    // 10. Search Filter
+    if (zohoFilters.search.trim()) {
+      const q = zohoFilters.search.toLowerCase();
+      rows = rows.filter(r => 
+        r.name.toLowerCase().includes(q) || 
+        r.displayId.toLowerCase().includes(q) ||
+        (r.school || '').toLowerCase().includes(q) ||
+        (r.fide_id || '').toLowerCase().includes(q)
+      );
+    }
+
+    // Sorting by column
+    const { sortCol, sortAsc } = zohoFilters;
     return rows.sort((a, b) => {
       let av: any = (a as any)[sortCol] ?? '';
       let bv: any = (b as any)[sortCol] ?? '';
@@ -448,7 +532,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
       if (av > bv) return sortAsc ? 1 : -1;
       return 0;
     });
-  }, [enriched, filterCentre, filterCoach, filterSegment, filterLevel, filterEngagement, filterStatus, filterHeat, search, sortCol, sortAsc, currentUser, coachRecord]);
+  }, [enriched, zohoFilters, currentUser, coachRecord]);
 
   // Coach-specific metrics
   const coachStats = useMemo(() => {
@@ -465,8 +549,11 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   }, [enriched, coachRecord]);
 
   const toggleSort = (col: string) => {
-    if (sortCol === col) setSortAsc(!sortAsc);
-    else { setSortCol(col); setSortAsc(true); }
+    setZohoFilters(prev => ({
+      ...prev,
+      sortCol: col,
+      sortAsc: prev.sortCol === col ? !prev.sortAsc : true,
+    }));
   };
 
   const SortTh = ({ col, children, right }: { col: string; children: React.ReactNode; right?: boolean }) => (
@@ -474,7 +561,7 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
       onClick={() => toggleSort(col)}
       className={`text-[9px] font-bold text-muted-custom tracking-widest uppercase py-2.5 px-2 cursor-pointer select-none hover:text-ink whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}
     >
-      {children}{sortCol === col ? (sortAsc ? ' ↑' : ' ↓') : ''}
+      {children}{zohoFilters.sortCol === col ? (zohoFilters.sortAsc ? ' ▲' : ' ▼') : ''}
     </th>
   );
 
@@ -502,11 +589,11 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
           </div>
 
           <select 
-            value={filterCentre}
-            onChange={e => setFilterCentre(e.target.value)}
+            value={zohoFilters.centre}
+            onChange={e => setZohoFilters(prev => ({ ...prev, centre: e.target.value }))}
             className="bg-white border border-line rounded-lg px-4 py-2 text-xs text-ink outline-none cursor-pointer"
           >
-            <option>All centres</option>
+            <option value="All centres">All centres</option>
             {centres.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
         </div>
@@ -609,145 +696,81 @@ export const Students: React.FC<StudentsProps> = ({ currentUser, activeCentre })
   }
 
   // Fallback to Admin Student Register View
-  const uniqueCoaches  = [...new Set(enriched.map(r => r.coachName))].sort();
-  const uniqueSegments = [...new Set(enriched.map(r => r.segment))].sort();
+  const uniqueCoaches = useMemo(() => [...new Set(enriched.map(r => r.coachName))].sort(), [enriched]);
+  const uniqueSchools = useMemo(() => [...new Set(enriched.map(r => r.school).filter(Boolean))].sort(), [enriched]);
+  const uniqueCategories = useMemo(() => {
+    const allCats = new Set<string>();
+    ['Early starts', 'Juniors', 'Seniors', 'Adult', 'Pro-Track'].forEach(c => allCats.add(c));
+    students.forEach(s => {
+      if (s.category) allCats.add(s.category);
+    });
+    enriched.forEach(r => {
+      if (r.segment) allCats.add(r.segment);
+      if (r.category) allCats.add(r.category);
+    });
+    return Array.from(allCats).filter(Boolean).sort();
+  }, [students, enriched]);
+  const uniqueLevels = useMemo(() => ['Beginner 1', 'Beginner 2', 'Intermediate 1', 'Intermediate 2', 'Advanced', 'FIDE', 'Pro-Track'], []);
+
+  const dateEnrolledOptions = useMemo(() => {
+    const monthMap = new Map<string, { year: number; month: number; label: string }>();
+
+    // Collect all student enrolled months
+    enriched.forEach(s => {
+      const raw = s.join_date || (s as any).created_at;
+      if (!raw) return;
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return;
+      const year = d.getFullYear();
+      const month = d.getMonth();
+      const key = `${year}-${String(month + 1).padStart(2, '0')}`;
+      if (!monthMap.has(key)) {
+        const monthStr = d.toLocaleString('default', { month: 'short' });
+        monthMap.set(key, { year, month, label: `${monthStr} - ${year}` });
+      }
+    });
+
+    // Ensure recent consecutive months (last 12 months) are included line-wise
+    const now = new Date();
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const month = d.getMonth();
+      const key = `${year}-${String(month + 1).padStart(2, '0')}`;
+      if (!monthMap.has(key)) {
+        const monthStr = d.toLocaleString('default', { month: 'short' });
+        monthMap.set(key, { year, month, label: `${monthStr} - ${year}` });
+      }
+    }
+
+    // Sort strictly by Year DESC, Month DESC (e.g. Sep 2026, Aug 2026, Jul 2026...)
+    const sortedMonths = Array.from(monthMap.values())
+      .sort((a, b) => (b.year !== a.year ? b.year - a.year : b.month - a.month))
+      .map(m => m.label);
+
+    return ['All', 'This Month', 'Last Month', 'This Year', 'Last 30 Days', 'Last 90 Days', ...sortedMonths];
+  }, [enriched]);
+
+  const centreNames = useMemo(() => centres.map(c => c.name), [centres]);
 
   return (
     <div className="p-6 max-w-full mx-auto w-full space-y-4 text-ink">
-      {/* Header */}
-      <div className="flex justify-between items-start">
-        <div>
-          <div className="text-[10px] font-bold tracking-widest text-[#C4A249] uppercase">OUTPUT · RAW</div>
-          <h1 className="text-2xl font-bold font-display text-ink mt-0.5">Student Register</h1>
-        </div>
-        <select 
-          value={filterCentre}
-          onChange={e => setFilterCentre(e.target.value)}
-          className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none"
-        >
-          <option>All centres</option>
-          {centres.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-        </select>
-      </div>
-
-      <p className="text-xs text-muted-custom">
-        <b className="text-ink">Raw student register.</b> Every field the system holds, filterable and downloadable for your own analysis in Excel.
-      </p>
-
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-2 py-2">
-        <span className="text-[9px] font-bold text-muted-custom uppercase tracking-widest mr-1">Filter</span>
-
-        <select
-          value={filterCentre}
-          onChange={e => setFilterCentre(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All centres</option>
-          {centres.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-        </select>
-
-        <select
-          value={filterCoach}
-          onChange={e => setFilterCoach(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All coaches</option>
-          {uniqueCoaches.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-
-        <select
-          value={filterSegment}
-          onChange={e => setFilterSegment(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All segments</option>
-          {uniqueSegments.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-
-        <select
-          value={filterLevel}
-          onChange={e => setFilterLevel(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All levels</option>
-          <option value="Beginner 1">Beginner 1</option>
-          <option value="Beginner 2">Beginner 2</option>
-          <option value="Intermediate 1">Intermediate 1</option>
-          <option value="Intermediate 2">Intermediate 2</option>
-          <option value="Advanced">Advanced</option>
-          <option value="FIDE">FIDE</option>
-        </select>
-
-        <select
-          value={filterEngagement}
-          onChange={e => setFilterEngagement(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All engagement</option>
-          <option value="ENGAGED">ENGAGED</option>
-          <option value="SLIPPING">SLIPPING</option>
-          <option value="COLD">COLD</option>
-          <option value="DORMANT">DORMANT</option>
-        </select>
-
-        <select
-          value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option value="All">All Statuses</option>
-          <option value="active">Active Only</option>
-          <option value="inactive">Inactive Only</option>
-          <option value="left">Left Only</option>
-        </select>
-
-        <select
-          value={filterHeat}
-          onChange={e => setFilterHeat(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All urgency</option>
-          <option value="NEW">NEW</option>
-          <option value="HOT">HOT</option>
-          <option value="WARM">WARM</option>
-          <option value="COLD">COLD</option>
-          <option value="HEALTHY">HEALTHY</option>
-        </select>
-
-        <input
-          type="text"
-          placeholder="Search..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-40"
-        />
-
-        {(filterCentre !== 'All centres' || filterCoach !== 'All coaches' || filterSegment !== 'All segments' || filterLevel !== 'All levels' || filterEngagement !== 'All engagement' || filterStatus !== 'All' || filterHeat !== 'All urgency' || search !== '') && (
-          <button
-            onClick={handleResetFilters}
-            className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[10px] px-2.5 py-1 rounded transition-all cursor-pointer"
-          >
-            ✕ Reset Filters
-          </button>
-        )}
-
-        <div className="ml-auto flex items-center gap-2 no-print">
-          <span className="text-xs text-muted-custom font-semibold">{filtered.length} rows</span>
-          <button 
-            onClick={() => exportTableToCSV('#student-table', 'student_register.csv')}
-            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
-          >
-            ↓ Excel
-          </button>
-          <button 
-            onClick={exportToPDF}
-            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
-          >
-            ⎙ PDF
-          </button>
-        </div>
-      </div>
+      {/* Zoho Creator Style Filter Header Bar */}
+      <ZohoAutoFilter
+        filters={zohoFilters}
+        onFilterChange={setZohoFilters}
+        onResetFilters={handleResetFilters}
+        onExportCSV={() => exportTableToCSV('#student-table', 'student_register.csv')}
+        onExportPDF={exportToPDF}
+        totalRecords={enriched.length}
+        filteredRecordsCount={filtered.length}
+        centres={centreNames}
+        coaches={uniqueCoaches}
+        categories={uniqueCategories}
+        levels={uniqueLevels}
+        schools={uniqueSchools}
+        dateEnrolledOptions={dateEnrolledOptions}
+      />
 
       {/* Main Grid */}
       <div className="bg-surface border border-line rounded-[14px] shadow-sm overflow-hidden">

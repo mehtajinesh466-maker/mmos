@@ -718,13 +718,13 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
             </button>
           )}
           <button 
-            onClick={() => exportTableToCSV('#schedule-table', 'weekly_schedule.csv')}
+            onClick={() => exportTableToCSV(scheduleTab === 'planner' ? '#schedule-table' : '#calendar-table', scheduleTab === 'planner' ? 'weekly_schedule.csv' : 'coach_calendar.csv')}
             className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all"
           >
             ↓ Excel
           </button>
           <button 
-            onClick={exportToPDF}
+            onClick={() => exportToPDF()}
             className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all"
           >
             ⎙ PDF
@@ -1118,7 +1118,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
               ↓ Excel
             </button>
             <button 
-              onClick={exportToPDF}
+              onClick={() => exportToPDF()}
               className="bg-white border border-line text-[#5c5c5c] font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all"
             >
               ⎙ PDF
@@ -1290,7 +1290,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
           {/* Week View */}
           {calendarViewMode === 'week' && (
             <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-sm">
-              <table className="w-full text-xs border-collapse min-w-[1000px] table-fixed">
+              <table id="calendar-table" className="w-full text-xs border-collapse min-w-[1000px] table-fixed">
                 <thead>
                   <tr className="bg-canvas border-b border-line text-[10px] font-bold text-muted-custom uppercase tracking-wider">
                     <th className="py-3 px-2 border-r border-line w-36 text-center bg-canvas/60">Time Slot</th>
@@ -1350,6 +1350,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                             const cellSessions = daySessions.filter(sess => {
                               const slot = slots.find(sl => sl.id === sess.slot_id);
                               if (!slot) return false;
+                              if (selectedCentre !== 'All' && slot.centre_id !== selectedCentre) return false;
                               const cleanTime = slot.time.split('::')[0];
                               const startHour = parseInt(cleanTime.split(':')[0], 10);
                               return startHour === hour;
@@ -1366,6 +1367,13 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                                     <div key={sess.id} className="bg-canvas border border-[#173F35]/15 p-2 rounded-lg space-y-1 relative group hover:shadow-sm transition-all">
                                       <div className="font-mono font-bold text-[9px] text-[#C4A249] flex items-center justify-between">
                                         <span>{slot.time?.split('::')[0]}</span>
+                                        <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded ${
+                                          getCentreName(slot.centre_id).toLowerCase().includes('bay') 
+                                            ? 'bg-amber-100 text-amber-900 border border-amber-300' 
+                                            : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                                        }`}>
+                                          {getCentreName(slot.centre_id).toLowerCase().includes('bay') ? 'BA' : 'JLT'}
+                                        </span>
                                       </div>
                                       <div className="text-[10px] font-bold text-[#173F35] truncate">{student.name}</div>
                                       <div className="text-[9px] text-muted-custom truncate">Level: {slot.level}</div>

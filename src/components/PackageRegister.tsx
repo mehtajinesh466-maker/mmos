@@ -5,6 +5,10 @@ import { db } from '../lib/db';
 import type { User, Student, Package, Coach, Centre, Tier } from '../lib/db';
 import { updatePackageDB, deletePackageDB, syncDatabaseToClient } from '../app/actions';
 import { exportTableToCSV, exportToPDF } from '../lib/export';
+import { ZohoPackageAutoFilter, ZohoPackageFilterState } from './ZohoPackageAutoFilter';
+import { OldVsNewChart } from './OldVsNewChart';
+import { ActiveStudentsChart } from './ActiveStudentsChart';
+import { MostPopularDayChart } from './MostPopularDayChart';
 interface PackageRegisterProps {
   currentUser: User;
   activeCentre: string;
@@ -19,26 +23,36 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
   const [attendance, setAttendance] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
 
-  // Filters
-  const [filterCentre, setFilterCentre] = useState<string>('All centres');
-  const [filterCoach, setFilterCoach] = useState<string>('All coaches');
-  const [filterSegment, setFilterSegment] = useState<string>('All segments');
-  const [filterEngagement, setFilterEngagement] = useState<string>('All engagement');
-  const [filterType, setFilterType] = useState<string>('All types');
-  const [search, setSearch] = useState<string>('');
+  // Filters & Sorting state (Zoho Creator style)
+  const [zohoFilters, setZohoFilters] = useState<ZohoPackageFilterState>({
+    centre: 'All centres',
+    modeOfPayment: 'All',
+    student: 'All',
+    dateOfPayment: 'All',
+    packageType: 'All types',
+    status: 'All statuses',
+    coach: 'All coaches',
+    segment: 'All segments',
+    search: '',
+    sortCol: 'studentName',
+    sortAsc: true,
+  });
 
   const handleResetFilters = () => {
-    setFilterCentre('All centres');
-    setFilterCoach('All coaches');
-    setFilterSegment('All segments');
-    setFilterEngagement('All engagement');
-    setFilterType('All types');
-    setSearch('');
+    setZohoFilters({
+      centre: 'All centres',
+      modeOfPayment: 'All',
+      student: 'All',
+      dateOfPayment: 'All',
+      packageType: 'All types',
+      status: 'All statuses',
+      coach: 'All coaches',
+      segment: 'All segments',
+      search: '',
+      sortCol: 'studentName',
+      sortAsc: true,
+    });
   };
-
-  // Sorting
-  const [sortCol, setSortCol] = useState<string>('studentName');
-  const [sortAsc, setSortAsc] = useState<boolean>(true);
 
   // Edit states
   const [selectedPkg, setSelectedPkg] = useState<any | null>(null);
@@ -100,10 +114,10 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
     if (activeCentre && activeCentre !== 'All') {
       const match = db.getCentres().find(c => c.id === activeCentre);
       if (match) {
-        setFilterCentre(match.name);
+        setZohoFilters(prev => ({ ...prev, centre: match.name }));
       }
     } else {
-      setFilterCentre('All centres');
+      setZohoFilters(prev => ({ ...prev, centre: 'All centres' }));
     }
   }, [activeCentre]);
 
@@ -230,35 +244,89 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
   const filtered = useMemo(() => {
     let rows = enriched;
 
-    if (filterCentre !== 'All centres') {
-      rows = rows.filter(r => r.centreName === filterCentre);
+    // 1. Centre Filter
+    if (zohoFilters.centre !== 'All centres' && zohoFilters.centre !== 'All') {
+      rows = rows.filter(r => r.centreName?.toLowerCase() === zohoFilters.centre.toLowerCase());
     }
-    if (filterCoach !== 'All coaches') {
-      rows = rows.filter(r => r.coachName.toUpperCase() === filterCoach.toUpperCase());
+
+    // 2. Mode of Payment Filter
+    if (zohoFilters.modeOfPayment !== 'All') {
+      rows = rows.filter(r => r.paymentMethod?.toLowerCase() === zohoFilters.modeOfPayment.toLowerCase());
     }
-    if (filterSegment !== 'All segments') {
-      rows = rows.filter(r => r.segment === filterSegment);
+
+    // 3. Student Name Filter
+    if (zohoFilters.student !== 'All') {
+      rows = rows.filter(r => r.studentName?.toLowerCase() === zohoFilters.student.toLowerCase());
     }
-    if (filterType !== 'All types') {
-      rows = rows.filter(r => r.type === filterType);
+
+    // 4. Date of Payment Filter
+    if (zohoFilters.dateOfPayment !== 'All') {
+      const today = new Date();
+      rows = rows.filter(r => {
+        if (!r.paidOn || r.paidOn === '-') return false;
+        const d = new Date(r.paidOn);
+        if (isNaN(d.getTime())) return false;
+
+        if (zohoFilters.dateOfPayment === 'This Month') {
+          return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+        }
+        if (zohoFilters.dateOfPayment === 'Last Month') {
+          const lm = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+          return d.getMonth() === lm.getMonth() && d.getFullYear() === lm.getFullYear();
+        }
+        if (zohoFilters.dateOfPayment === 'This Year') {
+          return d.getFullYear() === today.getFullYear();
+        }
+        if (zohoFilters.dateOfPayment === 'Last 30 Days') {
+          const diffDays = (today.getTime() - d.getTime()) / 86400000;
+          return diffDays >= 0 && diffDays <= 30;
+        }
+        if (zohoFilters.dateOfPayment === 'Last 90 Days') {
+          const diffDays = (today.getTime() - d.getTime()) / 86400000;
+          return diffDays >= 0 && diffDays <= 90;
+        }
+
+        const monthStr = d.toLocaleString('default', { month: 'short' });
+        const formatted = `${monthStr} - ${d.getFullYear()}`;
+        return formatted.toLowerCase() === zohoFilters.dateOfPayment.toLowerCase() || String(d.getFullYear()) === zohoFilters.dateOfPayment;
+      });
     }
-    if (filterEngagement !== 'All engagement') {
-      rows = rows.filter(r => 
-        r.engagement === filterEngagement || 
-        r.status === filterEngagement
-      );
+
+    // 5. Package Type Filter
+    if (zohoFilters.packageType !== 'All types' && zohoFilters.packageType !== 'All') {
+      rows = rows.filter(r => r.type?.toLowerCase() === zohoFilters.packageType.toLowerCase());
     }
-    if (search) {
-      const q = search.toLowerCase();
+
+    // 6. Status Filter
+    if (zohoFilters.status !== 'All statuses' && zohoFilters.status !== 'All') {
+      rows = rows.filter(r => r.status?.toLowerCase() === zohoFilters.status.toLowerCase());
+    }
+
+    // 7. Coach Filter
+    if (zohoFilters.coach !== 'All coaches' && zohoFilters.coach !== 'All') {
+      rows = rows.filter(r => r.coachName?.toLowerCase() === zohoFilters.coach.toLowerCase());
+    }
+
+    // 8. Segment / Category Filter
+    if (zohoFilters.segment !== 'All segments' && zohoFilters.segment !== 'All') {
+      rows = rows.filter(r => r.segment?.toLowerCase() === zohoFilters.segment.toLowerCase());
+    }
+
+    // 9. Search Filter
+    if (zohoFilters.search.trim()) {
+      const q = zohoFilters.search.toLowerCase();
       rows = rows.filter(r => 
         r.studentName.toLowerCase().includes(q) || 
-        r.displayId.toLowerCase().includes(q)
+        r.displayId.toLowerCase().includes(q) ||
+        (r.paymentMethod || '').toLowerCase().includes(q)
       );
     }
 
+    // Sorting
+    const { sortCol, sortAsc } = zohoFilters;
     return rows.sort((a, b) => {
-      let av = a[sortCol];
-      let bv = b[sortCol];
+      let av = (a as any)[sortCol];
+      let bv = (b as any)[sortCol];
 
       if (av === bv) return 0;
       if (av === null || av === undefined) return 1;
@@ -271,15 +339,14 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
       if (av > bv) return sortAsc ? 1 : -1;
       return 0;
     });
-  }, [enriched, filterCentre, filterCoach, filterSegment, filterEngagement, filterType, search, sortCol, sortAsc]);
+  }, [enriched, zohoFilters]);
 
   const toggleSort = (col: string) => {
-    if (sortCol === col) {
-      setSortAsc(!sortAsc);
-    } else {
-      setSortCol(col);
-      setSortAsc(true);
-    }
+    setZohoFilters(prev => ({
+      ...prev,
+      sortCol: col,
+      sortAsc: prev.sortCol === col ? !prev.sortAsc : true,
+    }));
   };
 
   const SortTh = ({ col, children, right }: { col: string; children: React.ReactNode; right?: boolean }) => (
@@ -287,7 +354,7 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
       onClick={() => toggleSort(col)}
       className={`text-[9px] font-bold text-muted-custom tracking-widest uppercase py-3 px-4 cursor-pointer select-none hover:text-ink whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}
     >
-      {children}{sortCol === col ? (sortAsc ? ' ↑' : ' ↓') : ''}
+      {children}{zohoFilters.sortCol === col ? (zohoFilters.sortAsc ? ' ▲' : ' ▼') : ''}
     </th>
   );
 
@@ -304,140 +371,92 @@ export const PackageRegister: React.FC<PackageRegisterProps> = ({ currentUser, a
     }
   };
 
-  const uniqueCoaches = useMemo(() => {
-    return [...new Set(enriched.map(r => r.coachName))].sort();
+  const uniqueCoaches = useMemo(() => [...new Set(enriched.map(r => r.coachName))].sort(), [enriched]);
+  const uniqueCategories = useMemo(() => {
+    const allCats = new Set<string>();
+    ['Early starts', 'Juniors', 'Seniors', 'Adult', 'Pro-Track'].forEach(c => allCats.add(c));
+    students.forEach(s => {
+      if (s.category) allCats.add(s.category);
+    });
+    enriched.forEach(r => {
+      if (r.segment) allCats.add(r.segment);
+      if (r.category) allCats.add(r.category);
+    });
+    return Array.from(allCats).filter(Boolean).sort();
+  }, [students, enriched]);
+  const uniqueStudents = useMemo(() => [...new Set(enriched.map(r => r.studentName))].sort(), [enriched]);
+  const uniquePaymentModes = useMemo(() => [...new Set(enriched.map(r => r.paymentMethod).filter(p => p && p !== '-'))].sort(), [enriched]);
+  const uniquePackageTypes = useMemo(() => ['Renewal', 'New', 'Tournament', 'Unbilled'], []);
+  const uniqueStatuses = useMemo(() => ['CURRENT', 'COMPLETED', 'UNBILLED'], []);
+
+  const datesOfPayment = useMemo(() => {
+    const monthMap = new Map<string, { year: number; month: number; label: string }>();
+
+    enriched.forEach(r => {
+      if (!r.paidOn || r.paidOn === '-') return;
+      const d = new Date(r.paidOn);
+      if (isNaN(d.getTime())) return;
+      const year = d.getFullYear();
+      const month = d.getMonth();
+      const key = `${year}-${String(month + 1).padStart(2, '0')}`;
+      if (!monthMap.has(key)) {
+        const monthStr = d.toLocaleString('default', { month: 'short' });
+        monthMap.set(key, { year, month, label: `${monthStr} - ${year}` });
+      }
+    });
+
+    const now = new Date();
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const month = d.getMonth();
+      const key = `${year}-${String(month + 1).padStart(2, '0')}`;
+      if (!monthMap.has(key)) {
+        const monthStr = d.toLocaleString('default', { month: 'short' });
+        monthMap.set(key, { year, month, label: `${monthStr} - ${year}` });
+      }
+    }
+
+    const sortedMonths = Array.from(monthMap.values())
+      .sort((a, b) => (b.year !== a.year ? b.year - a.year : b.month - a.month))
+      .map(m => m.label);
+
+    return ['All', 'This Month', 'Last Month', 'This Year', 'Last 30 Days', 'Last 90 Days', ...sortedMonths];
   }, [enriched]);
 
-  const uniqueSegments = useMemo(() => {
-    return [...new Set(enriched.map(r => r.segment))].sort();
-  }, [enriched]);
-
-  const totalPaidSum = useMemo(() => {
-    return filtered.reduce((sum, r) => sum + (r.type !== 'Unbilled' && r.type !== '>> UNPAID <<' ? (r.amount || 0) : 0), 0);
-  }, [filtered]);
+  const centreNames = useMemo(() => {
+    const names = centres.map(c => c.name);
+    if (enriched.some(r => r.centreName === 'Tournaments') && !names.includes('Tournaments')) {
+      names.push('Tournaments');
+    }
+    return names;
+  }, [centres, enriched]);
 
   return (
     <div className="p-6 max-w-full mx-auto w-full space-y-4 text-ink">
-      
-      {/* Top Header */}
-      <div className="flex justify-between items-start">
-        <div>
-          <div className="text-[10px] font-bold tracking-widest text-[#C4A249] uppercase">OUTPUT · RAW</div>
-          <h1 className="text-2xl font-bold font-display text-ink mt-0.5">Package Register</h1>
-        </div>
+      {/* Old Vs New (New Student vs Renewal) Month-wise Chart */}
+      <OldVsNewChart enrichedPackages={enriched} centres={centreNames} />
+      <ActiveStudentsChart attendance={attendance} students={students} coaches={coaches} centres={centres} slots={db.getScheduleSlots()} />
+      <MostPopularDayChart attendance={attendance} students={students} coaches={coaches} centres={centres} />
 
-        <select 
-          value={filterCentre}
-          onChange={e => setFilterCentre(e.target.value)}
-          className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none"
-        >
-          <option>All centres</option>
-          {centres.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-        </select>
-      </div>
-
-      <p className="text-xs text-muted-custom">
-        Raw package register with financial amounts paid and session timeline breakdown. One row per package.
-      </p>
-
-      {/* Filter Bar */}
-      <div className="flex flex-wrap items-center gap-2 py-2">
-        <span className="text-[9px] font-bold text-muted-custom uppercase tracking-widest mr-1">Filter</span>
-
-        <select
-          value={filterCentre}
-          onChange={e => setFilterCentre(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All centres</option>
-          {centres.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-        </select>
-
-        <select
-          value={filterCoach}
-          onChange={e => setFilterCoach(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All coaches</option>
-          {uniqueCoaches.map(coach => <option key={coach} value={coach}>{coach}</option>)}
-        </select>
-
-        <select
-          value={filterSegment}
-          onChange={e => setFilterSegment(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All segments</option>
-          {uniqueSegments.map(seg => <option key={seg} value={seg}>{seg}</option>)}
-        </select>
-
-        <select
-          value={filterEngagement}
-          onChange={e => setFilterEngagement(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All engagement</option>
-          <optgroup label="Package Status">
-            <option value="CURRENT">CURRENT</option>
-            <option value="COMPLETED">COMPLETED</option>
-            <option value="UNBILLED">UNBILLED</option>
-          </optgroup>
-          <optgroup label="Student Engagement">
-            <option value="ENGAGED">ENGAGED</option>
-            <option value="SLIPPING">SLIPPING</option>
-            <option value="COLD">COLD</option>
-          </optgroup>
-        </select>
-
-        <select
-          value={filterType}
-          onChange={e => setFilterType(e.target.value)}
-          className="bg-white border border-line rounded px-2 py-1 text-xs text-ink outline-none"
-        >
-          <option>All types</option>
-          <option value="Renewal">Renewal</option>
-          <option value="New">New</option>
-          <option value="Tournament">Tournament</option>
-          <option value="Unbilled">Unbilled</option>
-        </select>
-
-        <input
-          type="text"
-          placeholder="Search student or ID..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="bg-white border border-line rounded px-3 py-1 text-xs text-ink outline-none focus:border-forest w-44"
-        />
-
-        {(filterCentre !== 'All centres' || filterCoach !== 'All coaches' || filterSegment !== 'All segments' || filterEngagement !== 'All engagement' || filterType !== 'All types' || search !== '') && (
-          <button
-            onClick={handleResetFilters}
-            className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[10px] px-2.5 py-1 rounded transition-all cursor-pointer"
-          >
-            ✕ Reset Filters
-          </button>
-        )}
-
-        <div className="ml-auto flex items-center gap-2.5 no-print">
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] px-2.5 py-1 rounded-lg font-mono font-bold flex items-center gap-1.5 shadow-2xs">
-            <span className="text-[9px] uppercase tracking-wider text-emerald-600 font-sans font-semibold">Total Paid</span>
-            <span>AED {totalPaidSum.toLocaleString()}</span>
-          </div>
-          <span className="text-xs text-muted-custom font-semibold">{filtered.length} rows</span>
-          <button 
-            onClick={() => exportTableToCSV('#package-table', 'packages_register.csv')}
-            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
-          >
-            ↓ Excel
-          </button>
-          <button 
-            onClick={exportToPDF}
-            className="bg-white border border-line text-ink font-bold text-[10px] px-3 py-1.5 rounded-lg hover:bg-canvas flex items-center gap-1"
-          >
-            ⎙ PDF
-          </button>
-        </div>
-      </div>
+      {/* Zoho Creator Style Filter Header Bar for Package Register */}
+      <ZohoPackageAutoFilter
+        filters={zohoFilters}
+        onFilterChange={setZohoFilters}
+        onResetFilters={handleResetFilters}
+        onExportCSV={() => exportTableToCSV('#package-table', 'package_register.csv')}
+        onExportPDF={exportToPDF}
+        totalRecords={enriched.length}
+        filteredRecordsCount={filtered.length}
+        centres={centreNames}
+        paymentModes={uniquePaymentModes}
+        students={uniqueStudents}
+        datesOfPayment={datesOfPayment}
+        packageTypes={uniquePackageTypes}
+        statuses={uniqueStatuses}
+        coaches={uniqueCoaches}
+        segments={uniqueCategories}
+      />
 
       {/* Main Table Grid */}
       <div className="bg-surface border border-line rounded-[14px] shadow-sm overflow-hidden">
