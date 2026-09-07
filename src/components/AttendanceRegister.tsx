@@ -104,6 +104,29 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
 
   useEffect(() => {
     refresh();
+
+    fetch('/api/sync')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.success) {
+          db.syncFromNeon(data);
+          refresh();
+        } else {
+          syncDatabaseToClient().then(d => {
+            db.syncFromNeon(d);
+            refresh();
+          });
+        }
+      })
+      .catch(() => {
+        syncDatabaseToClient()
+          .then(d => {
+            db.syncFromNeon(d);
+            refresh();
+          })
+          .catch(e => console.error("Failed to sync database on mount:", e));
+      });
+
     window.addEventListener('db-synced', refresh);
     return () => window.removeEventListener('db-synced', refresh);
   }, []);
@@ -119,6 +142,47 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       setFilterCentre('All centres');
     }
   }, [activeCentre]);
+
+  // Helper for timezone-safe local YYYY-MM-DD and Month-Year parsing
+  const parseLocalDateString = (val: any) => {
+    if (!val) return { year: 1970, monthIndex: 0, day: 1, formatted: '—', monthYearKey: '' };
+    
+    let dateStr = '';
+    if (typeof val === 'string') {
+      dateStr = val.split('T')[0];
+    } else if (val instanceof Date) {
+      const y = val.getUTCFullYear();
+      const m = String(val.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(val.getUTCDate()).padStart(2, '0');
+      dateStr = `${y}-${m}-${d}`;
+    } else {
+      dateStr = String(val).split('T')[0];
+    }
+
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+      const year = parts[0];
+      const monthIndex = parts[1] - 1;
+      const day = parts[2];
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const mName = monthNames[monthIndex] || 'Jan';
+      const yShort = String(year).slice(-2);
+      const formatted = `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const monthYearKey = `${mName}-${yShort}`;
+      return { year, monthIndex, day, formatted, monthYearKey };
+    }
+
+    const d = new Date(val);
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const year = d.getFullYear();
+    const monthIndex = d.getMonth();
+    const day = d.getDate();
+    const mName = monthNames[monthIndex] || 'Jan';
+    const yShort = String(year).slice(-2);
+    const formatted = `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const monthYearKey = `${mName}-${yShort}`;
+    return { year, monthIndex, day, formatted, monthYearKey };
+  };
 
   // Enrich student records with attendance metrics
   const enriched = useMemo(() => {
@@ -145,11 +209,14 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       let cls90d = 0;
 
       studentAtts.forEach(a => {
-        const attDate = new Date(a.date);
-        const diffDays = Math.floor((today.getTime() - attDate.getTime()) / 86400000);
-        const amt = typeof a.duration === 'number' ? a.duration : 1;
-        if (diffDays >= -1 && diffDays <= 30) cls30d += amt;
-        if (diffDays >= -1 && diffDays <= 90) cls90d += amt;
+        const parsed = parseLocalDateString(a.date);
+        if (parsed.year && parsed.formatted) {
+          const attDate = new Date(parsed.year, parsed.monthIndex, parsed.day);
+          const diffDays = Math.floor((today.getTime() - attDate.getTime()) / 86400000);
+          const amt = typeof a.duration === 'number' ? a.duration : 1;
+          if (diffDays >= -1 && diffDays <= 30) cls30d += amt;
+          if (diffDays >= -1 && diffDays <= 90) cls90d += amt;
+        }
       });
 
       // Classes left across packages
@@ -180,7 +247,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
         cls30d,
         cls90d,
         daysSince: daysSince === 999 ? null : daysSince,
-        lastClass: s.last_attended ? new Date(s.last_attended).toISOString().split('T')[0] : '—',
+        lastClass: s.last_attended ? parseLocalDateString(s.last_attended).formatted : '—',
         classesLeft,
       };
     });
@@ -204,19 +271,12 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
     }
     if (filterDate) {
       rows = rows.filter(s => {
-        return attendance.some(a => a.student_id === s.id && new Date(a.date).toISOString().split('T')[0] === filterDate);
+        return attendance.some(a => a.student_id === s.id && parseLocalDateString(a.date).formatted === filterDate);
       });
     }
     if (filterMonth !== 'All months') {
-      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       rows = rows.filter(s => {
-        return attendance.some(a => {
-          if (a.student_id !== s.id) return false;
-          const d = new Date(a.date);
-          const m = monthNames[d.getUTCMonth()];
-          const y = d.getUTCFullYear().toString().slice(-2);
-          return `${m}-${y}` === filterMonth;
-        });
+        return attendance.some(a => a.student_id === s.id && parseLocalDateString(a.date).monthYearKey === filterMonth);
       });
     }
     if (search) {
@@ -246,15 +306,15 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
 
   // Memoized consolidated logs list of all days
   const filteredLogs = useMemo(() => {
+    const studentMap = new Map(students.map(s => [s.id, s]));
+    const centreMap = new Map(centres.map(c => [c.id, c.name]));
+    const coachMap = new Map(coaches.map(c => [c.id, c.name]));
+
     let rows = attendance.map(log => {
-      const student = students.find(s => s.id === log.student_id);
+      const student = studentMap.get(log.student_id);
       const studentName = student?.name || 'Unknown';
-      
-      const centre = centres.find(c => c.id === student?.centre_id);
-      const centreName = centre?.name || '—';
-      
-      const coach = coaches.find(c => c.id === log.coach_id);
-      const coachName = coach?.name || 'UNASSIGNED';
+      const centreName = student?.centre_id ? (centreMap.get(student.centre_id) || '—') : '—';
+      const coachName = coachMap.get(log.coach_id) || 'UNASSIGNED';
 
       return {
         ...log,
@@ -271,16 +331,10 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       rows = rows.filter(r => r.coachName.toUpperCase() === filterCoach.toUpperCase());
     }
     if (filterDate) {
-      rows = rows.filter(r => new Date(r.date).toISOString().split('T')[0] === filterDate);
+      rows = rows.filter(r => parseLocalDateString(r.date).formatted === filterDate);
     }
     if (filterMonth !== 'All months') {
-      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      rows = rows.filter(r => {
-        const d = new Date(r.date);
-        const m = monthNames[d.getUTCMonth()];
-        const y = d.getUTCFullYear().toString().slice(-2);
-        return `${m}-${y}` === filterMonth;
-      });
+      rows = rows.filter(r => parseLocalDateString(r.date).monthYearKey === filterMonth);
     }
     if (search) {
       const q = search.toLowerCase();
@@ -300,10 +354,10 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       if (bv === null || bv === undefined) return -1;
 
       if (logSortCol === 'date') {
-        const dateA = new Date(av as string).getTime() || 0;
-        const dateB = new Date(bv as string).getTime() || 0;
+        const dateA = parseLocalDateString(av).formatted;
+        const dateB = parseLocalDateString(bv).formatted;
         if (dateA === dateB) return 0;
-        return logSortAsc ? dateA - dateB : dateB - dateA;
+        return logSortAsc ? dateA.localeCompare(dateB) : dateB.localeCompare(dateA);
       }
 
       if (typeof av === 'string') av = av.toLowerCase();
@@ -380,11 +434,9 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
     const monthsSet = new Set<string>();
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     attendance.forEach(a => {
-      const d = new Date(a.date);
-      if (!isNaN(d.getTime())) {
-        const m = monthNames[d.getUTCMonth()];
-        const y = d.getUTCFullYear().toString().slice(-2);
-        monthsSet.add(`${m}-${y}`);
+      const parsed = parseLocalDateString(a.date);
+      if (parsed.monthYearKey) {
+        monthsSet.add(parsed.monthYearKey);
       }
     });
     return Array.from(monthsSet).sort((a, b) => {
@@ -392,7 +444,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
       const [mB, yB] = b.split('-');
       const valA = (parseInt(yA, 10) || 0) * 12 + monthNames.indexOf(mA);
       const valB = (parseInt(yB, 10) || 0) * 12 + monthNames.indexOf(mB);
-      return valA - valB;
+      return valB - valA;
     });
   }, [attendance]);
 
@@ -786,7 +838,7 @@ export const AttendanceRegister: React.FC<AttendanceRegisterProps> = ({ currentU
                     <tr key={log.id} className="border-b border-line hover:bg-canvas/30 transition-colors font-medium">
                       <td className="py-3 px-4 font-mono text-muted-custom w-12">{idx + 1}</td>
                       <td className="py-3 px-4 font-mono text-ink whitespace-nowrap">
-                        {new Date(log.date).toISOString().split('T')[0]}
+                        {parseLocalDateString(log.date).formatted}
                       </td>
                       <td className="py-3 px-4 font-bold text-ink whitespace-nowrap">
                         {log.studentName}

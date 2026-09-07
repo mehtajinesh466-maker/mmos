@@ -85,12 +85,27 @@ export const Attendance: React.FC<AttendanceProps> = ({
 
   useEffect(() => {
     loadData();
-    syncDatabaseToClient()
-      .then((data) => {
-        db.syncFromNeon(data);
-        loadData();
+    fetch('/api/sync')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.success) {
+          db.syncFromNeon(data);
+          loadData();
+        } else {
+          syncDatabaseToClient().then(d => {
+            db.syncFromNeon(d);
+            loadData();
+          });
+        }
       })
-      .catch((e) => console.error("Failed to sync on mount:", e));
+      .catch(() => {
+        syncDatabaseToClient()
+          .then((data) => {
+            db.syncFromNeon(data);
+            loadData();
+          })
+          .catch((e) => console.error("Failed to sync on mount:", e));
+      });
 
     window.addEventListener('db-synced', loadData);
     return () => window.removeEventListener('db-synced', loadData);

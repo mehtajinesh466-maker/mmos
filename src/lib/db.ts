@@ -183,6 +183,62 @@ export interface Enquiry {
   created_at?: string;
 }
 
+let inMemoryAttendance: Attendance[] = [];
+
+// IndexedDB Helper for storing large datasets (like attendance) bypassing localStorage 5MB limit
+function getIDBDB(): Promise<IDBDatabase | null> {
+  if (typeof window === 'undefined' || !window.indexedDB) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open('mmos_idb', 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('kv')) {
+          db.createObjectStore('kv');
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+function setIDBItem(key: string, val: any): Promise<void> {
+  return getIDBDB().then((idb) => {
+    if (!idb) return;
+    return new Promise((resolve) => {
+      try {
+        const tx = idb.transaction('kv', 'readwrite');
+        const store = tx.objectStore('kv');
+        store.put(val, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch (_) {
+        resolve();
+      }
+    });
+  });
+}
+
+function getIDBItem<T>(key: string): Promise<T | null> {
+  return getIDBDB().then((idb) => {
+    if (!idb) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = idb.transaction('kv', 'readonly');
+        const store = tx.objectStore('kv');
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      } catch (_) {
+        resolve(null);
+      }
+    });
+  });
+}
+
 // Helper to initialize local storage
 function initStorage() {
   if (typeof window === 'undefined') return;
@@ -205,6 +261,14 @@ function initStorage() {
     localStorage.setItem('mmos_class_sessions', JSON.stringify([]));
     localStorage.setItem('mmos_initialized', 'true');
   }
+
+  // Load attendance from IndexedDB into memory on boot
+  getIDBItem<Attendance[]>('mmos_attendance').then((data) => {
+    if (data && Array.isArray(data) && data.length > 0) {
+      inMemoryAttendance = data;
+      window.dispatchEvent(new Event('db-synced'));
+    }
+  });
 }
 
 initStorage();
@@ -220,7 +284,6 @@ export const db = {
     if (data.packages) this.save('packages', data.packages);
     if (data.scheduleSlots) this.save('schedule_slots', data.scheduleSlots);
     if (data.attendance) {
-      // Save all attendance records - localStorage can handle 17k rows fine
       this.save('attendance', data.attendance);
     }
     if (data.invoices) this.save('invoices', data.invoices);
@@ -241,26 +304,22 @@ export const db = {
 
   save<T>(table: string, data: T[]): void {
     if (typeof window === 'undefined') return;
+    if (table === 'attendance') {
+      inMemoryAttendance = data as any[];
+      setIDBItem('mmos_attendance', data);
+    }
     try {
       localStorage.setItem(`mmos_${table}`, JSON.stringify(data));
     } catch (e: any) {
       if (e.name === 'QuotaExceededError' || e.code === 22) {
-        console.warn(`Local storage quota exceeded for table ${table}. Trying to prune old records...`);
+        console.warn(`Local storage quota exceeded for table ${table}. Stored in memory and IndexedDB.`);
         if (table === 'attendance') {
-          // Fallback to storing only the last 30 days
-          const thirtyDaysAgo = new Date();
-          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-          const pruned = (data as any[]).filter(a => new Date(a.date).getTime() >= thirtyDaysAgo.getTime());
           try {
-            localStorage.setItem('mmos_attendance', JSON.stringify(pruned));
-            console.log(`Successfully stored pruned attendance logs (${pruned.length} records).`);
-            return;
-          } catch (innerErr) {
-            console.error('Failed to store even pruned attendance records:', innerErr);
-          }
+            localStorage.removeItem('mmos_attendance');
+          } catch (_) {}
+          return;
         }
       }
-      throw e;
     }
   },
 
@@ -360,7 +419,14 @@ export const db = {
 
   // Attendance
   getAttendance(): Attendance[] {
-    return this.get<Attendance>('attendance');
+    if (inMemoryAttendance && inMemoryAttendance.length > 0) {
+      return inMemoryAttendance;
+    }
+    const fromStorage = this.get<Attendance>('attendance');
+    if (fromStorage && fromStorage.length > 0) {
+      inMemoryAttendance = fromStorage;
+    }
+    return inMemoryAttendance || [];
   },
 
   // Enquiries

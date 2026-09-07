@@ -35,13 +35,15 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<string>('');
 
-  const [scheduleTab, setScheduleTab] = useState<'planner' | 'calendar'>('planner');
+  const [scheduleTab, setScheduleTab] = useState<'grid' | 'planner' | 'calendar'>('grid');
+  const [selectedLevelFilter, setSelectedLevelFilter] = useState<string>('All');
   const [calendarViewMode, setCalendarViewMode] = useState<'day' | 'week' | 'month' | 'term'>('week');
   const [anchorCalendarDate, setAnchorCalendarDate] = useState<Date>(new Date());
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [rescheduleSessionId, setRescheduleSessionId] = useState<string>('');
   const [rescheduleDate, setRescheduleDate] = useState<string>('');
   const [rescheduleNote, setRescheduleNote] = useState<string>('');
+
   
   // Drawer state for Roster Enrollment Management
   const [rosterModalSlot, setRosterModalSlot] = useState<ScheduleSlot | null>(null);
@@ -150,7 +152,11 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   const getSlotRoster = (slot: ScheduleSlot) => {
     const slotEnrollments = enrollments.filter(e => e.slot_id === slot.id);
     const enrolledStudentIds = new Set(slotEnrollments.map(e => e.student_id));
-    return students.filter(s => enrolledStudentIds.has(s.id));
+    return students.filter(s => {
+      if (!enrolledStudentIds.has(s.id)) return false;
+      if (selectedCoachId !== 'All' && activeCoachId && s.coach_id && s.coach_id !== activeCoachId) return false;
+      return true;
+    });
   };
 
   // Get dynamic dates for the current week (Monday to Sunday)
@@ -228,8 +234,16 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   const coachSessions = useMemo(() => {
     const coachSlots = slots.filter(s => s.coach_id === activeCoachId);
     const coachSlotIds = new Set(coachSlots.map(s => s.id));
-    return classSessions.filter(s => coachSlotIds.has(s.slot_id));
-  }, [classSessions, slots, activeCoachId]);
+    return classSessions.filter(s => {
+      if (!coachSlotIds.has(s.slot_id)) return false;
+      if (s.status === 'cancelled') return false;
+      if (selectedCoachId !== 'All' && activeCoachId) {
+        const student = students.find(st => st.id === s.student_id);
+        if (student && student.coach_id && student.coach_id !== activeCoachId) return false;
+      }
+      return true;
+    });
+  }, [classSessions, slots, activeCoachId, selectedCoachId, students]);
 
   const monthSessionsCount = useMemo(() => {
     const year = anchorCalendarDate.getFullYear();
@@ -371,11 +385,151 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   // Filter slots by selected coach and centre
   const filteredSlots = useMemo(() => {
     return slots.filter(s => {
-      if (s.coach_id !== activeCoachId) return false;
+      if (selectedCoachId !== 'All' && activeCoachId && s.coach_id !== activeCoachId) return false;
       if (selectedCentre !== 'All' && s.centre_id !== selectedCentre) return false;
       return true;
     });
-  }, [slots, activeCoachId, selectedCentre]);
+  }, [slots, activeCoachId, selectedCoachId, selectedCentre]);
+
+  // Level styling mapping matching screenshot design
+  const getLevelStyle = (levelName: string) => {
+    const norm = (levelName || '').trim().toLowerCase();
+    if (norm.includes('beginner 1') || norm === 'beginner1') {
+      return {
+        bg: 'bg-[#dcfce7]',
+        text: 'text-[#15803d]',
+        border: 'border-[#86efac]',
+        badgeBg: 'bg-[#dcfce7]',
+        badgeText: 'text-[#15803d]',
+        badgeBorder: 'border-[#86efac]'
+      };
+    }
+    if (norm.includes('beginner 2') || norm === 'beginner2' || norm === 'beginner') {
+      return {
+        bg: 'bg-[#bbf7d0]',
+        text: 'text-[#166534]',
+        border: 'border-[#4ade80]',
+        badgeBg: 'bg-[#bbf7d0]',
+        badgeText: 'text-[#166534]',
+        badgeBorder: 'border-[#4ade80]'
+      };
+    }
+    if (norm.includes('intermediate 1+') || norm.includes('interm 1+') || norm.includes('inter 1+')) {
+      return {
+        bg: 'bg-[#bfdbfe]',
+        text: 'text-[#1e40af]',
+        border: 'border-[#60a5fa]',
+        badgeBg: 'bg-[#bfdbfe]',
+        badgeText: 'text-[#1e40af]',
+        badgeBorder: 'border-[#60a5fa]'
+      };
+    }
+    if (norm.includes('intermediate 1') || norm.includes('interm 1') || norm.includes('inter 1') || norm === 'intermediate') {
+      return {
+        bg: 'bg-[#dbeafe]',
+        text: 'text-[#1d4ed8]',
+        border: 'border-[#93c5fd]',
+        badgeBg: 'bg-[#dbeafe]',
+        badgeText: 'text-[#1d4ed8]',
+        badgeBorder: 'border-[#93c5fd]'
+      };
+    }
+    if (norm.includes('intermediate 2') || norm.includes('interm 2') || norm.includes('inter 2')) {
+      return {
+        bg: 'bg-[#ffedd5]',
+        text: 'text-[#c2410c]',
+        border: 'border-[#fdba74]',
+        badgeBg: 'bg-[#ffedd5]',
+        badgeText: 'text-[#c2410c]',
+        badgeBorder: 'border-[#fdba74]'
+      };
+    }
+    if (norm.includes('junior') || norm.includes('interm 1+') || norm.includes('pink')) {
+      return {
+        bg: 'bg-[#fce7f3]',
+        text: 'text-[#be185d]',
+        border: 'border-[#f472b6]',
+        badgeBg: 'bg-[#fce7f3]',
+        badgeText: 'text-[#be185d]',
+        badgeBorder: 'border-[#f472b6]'
+      };
+    }
+    return {
+      bg: 'bg-[#f1f5f9]',
+      text: 'text-[#475569]',
+      border: 'border-[#cbd5e1]',
+      badgeBg: 'bg-[#f1f5f9]',
+      badgeText: 'text-[#475569]',
+      badgeBorder: 'border-[#cbd5e1]'
+    };
+  };
+
+  // Helper to format time slot label into 10 AM–11 AM format
+  const formatTimeSlotLabel = (timeStr: string): string => {
+    if (!timeStr) return '';
+    const clean = timeStr.split('::')[0].trim();
+    if (clean.includes('AM') || clean.includes('PM')) {
+      return clean.replace(/\s*-\s*/g, '–');
+    }
+    const parts = clean.split('-').map(p => p.trim());
+    const parseHour = (str: string) => {
+      const h = parseInt(str.split(':')[0], 10);
+      if (isNaN(h)) return null;
+      const period = h >= 12 ? 'PM' : 'AM';
+      const displayHour = h % 12 === 0 ? 12 : h % 12;
+      return `${displayHour} ${period}`;
+    };
+
+    if (parts.length >= 2) {
+      const start = parseHour(parts[0]);
+      const end = parseHour(parts[1]);
+      if (start && end) return `${start}–${end}`;
+    }
+
+    const start = parseHour(parts[0]);
+    if (start) {
+      const h = parseInt(parts[0].split(':')[0], 10);
+      const end = parseHour(`${h + 1}:00`);
+      return `${start}–${end || ''}`;
+    }
+
+    return clean;
+  };
+
+  // Chronologically sorted list of unique time slots for Weekly Grid View
+  const gridTimeSlots = useMemo(() => {
+    const defaultSlots = [
+      '10 AM–11 AM',
+      '11 AM–12 PM',
+      '12 PM–1 PM',
+      '2 PM–3 PM',
+      '3 PM–4 PM',
+      '4 PM–5 PM',
+      '5 PM–6 PM',
+      '6 PM–7 PM',
+      '7 PM–8 PM'
+    ];
+
+    const extracted = new Set<string>();
+    filteredSlots.forEach(s => {
+      const label = formatTimeSlotLabel(s.time);
+      if (label) extracted.add(label);
+    });
+
+    defaultSlots.forEach(s => extracted.add(s));
+
+    const getStartHour = (label: string) => {
+      const match = label.match(/(\d+)\s*(AM|PM)/i);
+      if (!match) return 99;
+      let h = parseInt(match[1], 10);
+      const period = match[2].toUpperCase();
+      if (period === 'PM' && h !== 12) h += 12;
+      if (period === 'AM' && h === 12) h = 0;
+      return h;
+    };
+
+    return Array.from(extracted).sort((a, b) => getStartHour(a) - getStartHour(b));
+  }, [filteredSlots]);
 
   // Normalize short vs long day names
   const normalizeDay = (day: string) => {
@@ -386,6 +540,32 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     };
     return map[day] || day;
   };
+
+  // Total active placements count and day class counts for Weekly Grid View
+  const gridPlacementsStats = useMemo(() => {
+    const dayCounts: Record<string, number> = {
+      Monday: 0, Tuesday: 0, Wednesday: 0, Thursday: 0, Friday: 0, Saturday: 0, Sunday: 0
+    };
+
+    let totalPlacements = 0;
+
+    filteredSlots.forEach(slot => {
+      const slotEnrollments = enrollments.filter(e => e.slot_id === slot.id);
+      const enrolledStudentIds = new Set(slotEnrollments.map(e => e.student_id));
+      const roster = students.filter(s => enrolledStudentIds.has(s.id) && s.status !== 'inactive');
+      
+      const count = roster.length;
+      totalPlacements += count;
+
+      const normDay = normalizeDay(slot.day);
+      if (dayCounts[normDay] !== undefined) {
+        dayCounts[normDay] += 1;
+      }
+    });
+
+    return { totalPlacements, dayCounts };
+  }, [filteredSlots, enrollments, students]);
+
 
   // Group slots by day for tabs
   const dailySlotsCount = useMemo(() => {
@@ -652,6 +832,14 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
         <div className="flex items-center gap-3">
           <div className="flex border border-line rounded-lg overflow-hidden bg-white text-xs">
             <button
+              onClick={() => setScheduleTab('grid')}
+              className={`px-4 py-2 font-semibold transition-all cursor-pointer ${
+                scheduleTab === 'grid' ? 'bg-[#173F35] text-white' : 'text-muted-custom hover:bg-canvas'
+              }`}
+            >
+              📊 Weekly Class Calendar
+            </button>
+            <button
               onClick={() => setScheduleTab('planner')}
               className={`px-4 py-2 font-semibold transition-all cursor-pointer ${
                 scheduleTab === 'planner' ? 'bg-[#173F35] text-white' : 'text-muted-custom hover:bg-canvas'
@@ -684,7 +872,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
 
 
       <p className="text-xs text-muted-custom">
-        {weekRangeText} · {activeCoach?.name.toUpperCase()} · {stats.classesCount} classes · {stats.totalPlaces} student-places
+        {weekRangeText} · {selectedCoachId === 'All' ? 'ALL COACHES' : activeCoach?.name.toUpperCase()} · {stats.classesCount} classes · {stats.totalPlaces} student-places
       </p>
 
       {/* Filter Toolbar */}
@@ -701,6 +889,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
               onChange={e => { setSelectedCoachId(e.target.value); localStorage.setItem('mmos_selected_coach_id', e.target.value); }}
               className="bg-white border border-line rounded-lg px-3 py-1 text-xs text-ink outline-none w-64 cursor-pointer"
             >
+              <option value="All">ALL COACHES</option>
               {coaches.map(c => (
                 <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>
               ))}
@@ -718,7 +907,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
             </button>
           )}
           <button 
-            onClick={() => exportTableToCSV(scheduleTab === 'planner' ? '#schedule-table' : '#calendar-table', scheduleTab === 'planner' ? 'weekly_schedule.csv' : 'coach_calendar.csv')}
+            onClick={() => exportTableToCSV(scheduleTab === 'grid' ? '#grid-calendar-table' : scheduleTab === 'planner' ? '#schedule-table' : '#calendar-table', scheduleTab === 'grid' ? 'weekly_class_calendar.csv' : scheduleTab === 'planner' ? 'weekly_schedule.csv' : 'coach_calendar.csv')}
             className="bg-white border border-line text-ink font-semibold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-canvas cursor-pointer transition-all"
           >
             ↓ Excel
@@ -737,6 +926,179 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
           {saveStatus}
         </div>
       )}
+
+      {/* WEEKLY CLASS CALENDAR GRID VIEW */}
+      {scheduleTab === 'grid' && (
+        <div className="space-y-6">
+          
+          {/* Header Card with Title & Level Filter Badges */}
+          <div className="bg-surface border border-line rounded-2xl p-6 shadow-sm space-y-4">
+            <div>
+              <h2 className="text-xl font-extrabold text-ink font-display">
+                Master Moves Chess Club — Weekly Class Calendar
+              </h2>
+              <p className="text-xs text-muted-custom mt-1 font-medium">
+                {gridPlacementsStats.totalPlacements} class placements across the week · Active students only · grouped by level within each time slot
+              </p>
+            </div>
+
+            {/* Level Filter Pills Bar */}
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              <button
+                onClick={() => setSelectedLevelFilter('All')}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold border transition-all cursor-pointer ${
+                  selectedLevelFilter === 'All'
+                    ? 'bg-[#173F35] text-white border-[#173F35] shadow-sm'
+                    : 'bg-white text-ink border-line hover:bg-canvas'
+                }`}
+              >
+                All Levels
+              </button>
+
+              {[
+                { name: 'Beginner 1', style: getLevelStyle('Beginner 1') },
+                { name: 'Beginner 2', style: getLevelStyle('Beginner 2') },
+                { name: 'Intermediate 1', style: getLevelStyle('Intermediate 1') },
+                { name: 'Intermediate 1+', style: getLevelStyle('Intermediate 1+') },
+                { name: 'Intermediate 2', style: getLevelStyle('Intermediate 2') },
+                { name: 'Junior Interm 1+', style: getLevelStyle('Junior Interm 1+') },
+              ].map((lvl) => {
+                const isSelected = selectedLevelFilter === lvl.name;
+                return (
+                  <button
+                    key={lvl.name}
+                    onClick={() => setSelectedLevelFilter(isSelected ? 'All' : lvl.name)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold border transition-all cursor-pointer ${
+                      isSelected
+                        ? `${lvl.style.badgeBg} ${lvl.style.badgeText} ${lvl.style.badgeBorder} ring-2 ring-[#173F35]`
+                        : `${lvl.style.badgeBg} ${lvl.style.badgeText} ${lvl.style.badgeBorder} opacity-80 hover:opacity-100`
+                    }`}
+                  >
+                    {lvl.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Weekly Class Calendar Table */}
+          <div className="bg-surface border border-line rounded-2xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table id="grid-calendar-table" className="w-full border-collapse text-xs min-w-[1100px] table-fixed">
+                <thead>
+                  <tr className="bg-[#173F35] text-white text-center font-bold">
+                    <th className="py-3.5 px-3 w-32 border-r border-[#245447] text-left text-xs uppercase tracking-wider pl-4 bg-[#122F28] text-white">
+                      Time
+                    </th>
+                    {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
+                      <th key={day} className="py-3.5 px-3 border-r border-[#245447] last:border-r-0 text-center w-[13%]">
+                        <div className="font-extrabold text-sm text-white">{day}</div>
+                        <div className="text-[10px] font-semibold text-[#C4A249] mt-0.5">
+                          {gridPlacementsStats.dayCounts[day] || 0} classes
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line align-top bg-white">
+                  {gridTimeSlots.map((tSlot) => (
+                    <tr key={tSlot} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="py-4 px-3 border-r border-line font-extrabold text-ink text-xs text-center bg-slate-50/80 w-32 align-middle font-mono">
+                        {tSlot}
+                      </td>
+                      {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => {
+                        const daySlots = filteredSlots.filter((s) => {
+                          if (normalizeDay(s.day) !== day) return false;
+                          if (formatTimeSlotLabel(s.time) !== tSlot) return false;
+                          return true;
+                        });
+
+                        // Gather all active enrolled students in this time cell
+                        const cellEnrolledStudents: { student: Student; slot: ScheduleSlot }[] = [];
+                        daySlots.forEach(slot => {
+                          const slotEnrollments = enrollments.filter(e => e.slot_id === slot.id);
+                          const enrolledStudentIds = new Set(slotEnrollments.map(e => e.student_id));
+                          const activeStudents = students.filter(s => enrolledStudentIds.has(s.id) && s.status !== 'inactive');
+                          activeStudents.forEach(st => {
+                            cellEnrolledStudents.push({ student: st, slot });
+                          });
+                        });
+
+                        // Group students by their effective level
+                        const levelGroups: Record<string, Student[]> = {};
+                        cellEnrolledStudents.forEach(({ student, slot }) => {
+                          let lvl = (student.level || '').trim();
+                          if (!lvl || lvl.toLowerCase() === 'all' || lvl.toLowerCase() === 'all levels' || lvl.toLowerCase() === 'unassigned') {
+                            lvl = (slot.level || '').trim();
+                          }
+                          if (!lvl || lvl.toLowerCase() === 'all' || lvl.toLowerCase() === 'all levels' || lvl.toLowerCase() === 'unassigned') {
+                            lvl = 'Beginner 1';
+                          }
+
+                          // Level filter check
+                          if (selectedLevelFilter !== 'All') {
+                            const lvlMatch = lvl.toLowerCase();
+                            const filterMatch = selectedLevelFilter.toLowerCase();
+                            if (!lvlMatch.includes(filterMatch)) return;
+                          }
+
+                          if (!levelGroups[lvl]) {
+                            levelGroups[lvl] = [];
+                          }
+                          levelGroups[lvl].push(student);
+                        });
+
+                        const levelOrder = ['Beginner 1', 'Beginner 2', 'Intermediate 1', 'Intermediate 1+', 'Intermediate 2', 'Junior Interm 1+', 'Advanced', 'Pro-Track'];
+                        const sortedLevelKeys = Object.keys(levelGroups).sort((a, b) => {
+                          const idxA = levelOrder.findIndex(l => a.toLowerCase().includes(l.toLowerCase()));
+                          const idxB = levelOrder.findIndex(l => b.toLowerCase().includes(l.toLowerCase()));
+                          if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                          if (idxA !== -1) return -1;
+                          if (idxB !== -1) return 1;
+                          return a.localeCompare(b);
+                        });
+
+                        return (
+                          <td key={day} className="p-2 border-r border-line last:border-r-0 align-top space-y-2 min-h-[90px] bg-white">
+                            {sortedLevelKeys.length === 0 ? null : (
+                              sortedLevelKeys.map((lvlName) => {
+                                const groupStudents = levelGroups[lvlName];
+                                const studentNames = groupStudents.map((st) => st.name).join(' · ');
+                                const lvlStyle = getLevelStyle(lvlName);
+
+                                return (
+                                  <div
+                                    key={lvlName}
+                                    className={`p-2.5 rounded-xl border space-y-1 transition-shadow hover:shadow-sm ${lvlStyle.bg} ${lvlStyle.border}`}
+                                  >
+                                    <div className={`text-[10px] font-extrabold tracking-wide uppercase ${lvlStyle.text}`}>
+                                      {lvlName}
+                                    </div>
+                                    <div className="text-[11px] font-semibold text-slate-800 leading-snug">
+                                      {studentNames}
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Footer Caption */}
+          <p className="text-[11px] text-muted-custom italic">
+            Generated from Student List & Level. Levels shown are current (New Levels). Names separated by · share the same slot and level.
+          </p>
+
+        </div>
+      )}
+
 
       {scheduleTab === 'planner' && (
         <>
