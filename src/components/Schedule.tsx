@@ -643,7 +643,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     const sortedSlots = [...filteredSlots]
       .sort((a, b) => {
-        const dayDiff = dayOrder.indexOf(a.day) - dayOrder.indexOf(b.day);
+        const dayDiff = dayOrder.indexOf(normalizeDay(a.day)) - dayOrder.indexOf(normalizeDay(b.day));
         if (dayDiff !== 0) return dayDiff;
         return a.time.localeCompare(b.time);
       });
@@ -900,7 +900,18 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
         <div className="flex items-center gap-2 ml-auto">
           {(currentUser.role === 'owner' || currentUser.role === 'front_desk') && (
             <button
-              onClick={() => setShowAddSlotModal(true)}
+              onClick={() => {
+                const defaultCoach = (selectedCoachId !== 'All' && coaches.some(c => c.id === selectedCoachId))
+                  ? selectedCoachId
+                  : (coaches.find(c => c.name.toLowerCase().includes('brylle'))?.id || coaches[0]?.id || '');
+                setNewSlotCoachId(defaultCoach);
+                const chosenCoachObj = coaches.find(c => c.id === defaultCoach);
+                const defaultCentre = (selectedCentre !== 'All' && centres.some(c => c.id === selectedCentre))
+                  ? selectedCentre
+                  : (chosenCoachObj?.centre_id || centres[0]?.id || '');
+                setNewSlotCentreId(defaultCentre);
+                setShowAddSlotModal(true);
+              }}
               className="bg-forest hover:bg-forest-light text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <span>+</span> Add Class Slot
@@ -2133,9 +2144,20 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
-                const targetCoachId = newSlotCoachId || selectedCoachId || (coaches[0]?.id || '');
-                const targetCentreId = newSlotCentreId || (centres[0]?.id || 'c-1');
+                const fallbackCoachId = selectedCoachId !== 'All' ? selectedCoachId : (coaches[0]?.id || '');
+                const targetCoachId = newSlotCoachId || fallbackCoachId;
+                const fallbackCentreId = selectedCentre !== 'All' ? selectedCentre : (centres[0]?.id || 'c-1');
+                const targetCentreId = newSlotCentreId || fallbackCentreId;
                 
+                if (!targetCoachId || targetCoachId === 'All') {
+                  alert("Please select a valid coach for this time slot.");
+                  return;
+                }
+                if (!targetCentreId || targetCentreId === 'All') {
+                  alert("Please select a valid centre for this time slot.");
+                  return;
+                }
+
                 try {
                   const baseTime = `${newSlotStartTime} - ${newSlotEndTime}`;
                   const finalTime = newSlotIsSummerCamp ? `${baseTime}::${newSlotSummerDeduction}` : baseTime;
@@ -2156,8 +2178,11 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                   db.save('schedule_slots', existingSlots);
                   
                   try {
-                    await createScheduleSlot(targetCentreId, targetCoachId, newSlotDay, finalTime, newSlotLevel, newSlotCapacity, newSlotIsSummerCamp, newSlot.id);
-                  } catch (err) {
+                    const serverSlot = await createScheduleSlot(targetCentreId, targetCoachId, newSlotDay, finalTime, newSlotLevel, newSlotCapacity, newSlotIsSummerCamp, newSlot.id);
+                    if (serverSlot && serverSlot.id) {
+                      newSlot.id = serverSlot.id;
+                    }
+                  } catch (err: any) {
                     console.warn("Server createScheduleSlot fallback:", err);
                   }
 
@@ -2235,8 +2260,15 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                 <div className="flex flex-col gap-1.5">
                   <label className="font-bold text-ink">Coach *</label>
                   <select
-                    value={newSlotCoachId || selectedCoachId}
-                    onChange={(e) => setNewSlotCoachId(e.target.value)}
+                    value={newSlotCoachId || (selectedCoachId !== 'All' ? selectedCoachId : (coaches[0]?.id || ''))}
+                    onChange={(e) => {
+                      const cid = e.target.value;
+                      setNewSlotCoachId(cid);
+                      const cObj = coaches.find(c => c.id === cid);
+                      if (cObj && cObj.centre_id) {
+                        setNewSlotCentreId(cObj.centre_id);
+                      }
+                    }}
                     className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
                   >
                     {coaches.map(c => (
@@ -2247,7 +2279,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
                 <div className="flex flex-col gap-1.5">
                   <label className="font-bold text-ink">Centre *</label>
                   <select
-                    value={newSlotCentreId || selectedCentre === 'All' ? (centres[0]?.id || '') : selectedCentre}
+                    value={newSlotCentreId || (selectedCentre !== 'All' ? selectedCentre : (centres[0]?.id || ''))}
                     onChange={(e) => setNewSlotCentreId(e.target.value)}
                     className="bg-white border border-line rounded-lg px-3 py-2 text-ink outline-none"
                     required
