@@ -301,15 +301,22 @@ export const Attendance: React.FC<AttendanceProps> = ({
   const rosterModalStudents = useMemo(() => {
     if (!rosterModalSlot) return [];
     
-    // Show active students at the same center
-    const centerStudents = students.filter(s => s.centre_id === rosterModalSlot.centre_id && s.status === 'active');
+    const slotEnrollments = enrollments.filter(e => e.slot_id === rosterModalSlot.id);
+    const enrolledIds = new Set(slotEnrollments.map(e => e.student_id));
+
+    // Show center active students or any matching search query / enrolled student
+    const candidates = students.filter(s => {
+      if (s.status === 'inactive') return false;
+      if (enrolledIds.has(s.id)) return true;
+      if (rosterSearch) {
+        return s.name.toLowerCase().includes(rosterSearch.toLowerCase());
+      }
+      return !rosterModalSlot.centre_id || s.centre_id === rosterModalSlot.centre_id;
+    });
     
-    const slotRoster = getSlotRoster(rosterModalSlot);
-    const slotRosterIds = new Set(slotRoster.map(s => s.id));
-    
-    const mapped = centerStudents.map(student => ({
+    const mapped = candidates.map(student => ({
       student,
-      isEnrolled: slotRosterIds.has(student.id)
+      isEnrolled: enrolledIds.has(student.id)
     }));
     
     // Sort so enrolled students are at the top, then alphabetically

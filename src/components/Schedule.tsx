@@ -152,11 +152,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   const getSlotRoster = (slot: ScheduleSlot) => {
     const slotEnrollments = enrollments.filter(e => e.slot_id === slot.id);
     const enrolledStudentIds = new Set(slotEnrollments.map(e => e.student_id));
-    return students.filter(s => {
-      if (!enrolledStudentIds.has(s.id)) return false;
-      if (selectedCoachId !== 'All' && activeCoachId && s.coach_id && s.coach_id !== activeCoachId) return false;
-      return true;
-    });
+    return students.filter(s => enrolledStudentIds.has(s.id) && s.status !== 'inactive');
   };
 
   // Get dynamic dates for the current week (Monday to Sunday)
@@ -237,13 +233,9 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
     return classSessions.filter(s => {
       if (!coachSlotIds.has(s.slot_id)) return false;
       if (s.status === 'cancelled') return false;
-      if (selectedCoachId !== 'All' && activeCoachId) {
-        const student = students.find(st => st.id === s.student_id);
-        if (student && student.coach_id && student.coach_id !== activeCoachId) return false;
-      }
       return true;
     });
-  }, [classSessions, slots, activeCoachId, selectedCoachId, students]);
+  }, [classSessions, slots, activeCoachId]);
 
   const monthSessionsCount = useMemo(() => {
     const year = anchorCalendarDate.getFullYear();
@@ -607,15 +599,24 @@ export const Schedule: React.FC<ScheduleProps> = ({ currentUser, activeCentre })
   const rosterModalStudents = useMemo(() => {
     if (!rosterModalSlot) return [];
     
-    // Get all active students for this center
-    const centerStudents = students.filter(s => s.centre_id === rosterModalSlot.centre_id && s.status === 'active');
-    
-    // Map their enrollment status based on getSlotRoster to correctly identify previously present students
-    const slotRoster = getSlotRoster(rosterModalSlot);
-    const mapped = centerStudents.map(s => {
-      const isEnrolled = slotRoster.some(rs => rs.id === s.id);
-      return { student: s, isEnrolled };
+    // Explicit enrollments for this slot
+    const slotEnrollments = enrollments.filter(e => e.slot_id === rosterModalSlot.id);
+    const enrolledStudentIds = new Set(slotEnrollments.map(e => e.student_id));
+
+    // Show center active students or any matching search query / enrolled student
+    const candidates = students.filter(s => {
+      if (s.status === 'inactive') return false;
+      if (enrolledStudentIds.has(s.id)) return true;
+      if (rosterSearch) {
+        return s.name.toLowerCase().includes(rosterSearch.toLowerCase());
+      }
+      return !rosterModalSlot.centre_id || s.centre_id === rosterModalSlot.centre_id;
     });
+
+    const mapped = candidates.map(s => ({
+      student: s,
+      isEnrolled: enrolledStudentIds.has(s.id)
+    }));
 
     // Filter by search query if any
     const filtered = rosterSearch

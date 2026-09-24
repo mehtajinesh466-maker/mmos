@@ -393,12 +393,6 @@ export async function enrollStudent(studentId: string, slotId: string) {
   if (session.user.role !== 'owner' && session.user.role !== 'front_desk' && session.user.role !== 'coach') {
     throw new Error("Unauthorized");
   }
-  if (session.user.role === 'front_desk' && session.user.centre_id) {
-    const student = await prisma.student.findUnique({ where: { id: studentId } });
-    if (student?.centre_id !== session.user.centre_id) {
-      throw new Error("Unauthorized");
-    }
-  }
 
   // Ensure slotId is a clean UUID
   const cleanSlotId = slotId.startsWith('slot-') ? slotId.replace('slot-', '') : slotId;
@@ -431,12 +425,7 @@ export async function unenrollStudent(studentId: string, slotId: string) {
   if (session.user.role !== 'owner' && session.user.role !== 'front_desk' && session.user.role !== 'coach') {
     throw new Error("Unauthorized");
   }
-  if (session.user.role === 'front_desk' && session.user.centre_id) {
-    const student = await prisma.student.findUnique({ where: { id: studentId } });
-    if (student?.centre_id !== session.user.centre_id) {
-      throw new Error("Unauthorized");
-    }
-  }
+
   // Ensure slotId is a clean UUID
   const cleanSlotId = slotId.startsWith('slot-') ? slotId.replace('slot-', '') : slotId;
   await prisma.enrollment.deleteMany({
